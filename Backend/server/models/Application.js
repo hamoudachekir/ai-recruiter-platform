@@ -10,6 +10,27 @@ const applicationSchema = new mongoose.Schema({
   appliedAt: { type: Date, default: Date.now },
   cv: { type: String }, // si tu l’as
   quizScore: { type: Number }, // ✅ Ajoute cette ligne
+  quizCompleted: { type: Boolean, default: false },
+  quizSubmittedAt: { type: Date },
+  quizTimeSpentSeconds: { type: Number, default: 0 },
+  quizReviewPendingCount: { type: Number, default: 0 },
+  quizAnswers: [
+    {
+      questionIndex: { type: Number, required: true },
+      question: { type: String, default: "" },
+      questionType: { type: String, default: "QCM" },
+      selectedAnswerIndex: { type: Number, default: null },
+      selectedAnswerText: { type: String, default: "" },
+      expectedAnswer: { type: String, default: "" },
+      isCorrect: { type: Boolean, default: false },
+      needsHumanReview: { type: Boolean, default: false },
+      aiSuggestedCorrect: { type: Boolean, default: null },
+      aiConfidence: { type: Number, default: null },
+      evaluationMode: { type: String, default: "auto-options" },
+      manualReviewedAt: { type: Date, default: null },
+    },
+  ],
+  aiCoach: { type: mongoose.Schema.Types.Mixed, default: null },
 });
 
 

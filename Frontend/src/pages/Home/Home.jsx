@@ -5,6 +5,7 @@ import Navbar from "../../components/Navbar/Navbar";
 import Footer from "../../components/Footer/Footer";
 import MessagePopup from "../../components/MessagePopup";
 import { io } from "socket.io-client";
+import { jwtDecode } from "jwt-decode";
 import "slick-carousel/slick/slick.css";
 import "slick-carousel/slick/slick-theme.css";
 import "./Home.css";
@@ -27,10 +28,18 @@ import { TypeAnimation } from "react-type-animation";
 
 const Home = () => {
   const token = localStorage.getItem("token");
-  const socket = io("http://localhost:3001", {
-    auth: { token },
-    transports: ['websocket']
-  });
+  const socketRef = useRef(null);
+
+  const isTokenExpired = (jwtToken) => {
+    if (!jwtToken) return true;
+    try {
+      const decoded = jwtDecode(jwtToken);
+      if (!decoded?.exp) return true;
+      return decoded.exp * 1000 <= Date.now();
+    } catch {
+      return true;
+    }
+  };
 
   const [jobs, setJobs] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -54,37 +63,80 @@ const Home = () => {
   const [messageNotifications, setMessageNotifications] = useState([]);
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const [messages, setMessages] = useState([]);
+  const [applicationStatusByJobId, setApplicationStatusByJobId] = useState({});
 
   const role = localStorage.getItem("role");
 
   useEffect(() => {
     const userId = localStorage.getItem("userId");
+    const canConnectSocket = token && !isTokenExpired(token);
+
+    if (canConnectSocket && !socketRef.current) {
+      socketRef.current = io("http://localhost:3001", {
+        auth: { token },
+        transports: ["websocket"],
+        reconnection: false
+      });
+    }
+
+    const socket = socketRef.current;
     if (userId) {
       setCurrentUserId(userId);
     }
 
-    // Socket event listeners
-    socket.on("connect", () => {
-      console.log("✅ Connected to socket server");
-    });
+    if (socket) {
+      socket.on("connect", () => {
+        console.log("✅ Connected to socket server");
+      });
 
-    socket.on("disconnect", () => {
-      console.log("❌ Disconnected from socket server");
-    });
+      socket.on("disconnect", () => {
+        console.log("❌ Disconnected from socket server");
+      });
 
-    socket.on("receive-message", (data) => {
-      console.log("📥 Message received from:", data.from);
-      if (data.to === userId) {
-        setMessages(prev => [...prev, data]);
-        setMessageNotifications(prev => [...prev, data]);
-        setHasUnreadMessages(true);
-      }
-    });
+      socket.on("connect_error", (error) => {
+        if (error?.message === "TOKEN_EXPIRED") {
+          console.warn("Socket disconnected: session expired. Please login again.");
+          socket.disconnect();
+        }
+      });
+
+      socket.on("receive-message", (data) => {
+        console.log("📥 Message received from:", data.from);
+        if (data.to === userId) {
+          setMessages(prev => [...prev, data]);
+          setMessageNotifications(prev => [...prev, data]);
+          setHasUnreadMessages(true);
+        }
+      });
+    }
 
     const fetchData = async () => {
       try {
         const jobsRes = await axios.get("http://localhost:3001/Frontend/jobs");
         setJobs(jobsRes.data);
+
+        if (role === "CANDIDATE" && userId) {
+          try {
+            const applicationsRes = await axios.get(`http://localhost:3001/Frontend/applications-by-candidate/${userId}`);
+            const applications = Array.isArray(applicationsRes?.data) ? applicationsRes.data : [];
+            const statusMap = {};
+            applications.forEach((application) => {
+              const jobId =
+                typeof application?.jobId === "object" && application?.jobId?._id
+                  ? String(application.jobId._id)
+                  : (application?.jobId ? String(application.jobId) : null);
+
+              if (!jobId) return;
+
+              const completed = Boolean(application?.quizCompleted);
+              statusMap[jobId] = completed ? "completed" : "pending";
+            });
+
+            setApplicationStatusByJobId(statusMap);
+          } catch (applicationError) {
+            console.error("❌ Error fetching candidate applications:", applicationError);
+          }
+        }
 
         if (role === "ENTERPRISE") {
           const candidatesRes = await axios.get("http://localhost:3001/api/Frontend/all-candidates");
@@ -162,9 +214,12 @@ const Home = () => {
     fetchData();
 
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
-      socket.off("receive-message");
+      if (socket) {
+        socket.off("connect");
+        socket.off("disconnect");
+        socket.off("connect_error");
+        socket.off("receive-message");
+      }
     };
   }, [role, token]);
 
@@ -338,14 +393,14 @@ const Home = () => {
       );
 
       if (response.data.success || response.status === 200) {
-        socket.emit("send-message", {
+        socketRef.current?.emit("send-message", {
           from: currentUserId,
           to: selectedCandidate._id,
           text: contactMessage,
           timestamp: new Date()
         });
 
-        socket.emit("notify-candidate", {
+        socketRef.current?.emit("notify-candidate", {
           to: selectedCandidate._id,
           message: `📬 New message from ${contactName}: "${contactSubject}"`,
           type: "message"
@@ -366,6 +421,11 @@ const Home = () => {
   };
 
   const renderJobCard = (job, isRecommended = false) => {
+    const currentJobId = String(job?._id || job?.id || "");
+    const applicationStatus = role === "CANDIDATE" ? applicationStatusByJobId[currentJobId] : null;
+    const isApplied = applicationStatus === "completed";
+    const hasPendingApplication = applicationStatus === "pending";
+
     // Determine the company image source
     let companyImage = "/images/working.png";
     if (job.entrepriseId?.picture) {
@@ -384,6 +444,11 @@ const Home = () => {
           <div className="recommendation-badge">
             <FontAwesomeIcon icon={faStar} />
             <span>{Math.round((job.match_score || job.score) * 100)}% Match</span>
+          </div>
+        )}
+        {isApplied && (
+          <div className="applied-badge-home">
+            Applied
           </div>
         )}
         <div className="job-card-body">
@@ -455,9 +520,19 @@ const Home = () => {
              {job.salary ? `${job.salary}€` : "Competitive"}
              <span className="job-salary-period">/Month</span>
           </span>
-          <Link to={`/job/${job._id || job.id}`} className="apply-btn-home">
-            Apply Now <FontAwesomeIcon icon={faChevronRight} />
-          </Link>
+          {isApplied ? (
+            <span className="apply-btn-home disabled">
+              Applied
+            </span>
+          ) : hasPendingApplication ? (
+            <Link to={`/quiz/${job._id || job.id}`} className="apply-btn-home continue">
+              Continue Quiz <FontAwesomeIcon icon={faChevronRight} />
+            </Link>
+          ) : (
+            <Link to={`/job/${job._id || job.id}`} className="apply-btn-home">
+              Apply Now <FontAwesomeIcon icon={faChevronRight} />
+            </Link>
+          )}
         </div>
       </div>
     );
