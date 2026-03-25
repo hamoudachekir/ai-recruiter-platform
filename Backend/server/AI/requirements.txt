@@ -9,3 +9,5 @@ scikit-learn==1.6.1
 paddleocr==2.7.3
 paddlepaddle==2.6.2
 chardet<6
+requests
+python-dotenv

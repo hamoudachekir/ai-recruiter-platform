@@ -32,6 +32,17 @@ const VideoCall = () => {
     const videoGridRef = useRef(null);
     const speechRecognitionRef = useRef(null);
 
+    const isTokenExpired = (jwtToken) => {
+        if (!jwtToken) return true;
+        try {
+            const decoded = jwtDecode(jwtToken);
+            if (!decoded?.exp) return true;
+            return decoded.exp * 1000 <= Date.now();
+        } catch (error) {
+            return true;
+        }
+    };
+
     // Role detection
     useEffect(() => {
         if (authLoading) return;
@@ -166,9 +177,25 @@ const VideoCall = () => {
                 }
 
                 // Connect to signaling server
+                const token = localStorage.getItem('token');
+                if (isTokenExpired(token)) {
+                    setStatus('error');
+                    console.warn('Cannot start call: session expired, please login again.');
+                    return;
+                }
+
                 socketRef.current = io('http://localhost:3001', {
-                    auth: { token: localStorage.getItem('token') },
-                    transports: ['websocket']
+                    auth: { token },
+                    transports: ['websocket'],
+                    reconnection: false
+                });
+
+                socketRef.current.on('connect_error', (error) => {
+                    if (error?.message === 'TOKEN_EXPIRED') {
+                        console.warn('Video call socket rejected: token expired.');
+                        socketRef.current?.disconnect();
+                        setStatus('error');
+                    }
                 });
 
                 // Create peer connection

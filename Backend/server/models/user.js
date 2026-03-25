@@ -126,6 +126,7 @@ const JobSchema = new Schema({
     skills: [{ type: String }],
     createdAt: { type: Date, default: Date.now },
     entrepriseId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    status: { type: String, enum: ['OPEN', 'CLOSED'], default: 'OPEN' },
 });
 const JobModel = mongoose.models.Job || mongoose.model("Job", JobSchema);
 

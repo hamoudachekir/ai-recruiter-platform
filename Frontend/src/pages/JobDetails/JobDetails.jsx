@@ -28,9 +28,44 @@ const JobDetails = () => {
   const [userProfile, setUserProfile] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [solutionType, setSolutionType] = useState(1); // 1 for URL solution, 2 for File solution
+  const [hasCompletedQuiz, setHasCompletedQuiz] = useState(false);
+  const [hasPendingApplication, setHasPendingApplication] = useState(false);
+  const [checkingApplication, setCheckingApplication] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [applyFeedback, setApplyFeedback] = useState({ type: "", text: "" });
   const role = localStorage.getItem("role");
   const userId = localStorage.getItem("userId");
   const navigate = useNavigate();
+
+  const refreshApplicationStateForJob = async () => {
+    if (role !== "CANDIDATE" || !userId || !id) {
+      return { completed: false, pending: false };
+    }
+
+    try {
+      setCheckingApplication(true);
+      const res = await axios.get(`http://localhost:3001/Frontend/applications-by-candidate/${userId}`);
+      const applications = Array.isArray(res?.data) ? res.data : [];
+      const existing = applications.find((application) => {
+        const applicationJobId =
+          typeof application?.jobId === "object"
+            ? application?.jobId?._id
+            : application?.jobId;
+        return String(applicationJobId) === String(id);
+      });
+
+      const completed = Boolean(existing?.quizCompleted);
+      const pending = Boolean(existing) && !completed;
+      setHasCompletedQuiz(completed);
+      setHasPendingApplication(pending);
+      return { completed, pending };
+    } catch (err) {
+      console.error("❌ Failed to check existing application", err);
+      return { completed: false, pending: false };
+    } finally {
+      setCheckingApplication(false);
+    }
+  };
 
   // Fetch the job details
   useEffect(() => {
@@ -64,6 +99,10 @@ const JobDetails = () => {
     }
   }, [role, userId]);
 
+  useEffect(() => {
+    refreshApplicationStateForJob();
+  }, [role, userId, id]);
+
   // Format date function
   const formatDate = (dateString) => {
     const options = { year: "numeric", month: "long", day: "numeric" };
@@ -77,6 +116,12 @@ const JobDetails = () => {
     }
 
     try {
+      setIsApplying(true);
+      setApplyFeedback({
+        type: "info",
+        text: "Submitting your application and generating your personalized quiz...",
+      });
+
       // First, fetch the resume file if it's stored as a URL
       const resumeResponse = await axios.get(userProfile.profile.resume, {
         responseType: 'blob'
@@ -105,11 +150,31 @@ const JobDetails = () => {
         }
       );
 
-      alert("🎉 Application submitted successfully!");
+      setHasPendingApplication(true);
+      setApplyFeedback({
+        type: "success",
+        text: "Application submitted. Redirecting you to your quiz...",
+      });
       navigate(`/quiz/${job._id}`);
     } catch (err) {
       console.error("❌ Error submitting application:", err);
-      alert(`Failed to submit application: ${err.response?.data?.message || err.message}`);
+      if (err?.response?.status === 409) {
+        const state = await refreshApplicationStateForJob();
+        if (!state.completed) {
+          setApplyFeedback({
+            type: "info",
+            text: "You already have an application for this job. Redirecting to your quiz...",
+          });
+          navigate(`/quiz/${job._id}`);
+          return;
+        }
+      }
+      setApplyFeedback({
+        type: "error",
+        text: err.response?.data?.message || err.message || "Failed to submit application.",
+      });
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -134,6 +199,12 @@ const JobDetails = () => {
     formData.append('phone', userProfile.profile?.phone || '');
 
     try {
+      setIsApplying(true);
+      setApplyFeedback({
+        type: "info",
+        text: "Submitting your application and generating your personalized quiz...",
+      });
+
       await axios.post(
         "http://localhost:3001/Frontend/apply-job",
         formData,
@@ -143,16 +214,41 @@ const JobDetails = () => {
           },
         }
       );
-      alert("🎉 Application submitted successfully!");
+      setHasPendingApplication(true);
+      setApplyFeedback({
+        type: "success",
+        text: "Application submitted. Redirecting you to your quiz...",
+      });
       navigate(`/quiz/${job._id}`);
     } catch (err) {
       console.error("❌ Error submitting application:", err);
-      alert(`Failed to submit application: ${err.response?.data?.message || err.message}`);
+      if (err?.response?.status === 409) {
+        const state = await refreshApplicationStateForJob();
+        if (!state.completed) {
+          setApplyFeedback({
+            type: "info",
+            text: "You already have an application for this job. Redirecting to your quiz...",
+          });
+          navigate(`/quiz/${job._id}`);
+          return;
+        }
+      }
+      setApplyFeedback({
+        type: "error",
+        text: err.response?.data?.message || err.message || "Failed to submit application.",
+      });
+    } finally {
+      setIsApplying(false);
     }
   };
 
   // Main apply handler that chooses the right solution
   const handleApply = () => {
+    if (hasPendingApplication && job?._id) {
+      navigate(`/quiz/${job._id}`);
+      return;
+    }
+
     if (solutionType === 1) {
       handleApplySolution1();
     } else {
@@ -255,9 +351,26 @@ const JobDetails = () => {
                 </div>
                 
                 <p>Ready to take the next step in your career? Submit your application now and join our team!</p>
-                <button className="apply-btn" onClick={handleApply}>
-                  Apply Now <FaChevronRight className="apply-btn-icon" />
+                <button
+                  className="apply-btn"
+                  onClick={handleApply}
+                  disabled={checkingApplication || isApplying || hasCompletedQuiz}
+                >
+                  {checkingApplication
+                    ? "Checking..."
+                    : isApplying
+                      ? "Submitting..."
+                      : hasCompletedQuiz
+                        ? "Applied"
+                        : hasPendingApplication
+                          ? "Continue Quiz"
+                          : "Apply Now"} <FaChevronRight className="apply-btn-icon" />
                 </button>
+                {applyFeedback.text && (
+                  <div className={`apply-feedback ${applyFeedback.type || "info"}`}>
+                    {applyFeedback.text}
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -263,6 +263,20 @@
     gap: 4px;
 }
 
+.applied-badge-home {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 20px;
+  box-shadow: 0 2px 8px rgba(46, 204, 113, 0.35);
+  z-index: 2;
+}
+
 .job-card-header {
     display: flex;
     justify-content: space-between;
@@ -461,6 +475,18 @@
 .apply-btn-home:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 10px rgba(91, 134, 229, 0.4);
+}
+
+.apply-btn-home.disabled {
+  background: #6c757d;
+  color: #f5f5f5;
+  cursor: not-allowed;
+  pointer-events: none;
+  box-shadow: none;
+}
+
+.apply-btn-home.continue {
+  background: linear-gradient(135deg, #2c7be5 0%, #36d1dc 100%);
 }
 
 

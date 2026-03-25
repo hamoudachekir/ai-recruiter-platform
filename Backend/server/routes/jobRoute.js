@@ -44,6 +44,11 @@ router.get('/jobs', async (req, res) => {
   try {
     const jobs = await JobModel.aggregate([
       {
+        $match: {
+          status: { $ne: 'CLOSED' }
+        }
+      },
+      {
         $lookup: {
           from: 'users',
           localField: 'entrepriseId',

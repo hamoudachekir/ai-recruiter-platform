@@ -10,31 +10,6 @@ const { v4: uuidv4 } = require('uuid');
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-// Ensure bot user exists
-const ensureBotUser = async () => {
-  try {
-    if (!User || typeof User.findOne !== 'function') {
-      throw new Error('User model is not properly defined');
-    }
-    const botUser = await User.findOne({ _id: 'bot' });
-    if (!botUser) {
-      await User.create({
-        _id: 'bot',
-        name: 'NextBot Assistant',
-        email: 'bot@nexthire.com',
-        role: 'BOT',
-        picture: '/images/bot-avatar.png'
-      });
-      console.log('✅ Bot user created');
-    }
-  } catch (err) {
-    console.error('❌ Error creating bot user:', err.message);
-  }
-};
-
-// Call this when the server starts
-ensureBotUser();
-
 // Save message
 router.post('/send', async (req, res) => {
   const { from, to, text } = req.body;

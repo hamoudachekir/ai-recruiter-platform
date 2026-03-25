@@ -20,27 +20,27 @@ router.get('/for-user', async(req, res) => {
         }
 
         // 2. Get recommendations from Python service with lower threshold
-        const response = await axios.post('http://127.0.0.1:5001/recommend', {
-            candidate_id: decoded.id,
-            top_k: 10,
-            threshold: 0.2  // Lowered from 0.3 to show more matches
-        }, {
-            timeout: 10000,
-            headers: { 'Content-Type': 'application/json' }
-        }).catch(err => {
+        let response;
+        try {
+            response = await axios.post('http://127.0.0.1:5001/recommend', {
+                candidate_id: decoded.id,
+                top_k: 10,
+                threshold: 0.2  // Lowered from 0.3 to show more matches
+            }, {
+                timeout: 10000,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        } catch (err) {
             console.error('Recommendation service error:', err.response ? err.response.data : err.message);
-            if (err.code === 'ECONNREFUSED') {
-                throw new Error('Recommendation service unavailable');
-            }
-            throw err;
-        });
+            return res.status(200).json([]);
+        }
 
         // 3. Process recommendations
         const responseData = response.data;
         const recommendations = responseData.recommendations || responseData;
 
         if (!Array.isArray(recommendations)) {
-            throw new Error('Invalid recommendations format received');
+            return res.status(200).json([]);
         }
 
         // 4. Collect unique enterprise IDs and fetch their data in one query
@@ -78,10 +78,7 @@ router.get('/for-user', async(req, res) => {
 
     } catch (error) {
         console.error('Recommendation error:', error.message);
-        res.status(500).json({
-            error: 'Failed to get recommendations',
-            details: error.message
-        });
+        res.status(200).json([]);
     }
 });
 

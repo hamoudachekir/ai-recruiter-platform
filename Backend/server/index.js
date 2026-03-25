@@ -23,6 +23,7 @@ const { exec } = require('child_process');
 const ApplicationModel = require('./models/Application'); // Chemin exact vers le model
 const uploadCV = require("./middleware/uploadCV");
 const QuizModel = require("./models/Quiz");
+const CandidateQuizModel = require("./models/CandidateQuiz");
 const QuizResultModel = require("./models/QuizResultModel");
 const Application = require("./models/Application");
 const messageRoutes = require('./routes/messages');
@@ -58,7 +59,12 @@ io.use((socket, next) => {
     socket.user = decoded;
     next();
   } catch (err) {
-    console.error("Authentication failed:", err);
+    if (err?.name === "TokenExpiredError") {
+      console.warn(`Socket auth failed: token expired at ${err.expiredAt?.toISOString?.() || err.expiredAt}`);
+      return next(new Error("TOKEN_EXPIRED"));
+    }
+
+    console.warn("Socket auth failed:", err?.message || "invalid token");
     return next(new Error("Authentication failed"));
   }
 });
@@ -96,6 +102,560 @@ io.on("connection", (socket) => {
     console.log("❌ Client disconnected:", socket.id);
   });
 });
+
+const normalizeSkillList = (skills) => {
+  if (!Array.isArray(skills)) return [];
+  return skills
+    .map((skill) => String(skill || "").trim().toLowerCase())
+    .filter(Boolean);
+};
+
+const normalizeQuestionType = (typeValue) => String(typeValue || "").trim().toLowerCase();
+
+const sanitizeToQcmQuestions = (questions = []) => {
+  if (!Array.isArray(questions)) return [];
+
+  const seen = new Set();
+  const sanitized = [];
+
+  questions.forEach((question) => {
+    if (!question || typeof question !== "object") return;
+    if (normalizeQuestionType(question.type || "QCM") !== "qcm") return;
+
+    const rawOptions = Array.isArray(question.options) ? question.options : [];
+    const options = rawOptions
+      .slice(0, 4)
+      .map((option) => String(option || "").trim());
+
+    if (options.length < 4 || options.some((option) => !option)) {
+      return;
+    }
+
+    const title = String(question.title || question.question || "Question")
+      .replace(/\s*\((unique|variante)\s*\d+\)\s*$/i, "")
+      .trim();
+    if (!title) return;
+
+    const dedupeKey = title.toLowerCase().replace(/\s+/g, " ");
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+
+    let correctAnswer = Number(question.correctAnswer);
+    if (!Number.isInteger(correctAnswer) || correctAnswer < 0 || correctAnswer > 3) {
+      correctAnswer = 0;
+    }
+
+    sanitized.push({
+      ...question,
+      title,
+      question: title,
+      type: "QCM",
+      options,
+      correctAnswer,
+      expectedAnswer: String(question.expectedAnswer || options[correctAnswer] || options[0] || "").trim(),
+      explanation: String(question.explanation || "").trim(),
+      score: Math.max(1, Number(question.score) || 1),
+      timeLimit: Math.max(15, Number(question.timeLimit) || 45),
+    });
+  });
+
+  return sanitized;
+};
+
+const buildQuizRationale = ({ job, candidateProfile = {}, meta = {} }) => {
+  const jobSkillsRaw = Array.isArray(job?.skills) ? job.skills : [];
+  const candidateSkillsRaw = Array.isArray(candidateProfile?.skills) ? candidateProfile.skills : [];
+  const jobSkills = normalizeSkillList(jobSkillsRaw);
+  const candidateSkills = normalizeSkillList(candidateSkillsRaw);
+  const matchedSkills = jobSkills.filter((skill) => candidateSkills.includes(skill));
+  const prioritizedSkills = Array.isArray(meta?.skillsUsed) ? meta.skillsUsed.slice(0, 6) : [];
+
+  const rationaleParts = [
+    `Quiz généré pour le poste "${job?.title || "N/A"}".`,
+    matchedSkills.length
+      ? `Compétences communes poste/candidat: ${matchedSkills.join(", ")}.`
+      : "Peu de compétences communes explicites détectées, le quiz couvre donc les exigences principales du poste.",
+    prioritizedSkills.length
+      ? `Le modèle a priorisé: ${prioritizedSkills.join(", ")}.`
+      : "Le modèle a priorisé les compétences techniques les plus fréquentes dans le profil et le poste.",
+  ];
+
+  return {
+    matchedSkills,
+    rationale: rationaleParts.join(" "),
+  };
+};
+
+const buildServerFallbackQuestions = ({ job = {}, candidateProfile = {}, totalQuestions = 20 }) => {
+  const normalizedTotal = Math.max(1, Math.min(20, Number(totalQuestions) || 20));
+  const jobSkills = normalizeSkillList(job?.skills || []);
+  const candidateSkills = normalizeSkillList(candidateProfile?.skills || []);
+  const prioritizedSkills = Array.from(new Set([...jobSkills, ...candidateSkills])).slice(0, 10);
+  const safeSkills = prioritizedSkills.length ? prioritizedSkills : ["problem solving", "communication", "teamwork", "javascript", "sql"];
+  const difficulties = ["facile", "moyen", "difficile"];
+  const domains = ["technique", "logique", "métier", "analyse"];
+  const qcmStems = [
+    "Quel énoncé décrit le mieux le rôle de",
+    "Dans ce contexte professionnel, quelle proposition est la plus juste pour",
+    "Quelle est l'utilisation la plus pertinente de",
+    "Quel bénéfice concret apporte",
+    "Quelle bonne pratique est la plus liée à",
+  ];
+
+  return Array.from({ length: normalizedTotal }, (_, index) => {
+    const questionNumber = index + 1;
+    const skill = safeSkills[index % safeSkills.length];
+    const difficulty = difficulties[index % difficulties.length];
+    const domain = domains[index % domains.length];
+
+    const stem = qcmStems[index % qcmStems.length];
+    const title = `QCM ${questionNumber}: ${stem} ${skill} ?`;
+
+    const optionVariants = [
+      {
+        options: [
+          `${skill} aide à structurer une solution fiable et maintenable`,
+          `${skill} n'a aucun impact sur la qualité du résultat`,
+          `${skill} remplace complètement les tests et la validation`,
+          `${skill} sert uniquement à la documentation`,
+        ],
+        correctAnswer: 0,
+      },
+      {
+        options: [
+          `${skill} doit être évité dans les projets réels`,
+          `${skill} améliore la performance, la qualité ou la robustesse selon le cas`,
+          `${skill} annule le besoin de revue de code`,
+          `${skill} est utile uniquement pour les profils non techniques`,
+        ],
+        correctAnswer: 1,
+      },
+      {
+        options: [
+          `${skill} ne s'applique jamais en production`,
+          `${skill} est seulement une tendance sans usage concret`,
+          `${skill} permet de mieux résoudre des problèmes techniques ciblés`,
+          `${skill} garantit automatiquement zéro bug`,
+        ],
+        correctAnswer: 2,
+      },
+      {
+        options: [
+          `${skill} supprime le besoin d'architecture et de conception`,
+          `${skill} ne concerne que la partie visuelle d'un produit`,
+          `${skill} est toujours incompatible avec le travail en équipe`,
+          `${skill} est pertinent quand il est choisi selon le besoin métier et technique`,
+        ],
+        correctAnswer: 3,
+      },
+    ];
+
+    const selectedVariant = optionVariants[index % optionVariants.length];
+
+    return {
+      title,
+      question: title,
+      type: "QCM",
+      domain,
+      skills: [skill],
+      difficulty,
+      options: selectedVariant.options,
+      correctAnswer: selectedVariant.correctAnswer,
+      expectedAnswer: selectedVariant.options[selectedVariant.correctAnswer],
+      explanation: `La bonne réponse identifie la valeur pratique de ${skill}.`,
+      score: 1,
+      timeLimit: 30,
+    };
+  });
+};
+
+const saveCandidateQuizFromAI = async ({
+  jobId,
+  candidateId,
+  generatedBy = null,
+  aiData = {},
+  job = {},
+  candidateProfile = {},
+}) => {
+  const questions = Array.isArray(aiData?.questions) ? aiData.questions : [];
+  if (!questions.length) {
+    return null;
+  }
+
+  const meta = aiData?.meta || {};
+  const rationaleData = buildQuizRationale({ job, candidateProfile, meta });
+  const updatePayload = {
+    jobId,
+    candidateId,
+    questions,
+    source: meta?.source || "mistral-api",
+    generationMeta: {
+      jobTitle: meta?.jobTitle || job?.title || "",
+      skillsUsed: Array.isArray(meta?.skillsUsed) ? meta.skillsUsed : [],
+      matchedSkills: rationaleData.matchedSkills,
+      model: meta?.model || "",
+      rationale: rationaleData.rationale,
+      difficultyMix: meta?.difficultyMix || {},
+      fallbackReason: meta?.fallbackReason || null,
+    },
+  };
+
+  if (generatedBy && mongoose.Types.ObjectId.isValid(generatedBy)) {
+    updatePayload.generatedBy = generatedBy;
+  }
+
+  return CandidateQuizModel.findOneAndUpdate(
+    { jobId, candidateId },
+    updatePayload,
+    { upsert: true, new: true }
+  );
+};
+
+const generateCandidateQuizForJobCandidate = async ({
+  jobId,
+  candidateId,
+  totalQuestions = 20,
+  forceMistral = true,
+  generatedBy = null,
+}) => {
+  const job = await JobModel.findById(jobId).select("title description skills location").lean();
+  if (!job) {
+    throw new Error("Job not found");
+  }
+
+  const candidate = await UserModel.findById(candidateId)
+    .select("name profile.skills profile.shortDescription profile.domain profile.experience")
+    .lean();
+
+  if (!candidate) {
+    throw new Error("Candidate not found");
+  }
+
+  const candidateProfile = {
+    name: candidate?.name || "",
+    domain: candidate?.profile?.domain || "",
+    shortDescription: candidate?.profile?.shortDescription || "",
+    skills: Array.isArray(candidate?.profile?.skills) ? candidate.profile.skills : [],
+    experience: Array.isArray(candidate?.profile?.experience) ? candidate.profile.experience : [],
+  };
+
+  const aiPayload = {
+    job: {
+      title: job.title || "",
+      description: job.description || "",
+      skills: Array.isArray(job.skills) ? job.skills : [],
+      location: job.location || "",
+    },
+    candidateProfiles: [candidateProfile],
+    totalQuestions: Math.max(1, Math.min(20, Number(totalQuestions) || 10)),
+    forceMistral,
+  };
+
+  const normalizedTotal = Math.max(1, Math.min(20, Number(totalQuestions) || 20));
+  let aiData = {};
+
+  try {
+    const aiResponse = await axios.post("http://localhost:5003/generate-quiz", aiPayload, {
+      timeout: 15000,
+    });
+    aiData = aiResponse.data || {};
+  } catch (error) {
+    const fallbackReason = error?.response?.data?.message || error?.message || "AI service unavailable";
+    aiData = {
+      questions: buildServerFallbackQuestions({
+        job,
+        candidateProfile,
+        totalQuestions: normalizedTotal,
+      }),
+      meta: {
+        source: "node-local-fallback",
+        fallbackReason,
+        model: "node-template-generator",
+        jobTitle: job?.title || "",
+        skillsUsed: normalizeSkillList([...(job?.skills || []), ...(candidateProfile?.skills || [])]).slice(0, 10),
+        difficultyMix: {
+          facile: Math.floor(normalizedTotal * 0.4),
+          moyen: Math.floor(normalizedTotal * 0.4),
+          difficile: normalizedTotal - Math.floor(normalizedTotal * 0.4) - Math.floor(normalizedTotal * 0.4),
+        },
+      },
+    };
+  }
+
+  const aiQuestions = Array.isArray(aiData?.questions) ? aiData.questions : [];
+  const sanitizedAiQcmQuestions = sanitizeToQcmQuestions(aiQuestions);
+
+  if (sanitizedAiQcmQuestions.length < normalizedTotal) {
+    const fallbackQuestions = buildServerFallbackQuestions({
+      job,
+      candidateProfile,
+      totalQuestions: normalizedTotal + 10,
+    });
+
+    const mergedQuestions = sanitizeToQcmQuestions([
+      ...sanitizedAiQcmQuestions,
+      ...fallbackQuestions,
+    ]).slice(0, normalizedTotal);
+
+    aiData.questions = mergedQuestions;
+    aiData.meta = {
+      ...(aiData.meta || {}),
+      source: (aiData?.meta?.source || "node-local-fallback") + "-normalized",
+      fallbackReason:
+        aiData?.meta?.fallbackReason ||
+        `Generated ${sanitizedAiQcmQuestions.length} valid QCM, completed to ${normalizedTotal} with backend fallback.`,
+      model: aiData?.meta?.model || "node-template-generator",
+      jobTitle: aiData?.meta?.jobTitle || job?.title || "",
+      skillsUsed:
+        Array.isArray(aiData?.meta?.skillsUsed) && aiData.meta.skillsUsed.length
+          ? aiData.meta.skillsUsed
+          : normalizeSkillList([...(job?.skills || []), ...(candidateProfile?.skills || [])]).slice(0, 10),
+    };
+  } else {
+    aiData.questions = sanitizedAiQcmQuestions.slice(0, normalizedTotal);
+  }
+
+  const savedQuiz = await saveCandidateQuizFromAI({
+    jobId,
+    candidateId,
+    generatedBy,
+    aiData,
+    job,
+    candidateProfile,
+  });
+
+  return { aiData, savedQuiz };
+};
+
+const coachTokenize = (value) => {
+  const text = String(value || "").toLowerCase();
+  const tokens = text.match(/[a-zA-Zàâäçéèêëîïôöùûüÿñæœ]{3,}/g) || [];
+  const stopwords = new Set([
+    "avec", "pour", "dans", "sans", "entre", "plus", "moins", "cette", "cela", "that", "this",
+    "des", "les", "une", "the", "and", "est", "sont", "sur", "par", "aux", "vous", "your",
+  ]);
+  return tokens.filter((token) => !stopwords.has(token));
+};
+
+const tokenOverlapRatio = (left, right) => {
+  const a = new Set(coachTokenize(left));
+  const b = new Set(coachTokenize(right));
+  if (!a.size || !b.size) return 0;
+  let overlap = 0;
+  a.forEach((token) => {
+    if (b.has(token)) overlap += 1;
+  });
+  return overlap / Math.max(1, b.size);
+};
+
+const clampScore = (value) => Math.max(0, Math.min(100, Math.round(value)));
+
+const OPEN_ANSWER_ACCEPT_THRESHOLD = Math.max(
+  0,
+  Math.min(1, Number(process.env.OPEN_ANSWER_ACCEPT_THRESHOLD || 0.72))
+);
+const OPEN_ANSWER_REJECT_THRESHOLD = Math.max(
+  0,
+  Math.min(OPEN_ANSWER_ACCEPT_THRESHOLD, Number(process.env.OPEN_ANSWER_REJECT_THRESHOLD || 0.45))
+);
+
+const OPEN_QUESTION_TYPES = new Set(["réponse courte", "mini-exercice"]);
+
+const evaluateOpenAnswerSemiAuto = ({ submittedAnswerText = "", expectedAnswerText = "", questionText = "", skillHints = [] }) => {
+  const submitted = String(submittedAnswerText || "").trim();
+  const expected = String(expectedAnswerText || "").trim();
+  const hints = Array.isArray(skillHints) ? skillHints : [];
+
+  if (!submitted) {
+    return {
+      isCorrect: false,
+      needsHumanReview: false,
+      aiSuggestedCorrect: false,
+      aiConfidence: 0,
+      evaluationMode: "auto-rejected-empty",
+    };
+  }
+
+  const overlapExpected = expected ? tokenOverlapRatio(submitted, expected) : 0;
+  const overlapQuestion = tokenOverlapRatio(submitted, questionText);
+  const overlapSkills = tokenOverlapRatio(submitted, hints.join(" "));
+  const semanticScore = (overlapExpected * 0.65) + (overlapQuestion * 0.2) + (overlapSkills * 0.15);
+  const lengthScore = Math.min(100, Math.round((submitted.length / 260) * 100));
+  const aiConfidence = clampScore((semanticScore * 100 * 0.75) + (lengthScore * 0.25));
+
+  if (!expected) {
+    const aiSuggestedCorrect = aiConfidence >= 55;
+    return {
+      isCorrect: aiSuggestedCorrect,
+      needsHumanReview: true,
+      aiSuggestedCorrect,
+      aiConfidence,
+      evaluationMode: "ambiguous-no-expected",
+    };
+  }
+
+  if (overlapExpected >= OPEN_ANSWER_ACCEPT_THRESHOLD) {
+    return {
+      isCorrect: true,
+      needsHumanReview: false,
+      aiSuggestedCorrect: true,
+      aiConfidence,
+      evaluationMode: "auto-accepted",
+    };
+  }
+
+  if (overlapExpected <= OPEN_ANSWER_REJECT_THRESHOLD) {
+    return {
+      isCorrect: false,
+      needsHumanReview: false,
+      aiSuggestedCorrect: false,
+      aiConfidence,
+      evaluationMode: "auto-rejected",
+    };
+  }
+
+  const aiSuggestedCorrect = semanticScore >= 0.55;
+  return {
+    isCorrect: aiSuggestedCorrect,
+    needsHumanReview: true,
+    aiSuggestedCorrect,
+    aiConfidence,
+    evaluationMode: "ambiguous-threshold-band",
+  };
+};
+
+const buildOpenAnswerRubric = ({ answer, question, skillHints = [] }) => {
+  const text = String(answer?.selectedAnswerText || "").trim();
+  const expected = String(answer?.expectedAnswer || question?.expectedAnswer || "").trim();
+  const questionText = String(question?.title || question?.question || answer?.question || "");
+
+  const lengthScore = Math.min(100, Math.round((text.length / 260) * 100));
+  const structureBonus = text.includes("\n") || text.includes("-") || text.includes(";") ? 15 : 0;
+  const structure = clampScore(lengthScore * 0.6 + structureBonus);
+
+  const exactitudeOverlap = tokenOverlapRatio(text, expected);
+  const exactitude = clampScore(exactitudeOverlap * 100);
+
+  const relevanceQuestion = tokenOverlapRatio(text, questionText);
+  const relevanceSkills = tokenOverlapRatio(text, skillHints.join(" "));
+  const pertinence = clampScore(((relevanceQuestion * 0.6) + (relevanceSkills * 0.4)) * 100);
+
+  const global = clampScore((structure * 0.35) + (exactitude * 0.35) + (pertinence * 0.30));
+  const confidence = clampScore((global * 0.7) + (Math.min(100, text.length) * 0.3));
+
+  let feedback = "Réponse correcte mais peut être renforcée en structurant mieux les idées.";
+  if (global >= 80) {
+    feedback = "Très bonne réponse: claire, pertinente et techniquement solide.";
+  } else if (global < 50) {
+    feedback = "Réponse à améliorer: manque de structure et de précision technique.";
+  }
+
+  return {
+    questionIndex: answer?.questionIndex,
+    question: answer?.question || questionText,
+    rubric: {
+      structure,
+      exactitude,
+      pertinence,
+    },
+    globalScore: global,
+    confidence,
+    feedback,
+  };
+};
+
+const buildSkillNarrative = ({ answersDetailed = [], questions = [] }) => {
+  const skillStats = new Map();
+
+  answersDetailed.forEach((answer, index) => {
+    const question = questions[index] || {};
+    const skills = Array.isArray(question?.skills) && question.skills.length
+      ? question.skills
+      : [question?.domain || "general"];
+
+    skills.forEach((skillValue) => {
+      const skill = String(skillValue || "general").toLowerCase();
+      if (!skillStats.has(skill)) {
+        skillStats.set(skill, { total: 0, correct: 0, openCount: 0, openScoreSum: 0 });
+      }
+      const current = skillStats.get(skill);
+      current.total += 1;
+      if (answer?.isCorrect) current.correct += 1;
+      skillStats.set(skill, current);
+    });
+  });
+
+  const bySkill = [];
+  skillStats.forEach((stats, skill) => {
+    const successRate = stats.total ? (stats.correct / stats.total) * 100 : 0;
+    let level = "À renforcer";
+    if (successRate >= 80) level = "Fort";
+    else if (successRate >= 60) level = "Intermédiaire";
+
+    const strength = successRate >= 70
+      ? `Bonne maîtrise de ${skill}, avec des réponses globalement justes.`
+      : `Base présente sur ${skill}, mais la précision reste irrégulière.`;
+
+    const improvementPlan = successRate >= 80
+      ? `Approfondir ${skill} via cas avancés et optimisation.`
+      : `Réviser ${skill} avec exercices ciblés, puis refaire un mini-quiz pratique.`;
+
+    bySkill.push({
+      skill,
+      successRate: clampScore(successRate),
+      level,
+      strength,
+      improvementPlan,
+    });
+  });
+
+  bySkill.sort((left, right) => right.successRate - left.successRate);
+  const strongSkills = bySkill.filter((entry) => entry.successRate >= 70).slice(0, 3).map((entry) => entry.skill);
+  const weakSkills = bySkill.filter((entry) => entry.successRate < 70).slice(0, 3).map((entry) => entry.skill);
+
+  const summary = {
+    strengths: strongSkills,
+    improvements: weakSkills,
+    narrative: strongSkills.length
+      ? `Vos points forts: ${strongSkills.join(", ")}. Priorité d'amélioration: ${weakSkills.join(", ") || "stabilité globale"}.`
+      : `Le quiz montre des bases en construction. Priorité: ${weakSkills.join(", ") || "fondamentaux techniques"}.`,
+  };
+
+  return { bySkill, summary };
+};
+
+const buildAiCoachFeedback = ({ answersDetailed = [], questions = [] }) => {
+  const openTypes = new Set(["réponse courte", "mini-exercice"]);
+  const openRubric = [];
+
+  answersDetailed.forEach((answer, index) => {
+    const question = questions[index] || {};
+    const type = String(answer?.questionType || question?.type || "").toLowerCase();
+    if (!openTypes.has(type)) return;
+    openRubric.push(
+      buildOpenAnswerRubric({
+        answer,
+        question,
+        skillHints: Array.isArray(question?.skills) ? question.skills : [],
+      })
+    );
+  });
+
+  const skillNarrative = buildSkillNarrative({ answersDetailed, questions });
+  const overallRubricAverage = openRubric.length
+    ? clampScore(openRubric.reduce((sum, item) => sum + Number(item?.globalScore || 0), 0) / openRubric.length)
+    : null;
+
+  return {
+    generatedAt: new Date(),
+    summary: {
+      ...skillNarrative.summary,
+      openAnswerAverage: overallRubricAverage,
+    },
+    bySkill: skillNarrative.bySkill,
+    openAnswerRubric: openRubric,
+  };
+};
 
 
 
@@ -145,10 +705,7 @@ app.use(
 app.use('/api/messages', messageRoutes);
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
+mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
   .catch(err => console.error("❌ MongoDB Connection Error:", err));
 
@@ -1067,7 +1624,7 @@ app.post("/Frontend/add-job", async (req, res) => {
   
 app.get("/Frontend/jobs", async (req, res) => {
     try {
-      const jobs = await JobModel.find()
+      const jobs = await JobModel.find({ status: { $ne: "CLOSED" } })
         .populate({
           path: 'entrepriseId',
           select: 'enterprise.name name picture'
@@ -1113,12 +1670,139 @@ app.delete("/Frontend/delete-job/:id", async (req, res) => {
       if (!deletedJob) {
         return res.status(404).json({ message: "Job non trouvé" });
       }
+
+      await UserModel.updateOne(
+        { _id: deletedJob.entrepriseId },
+        { $pull: { jobsPosted: { jobId: deletedJob._id } } }
+      );
   
       res.status(200).json({ message: "Job supprimé avec succès" });
     } catch (error) {
       console.error("❌ Erreur lors de la suppression du job :", error);
       res.status(500).json({ message: "Erreur serveur" });
     }
+});
+
+app.put("/Frontend/update-job/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { entrepriseId, title, description, location, salary, languages, skills } = req.body;
+
+    if (!entrepriseId) {
+      return res.status(400).json({ message: "entrepriseId is required" });
+    }
+
+    const job = await JobModel.findById(id);
+    if (!job) {
+      return res.status(404).json({ message: "Job non trouvé" });
+    }
+
+    if (String(job.entrepriseId) !== String(entrepriseId)) {
+      return res.status(403).json({ message: "Forbidden: this job does not belong to your enterprise" });
+    }
+
+    const normalizeList = (value) => {
+      if (!Array.isArray(value)) return [];
+      return value.map((item) => String(item || "").trim()).filter(Boolean);
+    };
+
+    job.title = String(title || "").trim() || job.title;
+    job.description = String(description || "").trim();
+    job.location = String(location || "").trim();
+    job.salary = Number(salary) || 0;
+    job.languages = normalizeList(languages);
+    job.skills = normalizeList(skills);
+
+    await job.save();
+
+    await UserModel.updateOne(
+      { _id: entrepriseId, "jobsPosted.jobId": job._id },
+      {
+        $set: {
+          "jobsPosted.$.title": job.title,
+        }
+      }
+    );
+
+    return res.status(200).json({ message: "Job mis à jour avec succès", job });
+  } catch (error) {
+    console.error("❌ Erreur lors de la mise à jour du job :", error);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+app.put("/Frontend/archive-job/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { entrepriseId } = req.body;
+
+    if (!entrepriseId) {
+      return res.status(400).json({ message: "entrepriseId is required" });
+    }
+
+    const job = await JobModel.findById(id);
+    if (!job) {
+      return res.status(404).json({ message: "Job non trouvé" });
+    }
+
+    if (String(job.entrepriseId) !== String(entrepriseId)) {
+      return res.status(403).json({ message: "Forbidden: this job does not belong to your enterprise" });
+    }
+
+    job.status = "CLOSED";
+    await job.save();
+
+    await UserModel.updateOne(
+      { _id: entrepriseId, "jobsPosted.jobId": job._id },
+      {
+        $set: {
+          "jobsPosted.$.status": "CLOSED",
+        }
+      }
+    );
+
+    return res.status(200).json({ message: "Job archivé avec succès", job });
+  } catch (error) {
+    console.error("❌ Erreur lors de l'archivage du job :", error);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+app.put("/Frontend/unarchive-job/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { entrepriseId } = req.body;
+
+    if (!entrepriseId) {
+      return res.status(400).json({ message: "entrepriseId is required" });
+    }
+
+    const job = await JobModel.findById(id);
+    if (!job) {
+      return res.status(404).json({ message: "Job non trouvé" });
+    }
+
+    if (String(job.entrepriseId) !== String(entrepriseId)) {
+      return res.status(403).json({ message: "Forbidden: this job does not belong to your enterprise" });
+    }
+
+    job.status = "OPEN";
+    await job.save();
+
+    await UserModel.updateOne(
+      { _id: entrepriseId, "jobsPosted.jobId": job._id },
+      {
+        $set: {
+          "jobsPosted.$.status": "OPEN",
+        }
+      }
+    );
+
+    return res.status(200).json({ message: "Job désarchivé avec succès", job });
+  } catch (error) {
+    console.error("❌ Erreur lors du désarchivage du job :", error);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
 });
 
 
@@ -1149,6 +1833,15 @@ app.post("/Frontend/apply-job", uploadCV.single("cv"), async (req, res) => {
   try {
     const { jobId, enterpriseId, candidateId, fullName, email, phone } = req.body;
 
+    if (!jobId || !candidateId) {
+      return res.status(400).json({ message: "jobId and candidateId are required." });
+    }
+
+    const existingApplication = await ApplicationModel.findOne({ jobId, candidateId }).lean();
+    if (existingApplication) {
+      return res.status(409).json({ message: "Vous avez déjà postulé à cette offre." });
+    }
+
     if (!req.file) {
       return res.status(400).json({ message: "Fichier CV manquant." });
     }
@@ -1165,7 +1858,27 @@ app.post("/Frontend/apply-job", uploadCV.single("cv"), async (req, res) => {
 
     await newApplication.save();
 
-    res.status(201).json({ message: "Candidature envoyée avec succès." });
+    let quizAutoGenerated = false;
+    let quizGenerationError = null;
+    try {
+      const generationResult = await generateCandidateQuizForJobCandidate({
+        jobId,
+        candidateId,
+        totalQuestions: 20,
+        forceMistral: true,
+        generatedBy: enterpriseId,
+      });
+      quizAutoGenerated = Boolean(generationResult?.savedQuiz);
+    } catch (generationError) {
+      quizGenerationError = generationError?.response?.data || generationError?.message || "Quiz generation failed";
+      console.error("❌ Auto quiz generation after apply failed:", quizGenerationError);
+    }
+
+    res.status(201).json({
+      message: "Candidature envoyée avec succès.",
+      quizAutoGenerated,
+      quizGenerationError,
+    });
   } catch (error) {
     console.error("❌ Backend error:", error);
     res.status(500).json({ message: "Erreur interne du serveur." });
@@ -1236,11 +1949,124 @@ app.get("/Frontend/job-applications/:jobId", async (req, res) => {
     try {
       const { jobId } = req.params;
       const applications = await ApplicationModel.find({ jobId }).populate("candidateId");
+      const candidateIds = applications
+        .map((application) => application?.candidateId?._id)
+        .filter(Boolean);
+
+      const quizResults = await QuizResultModel.find({
+        jobId,
+        candidateId: { $in: candidateIds },
+      })
+        .select("candidateId score totalQuestions timeSpentSeconds answers submittedAt")
+        .sort({ submittedAt: -1 })
+        .lean();
+
+      const historyByCandidateId = new Map();
+      quizResults.forEach((result) => {
+        const key = String(result.candidateId);
+        if (!historyByCandidateId.has(key)) {
+          historyByCandidateId.set(key, []);
+        }
+        historyByCandidateId.get(key).push({
+          score: Number(result?.score || 0),
+          totalQuestions: Number(result?.totalQuestions || 0),
+          timeSpentSeconds: Number(result?.timeSpentSeconds || 0),
+          submittedAt: result?.submittedAt || null,
+          answers: Array.isArray(result?.answers) ? result.answers : [],
+        });
+      });
+
+      const candidateQuizzes = await CandidateQuizModel.find({
+        jobId,
+        candidateId: { $in: candidateIds },
+      })
+        .select("candidateId questions source generationMeta updatedAt")
+        .lean();
+
+      const quizByCandidateId = new Map(
+        candidateQuizzes.map((quiz) => [String(quiz.candidateId), quiz])
+      );
+
+      const enrichedApplications = applications.map((application) => {
+        const candidateId = application?.candidateId?._id ? String(application.candidateId._id) : null;
+        const candidateQuiz = candidateId ? quizByCandidateId.get(candidateId) : null;
+        const quizHistory = candidateId ? (historyByCandidateId.get(candidateId) || []) : [];
+        const questionCount = candidateQuiz?.questions?.length || 0;
+        const quizSkillsUsed = Array.isArray(candidateQuiz?.generationMeta?.skillsUsed)
+          ? candidateQuiz.generationMeta.skillsUsed
+          : [];
+        const fallbackRationale = candidateQuiz?.questions?.length
+          ? `Ce quiz a été généré à partir du profil du candidat et des exigences du poste, avec un focus sur les domaines: ${[
+              ...new Set(candidateQuiz.questions.map((question) => question?.domain).filter(Boolean)),
+            ].slice(0, 4).join(", ") || "techniques principales"}.`
+          : "";
+
+        const serialized = application.toObject ? application.toObject() : application;
+        const legacyAttempt = serialized?.quizScore !== undefined && serialized?.quizScore !== null
+          ? {
+              score: Number(serialized.quizScore || 0),
+              totalQuestions: questionCount,
+              timeSpentSeconds: Number(serialized?.quizTimeSpentSeconds || 0),
+              submittedAt: serialized?.quizSubmittedAt || serialized?.appliedAt || null,
+              answers: Array.isArray(serialized?.quizAnswers) ? serialized.quizAnswers : [],
+            }
+          : null;
+        const normalizedHistory = quizHistory.length
+          ? quizHistory
+          : (legacyAttempt ? [legacyAttempt] : []);
+        const latestAttempt = normalizedHistory[0] || null;
+
+        return {
+          ...serialized,
+          quizLength: questionCount,
+          passingScore: questionCount ? Math.ceil(questionCount / 2) : 0,
+          quizSource: candidateQuiz?.source || null,
+          quizGeneratedAt: candidateQuiz?.updatedAt || null,
+          quizRationale: candidateQuiz?.generationMeta?.rationale || fallbackRationale,
+          quizSkillsUsed,
+          quizQuestions: Array.isArray(candidateQuiz?.questions)
+            ? candidateQuiz.questions.map((question, index) => ({
+                questionIndex: index,
+                question: question?.title || question?.question || "Question",
+                type: question?.type || "QCM",
+                expectedAnswer: question?.expectedAnswer || "",
+                explanation: question?.explanation || "",
+              }))
+            : [],
+          quizAnswers: Array.isArray(latestAttempt?.answers)
+            ? latestAttempt.answers.map((answer) => {
+                const questionRef = (candidateQuiz?.questions || [])[Number(answer?.questionIndex)] || null;
+                return {
+                  ...answer,
+                  question: questionRef?.title || questionRef?.question || "Question",
+                  questionType: questionRef?.type || answer?.questionType || "QCM",
+                  expectedAnswer: questionRef?.expectedAnswer || answer?.expectedAnswer || "",
+                };
+              })
+            : [],
+          quizTimeSpentSeconds: Number(latestAttempt?.timeSpentSeconds || 0),
+          quizSubmittedAt: latestAttempt?.submittedAt || null,
+          quizHistory: normalizedHistory.map((attempt) => ({
+            ...attempt,
+            answers: Array.isArray(attempt?.answers)
+              ? attempt.answers.map((answer) => {
+                  const questionRef = (candidateQuiz?.questions || [])[Number(answer?.questionIndex)] || null;
+                  return {
+                    ...answer,
+                    question: questionRef?.title || questionRef?.question || "Question",
+                    questionType: questionRef?.type || answer?.questionType || "QCM",
+                    expectedAnswer: questionRef?.expectedAnswer || answer?.expectedAnswer || "",
+                  };
+                })
+              : [],
+          })),
+        };
+      });
       
       // Always return an array, even if empty
       res.status(200).json({
         success: true,
-        applications: applications || [] // Ensure it's always an array
+        applications: enrichedApplications || [] // Ensure it's always an array
       });
     } catch (error) {
       res.status(500).json({
@@ -1250,12 +2076,247 @@ app.get("/Frontend/job-applications/:jobId", async (req, res) => {
       });
     }
   });
+
+app.get("/Frontend/job-candidate-quizzes/:jobId", async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const applications = await ApplicationModel.find({ jobId })
+      .populate("candidateId", "name email profile.skills profile.shortDescription")
+      .lean();
+
+    const candidateIds = applications
+      .map((application) => application?.candidateId?._id)
+      .filter(Boolean);
+
+    const quizzes = await CandidateQuizModel.find({
+      jobId,
+      candidateId: { $in: candidateIds },
+    })
+      .select("candidateId questions updatedAt source")
+      .lean();
+
+    const quizByCandidateId = new Map(
+      quizzes.map((quiz) => [String(quiz.candidateId), quiz])
+    );
+
+    const candidates = applications
+      .filter((application) => application?.candidateId)
+      .map((application) => {
+        const candidate = application.candidateId;
+        const existingQuiz = quizByCandidateId.get(String(candidate._id));
+        return {
+          candidateId: candidate._id,
+          name: candidate.name,
+          email: candidate.email,
+          skills: Array.isArray(candidate?.profile?.skills) ? candidate.profile.skills : [],
+          shortDescription: candidate?.profile?.shortDescription || "",
+          hasQuiz: Boolean(existingQuiz),
+          quizQuestionCount: existingQuiz?.questions?.length || 0,
+          quizUpdatedAt: existingQuiz?.updatedAt || null,
+          quizSource: existingQuiz?.source || null,
+        };
+      });
+
+    return res.status(200).json({ candidates });
+  } catch (error) {
+    console.error("❌ Error fetching candidate quizzes:", error);
+    return res.status(500).json({ message: "Error fetching candidate quiz list" });
+  }
+});
+
+app.get("/Frontend/candidate-quiz/:jobId/:candidateId", async (req, res) => {
+  try {
+    const { jobId, candidateId } = req.params;
+    const quiz = await CandidateQuizModel.findOne({ jobId, candidateId }).lean();
+
+    if (!quiz) {
+      return res.status(404).json({ message: "No candidate quiz found for this job." });
+    }
+
+    return res.status(200).json(quiz);
+  } catch (error) {
+    console.error("❌ Error fetching candidate quiz:", error);
+    return res.status(500).json({ message: "Error fetching candidate quiz" });
+  }
+});
+
+app.post("/Frontend/save-candidate-quiz", async (req, res) => {
+  try {
+    const { jobId, candidateId, questions, source = "manual" } = req.body;
+
+    if (!jobId || !candidateId || !Array.isArray(questions)) {
+      return res.status(400).json({ message: "jobId, candidateId and questions are required" });
+    }
+
+    const savedQuiz = await CandidateQuizModel.findOneAndUpdate(
+      { jobId, candidateId },
+      {
+        jobId,
+        candidateId,
+        questions,
+        source,
+      },
+      { new: true, upsert: true }
+    );
+
+    return res.status(200).json({ message: "Candidate quiz saved", quiz: savedQuiz });
+  } catch (error) {
+    console.error("❌ Error saving candidate quiz:", error);
+    return res.status(500).json({ message: "Error saving candidate quiz" });
+  }
+});
+
+app.post("/Frontend/generate-quiz-from-profile", async (req, res) => {
+  try {
+    const { jobId, candidateId = null, totalQuestions = 20, forceMistral = false, generatedBy = null } = req.body;
+
+    if (!jobId) {
+      return res.status(400).json({ message: "jobId is required" });
+    }
+
+    const job = await JobModel.findById(jobId).select("title description skills location");
+    if (!job) {
+      return res.status(404).json({ message: "Job not found" });
+    }
+
+    if (candidateId) {
+      const { aiData } = await generateCandidateQuizForJobCandidate({
+        jobId,
+        candidateId,
+        totalQuestions,
+        forceMistral,
+        generatedBy,
+      });
+      return res.status(200).json(aiData);
+    }
+
+    const applicationFilter = candidateId ? { jobId, candidateId } : { jobId };
+    const applications = await ApplicationModel.find(applicationFilter)
+      .populate("candidateId", "name profile.skills profile.shortDescription profile.domain profile.experience")
+      .limit(30)
+      .lean();
+
+    const candidateProfiles = applications
+      .map((application) => application?.candidateId)
+      .filter(Boolean)
+      .map((candidate) => ({
+        name: candidate?.name || "",
+        domain: candidate?.profile?.domain || "",
+        shortDescription: candidate?.profile?.shortDescription || "",
+        skills: Array.isArray(candidate?.profile?.skills) ? candidate.profile.skills : [],
+        experience: Array.isArray(candidate?.profile?.experience) ? candidate.profile.experience : [],
+      }));
+
+    const aiPayload = {
+      job: {
+        title: job.title || "",
+        description: job.description || "",
+        skills: Array.isArray(job.skills) ? job.skills : [],
+        location: job.location || "",
+      },
+      candidateProfiles,
+      totalQuestions,
+      forceMistral,
+    };
+
+    const aiResponse = await axios.post("http://localhost:5003/generate-quiz", aiPayload, {
+      timeout: 15000,
+    });
+
+    const aiData = aiResponse.data || {};
+
+    return res.status(200).json(aiData);
+  } catch (error) {
+    console.error("❌ Error generating quiz from profile:", error.response?.data || error.message);
+    return res.status(503).json({
+      message: "Quiz AI service unavailable. Start Backend/server/AI/quiz_generation_service.py first.",
+      details: error.response?.data || error.message,
+    });
+  }
+});
+
+app.post("/Frontend/adaptive-quiz-page", async (req, res) => {
+  try {
+    const {
+      jobId,
+      candidateId,
+      page = 1,
+      pageSize = 5,
+      responseHistory = [],
+      askedQuestionKeys = [],
+      forceMistral = false,
+    } = req.body;
+
+    if (!jobId || !candidateId) {
+      return res.status(400).json({ message: "jobId and candidateId are required" });
+    }
+
+    let personalizedQuiz = await CandidateQuizModel.findOne({ jobId, candidateId }).lean();
+    const existingQuestions = Array.isArray(personalizedQuiz?.questions) ? personalizedQuiz.questions : [];
+    const containsLegacyLowQualityTemplate = existingQuestions.some((question) => {
+      const title = String(question?.title || question?.question || "").toLowerCase();
+      const options = Array.isArray(question?.options) ? question.options : [];
+      return options.some((option) =>
+        String(option || "").toLowerCase().includes("réservé uniquement aux managers")
+      ) || title.includes("(unique") || title.includes("(variante");
+    });
+
+    const needsRegeneration =
+      !personalizedQuiz ||
+      !existingQuestions.length ||
+      existingQuestions.length < 20 ||
+      containsLegacyLowQualityTemplate;
+
+    if (needsRegeneration) {
+      const generated = await generateCandidateQuizForJobCandidate({
+        jobId,
+        candidateId,
+        totalQuestions: 20,
+        forceMistral,
+      });
+
+      personalizedQuiz = {
+        questions: Array.isArray(generated?.aiData?.questions) ? generated.aiData.questions : [],
+        generationMeta: generated?.savedQuiz?.generationMeta || {},
+      };
+    }
+
+    const questions = Array.isArray(personalizedQuiz?.questions) ? personalizedQuiz.questions.slice(0, 20) : [];
+    if (!questions.length) {
+      return res.status(404).json({ message: "No generated quiz available for this candidate" });
+    }
+
+    const aiAdaptiveResponse = await axios.post(
+      "http://localhost:5003/adaptive-next-page",
+      {
+        questions,
+        page: Math.max(1, Number(page) || 1),
+        pageSize: Math.max(1, Math.min(10, Number(pageSize) || 5)),
+        responseHistory: Array.isArray(responseHistory) ? responseHistory : [],
+        askedQuestionKeys: Array.isArray(askedQuestionKeys) ? askedQuestionKeys : [],
+      },
+      { timeout: 15000 }
+    );
+
+    return res.status(200).json(aiAdaptiveResponse.data || {});
+  } catch (error) {
+    console.error("❌ Error generating adaptive quiz page:", error.response?.data || error.message);
+    return res.status(503).json({
+      message: "Adaptive quiz AI service unavailable. Start Backend/server/AI/quiz_generation_service.py first.",
+      details: error.response?.data || error.message,
+    });
+  }
+});
+
 app.post("/Frontend/create-quiz", async (req, res) => {
   try {
     const { jobId, questions } = req.body;
-    const quiz = new QuizModel({ jobId, questions });
-    await quiz.save();
-    res.status(200).json({ message: "Quiz enregistré !" });
+    const quiz = await QuizModel.findOneAndUpdate(
+      { jobId },
+      { jobId, questions },
+      { upsert: true, new: true }
+    );
+    res.status(200).json({ message: "Quiz enregistré !", quiz });
   } catch (error) {
     console.error("Erreur création quiz:", error);
     res.status(500).json({ message: "Erreur serveur." });
@@ -1266,6 +2327,15 @@ app.post("/Frontend/create-quiz", async (req, res) => {
 app.get("/Frontend/quiz/:jobId", async (req, res) => {
   try {
     const { jobId } = req.params;
+    const { candidateId } = req.query;
+
+    if (candidateId) {
+      const personalizedQuiz = await CandidateQuizModel.findOne({ jobId, candidateId });
+      if (personalizedQuiz) {
+        return res.json(personalizedQuiz);
+      }
+    }
+
     const quiz = await QuizModel.findOne({ jobId });
 
     if (!quiz) {
@@ -1282,34 +2352,192 @@ app.get("/Frontend/quiz/:jobId", async (req, res) => {
 
 app.post("/Frontend/submit-quiz", async (req, res) => {
     try {
-      const { jobId, candidateId, answers } = req.body;
+  const { jobId, candidateId, answers, answersByQuestionKey, timeSpentSeconds = 0, requireComplete = true } = req.body;
   
-      // Get the quiz questions
-      const quiz = await QuizModel.findOne({ jobId });
+      // Get candidate-specific quiz first, fallback to generic job quiz
+      const personalizedQuiz = await CandidateQuizModel.findOne({ jobId, candidateId });
+      const quiz = personalizedQuiz || await QuizModel.findOne({ jobId });
       if (!quiz) {
         return res.status(404).json({ message: "Quiz not found for this job" });
       }
   
       // Calculate score
       let score = 0;
+      let pendingReviewCount = 0;
+      const answersDetailed = [];
+      const keyedAnswers = (answersByQuestionKey && typeof answersByQuestionKey === "object") ? answersByQuestionKey : {};
+
+      const parseOptionAnswerIndex = (value) => {
+        if (value === null || value === undefined) {
+          return null;
+        }
+        if (typeof value === "string" && !value.trim()) {
+          return null;
+        }
+
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue)) {
+          return null;
+        }
+
+        return Number.isInteger(numericValue) ? numericValue : null;
+      };
+
+      const answeredQuestionsCount = quiz.questions.reduce((count, question, index) => {
+        const submittedAnswer =
+          keyedAnswers?.[index]
+          ?? keyedAnswers?.[String(index)]
+          ?? answers?.[index]
+          ?? answers?.[String(index)]
+          ?? null;
+
+        const hasOptions = Array.isArray(question?.options)
+          && question.options.some((option) => String(option || "").trim().length > 0);
+
+        const parsedAnswerIndex = parseOptionAnswerIndex(submittedAnswer);
+
+        const hasAnswer = hasOptions
+          ? parsedAnswerIndex !== null
+          : (typeof submittedAnswer === "string" && submittedAnswer.trim().length > 0);
+
+        return hasAnswer ? count + 1 : count;
+      }, 0);
+
+      if (requireComplete && answeredQuestionsCount < quiz.questions.length) {
+        return res.status(400).json({
+          message: "Please answer all questions before submitting.",
+          totalQuestions: quiz.questions.length,
+          answeredQuestions: answeredQuestionsCount,
+          missingQuestions: Math.max(0, quiz.questions.length - answeredQuestionsCount),
+        });
+      }
+
       quiz.questions.forEach((question, index) => {
-        if (answers[index] === question.correctAnswer) {
+        const submittedAnswer =
+          keyedAnswers?.[index]
+          ?? keyedAnswers?.[String(index)]
+          ?? answers?.[index]
+          ?? answers?.[String(index)]
+          ?? null;
+        const hasOptions = Array.isArray(question?.options)
+          && question.options.some((option) => String(option || "").trim().length > 0);
+        const parsedAnswerIndex = parseOptionAnswerIndex(submittedAnswer);
+        const submittedAnswerText = typeof submittedAnswer === "string" ? submittedAnswer.trim() : "";
+        const expectedAnswerText = String(question?.expectedAnswer || "").trim();
+        const questionType = String(question?.type || "QCM");
+        const isOpenQuestion = OPEN_QUESTION_TYPES.has(questionType.toLowerCase());
+
+        let isCorrect = false;
+        let needsHumanReview = false;
+        let aiSuggestedCorrect = null;
+        let aiConfidence = null;
+        let evaluationMode = "auto-options";
+        if (hasOptions) {
+          isCorrect = parsedAnswerIndex === question.correctAnswer;
+          aiSuggestedCorrect = isCorrect;
+          aiConfidence = 100;
+        } else if (submittedAnswerText) {
+          if (isOpenQuestion) {
+            const openEval = evaluateOpenAnswerSemiAuto({
+              submittedAnswerText,
+              expectedAnswerText,
+              questionText: question?.title || question?.question || "",
+              skillHints: Array.isArray(question?.skills) ? question.skills : [],
+            });
+            isCorrect = openEval.isCorrect;
+            needsHumanReview = openEval.needsHumanReview;
+            aiSuggestedCorrect = openEval.aiSuggestedCorrect;
+            aiConfidence = openEval.aiConfidence;
+            evaluationMode = openEval.evaluationMode;
+          } else if (!expectedAnswerText) {
+            isCorrect = true;
+            aiSuggestedCorrect = true;
+            aiConfidence = 70;
+            evaluationMode = "auto-accepted-no-expected";
+          } else {
+            isCorrect = submittedAnswerText.toLowerCase() === expectedAnswerText.toLowerCase();
+            aiSuggestedCorrect = isCorrect;
+            aiConfidence = isCorrect ? 100 : 40;
+            evaluationMode = "auto-string-match";
+          }
+        }
+
+        if (isCorrect) {
           score++;
         }
+
+        if (needsHumanReview) {
+          pendingReviewCount += 1;
+        }
+
+        answersDetailed.push({
+          questionIndex: index,
+          question: question?.title || question?.question || "Question",
+          questionType,
+          selectedAnswerIndex: parsedAnswerIndex,
+          selectedAnswerText:
+            submittedAnswerText || (parsedAnswerIndex !== null && Array.isArray(question?.options)
+              ? String(question.options[parsedAnswerIndex] || "")
+              : ""),
+          expectedAnswer: String(question?.expectedAnswer || ""),
+          isCorrect,
+          needsHumanReview,
+          aiSuggestedCorrect,
+          aiConfidence,
+          evaluationMode,
+        });
+      });
+
+      const normalizedTimeSpent = Math.max(0, Number(timeSpentSeconds) || 0);
+      const submittedAt = new Date();
+      const aiCoach = buildAiCoachFeedback({
+        answersDetailed,
+        questions: Array.isArray(quiz?.questions) ? quiz.questions : [],
       });
   
       // Update application with quiz score
       await ApplicationModel.findOneAndUpdate(
         { jobId, candidateId },
-        { quizScore: score, quizCompleted: true },
+        {
+          quizScore: score,
+          quizReviewPendingCount: pendingReviewCount,
+          quizCompleted: true,
+          quizSubmittedAt: submittedAt,
+          quizTimeSpentSeconds: normalizedTimeSpent,
+          quizAnswers: answersDetailed,
+          aiCoach,
+        },
         { new: true }
       );
+
+      await QuizResultModel.create({
+        jobId,
+        candidateId,
+        score,
+        totalQuestions: quiz.questions.length,
+        timeSpentSeconds: normalizedTimeSpent,
+        answers: answersDetailed.map((answer) => ({
+          questionIndex: answer.questionIndex,
+          selectedAnswerIndex: answer.selectedAnswerIndex,
+          selectedAnswerText: answer.selectedAnswerText,
+          isCorrect: answer.isCorrect,
+          needsHumanReview: answer.needsHumanReview,
+          aiSuggestedCorrect: answer.aiSuggestedCorrect,
+          aiConfidence: answer.aiConfidence,
+          evaluationMode: answer.evaluationMode,
+        })),
+        aiCoach,
+        submittedAt,
+      });
   
       res.status(200).json({
         success: true,
         score,
         totalQuestions: quiz.questions.length,
-        passingScore: Math.ceil(quiz.questions.length / 2)
+        passingScore: Math.ceil(quiz.questions.length / 2),
+        timeSpentSeconds: normalizedTimeSpent,
+        reviewRequiredCount: pendingReviewCount,
+        aiCoach,
       });
     } catch (error) {
       console.error("❌ Error submitting quiz:", error);
@@ -1340,6 +2568,170 @@ app.get("/Frontend/quiz-results/:jobId", async (req, res) => {
   } catch (err) {
     console.error("❌ Erreur récupération des scores:", err);
     res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+app.put("/Frontend/manual-grade-quiz-answer", async (req, res) => {
+  try {
+    const { jobId, candidateId, questionIndex, isCorrect } = req.body;
+
+    if (!jobId || !candidateId || !Number.isInteger(Number(questionIndex)) || typeof isCorrect !== "boolean") {
+      return res.status(400).json({
+        message: "jobId, candidateId, questionIndex (number), and isCorrect (boolean) are required",
+      });
+    }
+
+    const normalizedQuestionIndex = Number(questionIndex);
+    const application = await ApplicationModel.findOne({ jobId, candidateId });
+    if (!application) {
+      return res.status(404).json({ message: "Application not found" });
+    }
+
+    if (!Array.isArray(application.quizAnswers) || !application.quizAnswers[normalizedQuestionIndex]) {
+      return res.status(404).json({ message: "Quiz answer not found for this question index" });
+    }
+
+    application.quizAnswers[normalizedQuestionIndex].isCorrect = isCorrect;
+    application.quizAnswers[normalizedQuestionIndex].needsHumanReview = false;
+    application.quizAnswers[normalizedQuestionIndex].evaluationMode = "rh-manual";
+    application.quizAnswers[normalizedQuestionIndex].manualReviewedAt = new Date();
+    const recalculatedScore = application.quizAnswers.filter((answer) => answer?.isCorrect).length;
+    const recalculatedPendingReviews = application.quizAnswers.filter((answer) => answer?.needsHumanReview).length;
+    application.quizScore = recalculatedScore;
+    application.quizReviewPendingCount = recalculatedPendingReviews;
+    application.quizCompleted = true;
+    if (!application.quizSubmittedAt) {
+      application.quizSubmittedAt = new Date();
+    }
+    await application.save();
+
+    const latestQuizResult = await QuizResultModel.findOne({ jobId, candidateId }).sort({ submittedAt: -1 });
+    let updatedQuizResult = null;
+    if (latestQuizResult) {
+      latestQuizResult.score = recalculatedScore;
+      latestQuizResult.totalQuestions = Array.isArray(application.quizAnswers) ? application.quizAnswers.length : 0;
+      latestQuizResult.timeSpentSeconds = Number(application.quizTimeSpentSeconds || 0);
+      latestQuizResult.answers = Array.isArray(application.quizAnswers)
+        ? application.quizAnswers.map((answer) => ({
+            questionIndex: answer.questionIndex,
+            selectedAnswerIndex: answer.selectedAnswerIndex,
+            selectedAnswerText: answer.selectedAnswerText,
+            isCorrect: answer.isCorrect,
+            needsHumanReview: answer.needsHumanReview,
+            aiSuggestedCorrect: answer.aiSuggestedCorrect,
+            aiConfidence: answer.aiConfidence,
+            evaluationMode: answer.evaluationMode,
+          }))
+        : [];
+      if (!latestQuizResult.submittedAt) {
+        latestQuizResult.submittedAt = application.quizSubmittedAt || new Date();
+      }
+      updatedQuizResult = await latestQuizResult.save();
+    }
+
+    return res.status(200).json({
+      message: "Manual grading saved",
+      quizScore: recalculatedScore,
+      reviewRequiredCount: recalculatedPendingReviews,
+      updatedAnswer: application.quizAnswers[normalizedQuestionIndex],
+      quizResult: updatedQuizResult,
+    });
+  } catch (error) {
+    console.error("❌ Error while manually grading quiz answer:", error);
+    return res.status(500).json({ message: "Server error while saving manual grade" });
+  }
+});
+
+
+app.put("/Frontend/ai-grade-quiz-answer", async (req, res) => {
+  try {
+    const { jobId, candidateId, questionIndex } = req.body;
+
+    if (!jobId || !candidateId || !Number.isInteger(Number(questionIndex))) {
+      return res.status(400).json({
+        message: "jobId, candidateId and questionIndex (number) are required",
+      });
+    }
+
+    const normalizedQuestionIndex = Number(questionIndex);
+    const application = await ApplicationModel.findOne({ jobId, candidateId });
+    if (!application) {
+      return res.status(404).json({ message: "Application not found" });
+    }
+
+    if (!Array.isArray(application.quizAnswers) || !application.quizAnswers[normalizedQuestionIndex]) {
+      return res.status(404).json({ message: "Quiz answer not found for this question index" });
+    }
+
+    const answer = application.quizAnswers[normalizedQuestionIndex];
+    const answerType = String(answer?.questionType || "").toLowerCase();
+    if (!OPEN_QUESTION_TYPES.has(answerType)) {
+      return res.status(400).json({ message: "AI grading is only available for open-answer questions" });
+    }
+
+    const personalizedQuiz = await CandidateQuizModel.findOne({ jobId, candidateId }).select("questions").lean();
+    const genericQuiz = !personalizedQuiz ? await QuizModel.findOne({ jobId }).select("questions").lean() : null;
+    const questionRef = ((personalizedQuiz?.questions || genericQuiz?.questions || [])[normalizedQuestionIndex]) || null;
+
+    const aiEvaluation = evaluateOpenAnswerSemiAuto({
+      submittedAnswerText: String(answer?.selectedAnswerText || ""),
+      expectedAnswerText: String(answer?.expectedAnswer || questionRef?.expectedAnswer || ""),
+      questionText: String(answer?.question || questionRef?.title || questionRef?.question || ""),
+      skillHints: Array.isArray(questionRef?.skills) ? questionRef.skills : [],
+    });
+
+    application.quizAnswers[normalizedQuestionIndex].isCorrect = aiEvaluation.isCorrect;
+    application.quizAnswers[normalizedQuestionIndex].needsHumanReview = aiEvaluation.needsHumanReview;
+    application.quizAnswers[normalizedQuestionIndex].aiSuggestedCorrect = aiEvaluation.aiSuggestedCorrect;
+    application.quizAnswers[normalizedQuestionIndex].aiConfidence = aiEvaluation.aiConfidence;
+    application.quizAnswers[normalizedQuestionIndex].evaluationMode = `rh-ai-${aiEvaluation.evaluationMode}`;
+    application.quizAnswers[normalizedQuestionIndex].manualReviewedAt = null;
+
+    const recalculatedScore = application.quizAnswers.filter((item) => item?.isCorrect).length;
+    const recalculatedPendingReviews = application.quizAnswers.filter((item) => item?.needsHumanReview).length;
+    application.quizScore = recalculatedScore;
+    application.quizReviewPendingCount = recalculatedPendingReviews;
+    application.quizCompleted = true;
+    if (!application.quizSubmittedAt) {
+      application.quizSubmittedAt = new Date();
+    }
+    await application.save();
+
+    const latestQuizResult = await QuizResultModel.findOne({ jobId, candidateId }).sort({ submittedAt: -1 });
+    let updatedQuizResult = null;
+    if (latestQuizResult) {
+      latestQuizResult.score = recalculatedScore;
+      latestQuizResult.totalQuestions = Array.isArray(application.quizAnswers) ? application.quizAnswers.length : 0;
+      latestQuizResult.timeSpentSeconds = Number(application.quizTimeSpentSeconds || 0);
+      latestQuizResult.answers = Array.isArray(application.quizAnswers)
+        ? application.quizAnswers.map((item) => ({
+            questionIndex: item.questionIndex,
+            selectedAnswerIndex: item.selectedAnswerIndex,
+            selectedAnswerText: item.selectedAnswerText,
+            isCorrect: item.isCorrect,
+            needsHumanReview: item.needsHumanReview,
+            aiSuggestedCorrect: item.aiSuggestedCorrect,
+            aiConfidence: item.aiConfidence,
+            evaluationMode: item.evaluationMode,
+          }))
+        : [];
+      if (!latestQuizResult.submittedAt) {
+        latestQuizResult.submittedAt = application.quizSubmittedAt || new Date();
+      }
+      updatedQuizResult = await latestQuizResult.save();
+    }
+
+    return res.status(200).json({
+      message: "AI grading completed",
+      quizScore: recalculatedScore,
+      reviewRequiredCount: recalculatedPendingReviews,
+      updatedAnswer: application.quizAnswers[normalizedQuestionIndex],
+      aiEvaluation,
+      quizResult: updatedQuizResult,
+    });
+  } catch (error) {
+    console.error("❌ Error while AI grading quiz answer:", error);
+    return res.status(500).json({ message: "Server error while processing AI grading" });
   }
 });
 
@@ -1617,10 +3009,15 @@ app.post('/predict-from-skills', async (req, res) => {
     const response = await axios.post('http://localhost:5000/predict-from-skills', requestData);
     res.json(response.data);
   } catch (error) {
-    console.error('Error calling Flask service:', error.response?.data || error.message);
+    const remoteError = error.response?.data;
+    const details =
+      (typeof remoteError?.error === 'string' && remoteError.error.trim())
+      || (typeof error.message === 'string' && error.message.trim())
+      || 'Unknown prediction service error';
+    console.error('Error calling Flask service:', remoteError || error.message);
     res.status(500).json({ 
       error: 'Failed to get prediction',
-      details: error.response?.data || error.message,
+      details,
       status: 'failed' 
     });
   }

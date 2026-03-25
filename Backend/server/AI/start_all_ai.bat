@@ -13,6 +13,7 @@ start "Hiring Model (Port 5000)" cmd /k "\"%VENV_PY%\" hiring_model.py"
 start "Recommendation (Port 5001)" cmd /k "\"%VENV_PY%\" recommendation_service.py"
 start "Interview Score (Port 7000)" cmd /k "\"%VENV_PY%\" interview_score_model.py"
 start "Clustering" cmd /k "\"%VENV_PY%\" clustering.py"
+start "Quiz Generation (Port 5003)" cmd /k "\"%VENV_PY%\" quiz_generation_service.py"
 
-echo All 5 AI servers are launching in separate windows!
+echo All AI servers are launching in separate windows!
     

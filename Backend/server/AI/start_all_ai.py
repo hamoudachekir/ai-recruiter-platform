@@ -11,7 +11,8 @@ def start_services():
         {"name": "Hiring Model (Port 5000)", "script": "hiring_model.py"},
         {"name": "Recommendation (Port 5001)", "script": "recommendation_service.py"},
         {"name": "Interview Score (Port 7000)", "script": "interview_score_model.py"},
-        {"name": "Clustering", "script": "clustering.py"}
+        {"name": "Clustering", "script": "clustering.py"},
+        {"name": "Quiz Generation (Port 5003)", "script": "quiz_generation_service.py"}
     ]
     
     processes = []

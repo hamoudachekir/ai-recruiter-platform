@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
+import { toast } from "react-toastify";
 import PublicLayout from "../../layouts/PublicLayout";
 import "./EntrepriseProfile.css";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -9,7 +10,7 @@ import {
   faLocationDot, faGlobe, faFileLines, 
   faPeopleGroup, faEdit, faSave, faTimes, 
   faBriefcase, faCamera, faPlus, faMinus, 
-  faPlusCircle, faCalendarAlt, faVideo,
+  faPlusCircle, faCalendarAlt, faVideo, faBoxArchive, faRotateLeft,
   faEnvelope, faLock, faKey
 } from "@fortawesome/free-solid-svg-icons";
 
@@ -25,6 +26,15 @@ const EntrepriseProfile = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedEnterprise, setEditedEnterprise] = useState({});
   const [showJobForm, setShowJobForm] = useState(false);
+  const [editingJobCardId, setEditingJobCardId] = useState(null);
+  const [editingJobCardData, setEditingJobCardData] = useState({
+    title: "",
+    description: "",
+    location: "",
+    salary: "",
+    languages: "",
+    skills: "",
+  });
   const [applications, setApplications] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [applicationCounts, setApplicationCounts] = useState({});
@@ -50,6 +60,11 @@ const EntrepriseProfile = () => {
   const [quizQuestions, setQuizQuestions] = useState([
     { question: "", options: ["", "", "", ""], correctAnswer: 0 },
   ]);
+  const [quizBlueprint, setQuizBlueprint] = useState({ totalQuestions: 10 });
+  const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
+  const [generationInfo, setGenerationInfo] = useState(null);
+  const [jobCandidatesForQuiz, setJobCandidatesForQuiz] = useState([]);
+  const [selectedQuizCandidateId, setSelectedQuizCandidateId] = useState("");
   const [jobQuizLengths, setJobQuizLengths] = useState({});
 
   const [newJob, setNewJob] = useState({
@@ -80,6 +95,117 @@ const EntrepriseProfile = () => {
     (sum, count) => sum + (Number(count) || 0),
     0
   );
+  const activeJobs = enterpriseJobs.filter((job) => job.status !== "CLOSED");
+  const archivedJobs = enterpriseJobs.filter((job) => job.status === "CLOSED");
+  const activeJobsCount = activeJobs.length;
+  const archivedJobsCount = archivedJobs.length;
+
+  const formatQuizDuration = (seconds) => {
+    const safeSeconds = Math.max(0, Number(seconds) || 0);
+    const minutes = Math.floor(safeSeconds / 60);
+    const remainingSeconds = safeSeconds % 60;
+    return `${minutes}m ${remainingSeconds}s`;
+  };
+
+  const normalizeMongoId = (value) => {
+    if (!value) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "object") {
+      return String(value._id || value.id || "");
+    }
+    return String(value);
+  };
+
+  const computeQuizQuality = (validation = {}, totalQuestions = 0) => {
+    const semanticDuplicatesRemoved = Number(validation?.semanticDuplicatesRemoved || 0);
+    const difficultyFixCount = Number(validation?.difficultyFixCount || 0);
+    const weakAfter = Number(validation?.weakQuestionCountAfter || 0);
+    const timeTarget = Number(validation?.timeBudget?.target || 0);
+    const timeActual = Number(validation?.timeBudget?.actualAfter || 0);
+    const timeDelta = Math.abs(timeTarget - timeActual);
+
+    let score = 100;
+    score -= semanticDuplicatesRemoved * 3;
+    score -= difficultyFixCount * 4;
+    score -= weakAfter * 6;
+    score -= timeDelta > 0 ? Math.min(20, Math.round((timeDelta / Math.max(1, timeTarget)) * 100)) : 0;
+
+    const normalizedScore = Math.max(0, Math.min(100, score));
+    if (normalizedScore >= 85) {
+      return { label: "Excellent", className: "quiz-quality-excellent", score: normalizedScore };
+    }
+    if (normalizedScore >= 65) {
+      return { label: "Correct", className: "quiz-quality-good", score: normalizedScore };
+    }
+    return { label: "À revoir", className: "quiz-quality-needs-review", score: normalizedScore };
+  };
+
+  const generateQuizFromBlueprint = async () => {
+    if (!quizJobId) {
+      alert("Please select a job first.");
+      return;
+    }
+
+    if (!selectedQuizCandidateId) {
+      alert("Please select a candidate first.");
+      return;
+    }
+
+    try {
+      setIsGeneratingQuiz(true);
+      setGenerationInfo(null);
+
+      const targetCount = Math.max(1, Math.min(20, Number(quizBlueprint.totalQuestions) || 10));
+      const response = await axios.post("http://localhost:3001/Frontend/generate-quiz-from-profile", {
+        jobId: quizJobId,
+        candidateId: selectedQuizCandidateId,
+        totalQuestions: targetCount,
+        forceMistral: true,
+        generatedBy: localStorage.getItem("userId") || null,
+      });
+
+      const meta = response?.data?.meta || {};
+      const source = meta.source;
+
+      if (source !== "mistral-api") {
+        throw new Error(
+          meta.fallbackReason ||
+          "Mistral was not used. Check API key, model name, and service logs."
+        );
+      }
+
+      const generatedQuestions = response?.data?.questions || [];
+      if (!generatedQuestions.length) {
+        alert("No quiz generated. Verify candidate profiles and AI service.");
+        return;
+      }
+
+      setQuizQuestions(generatedQuestions);
+      const postValidation = meta?.postValidation || meta?.generationTrace?.validation || {};
+      const quality = computeQuizQuality(postValidation, generatedQuestions.length);
+      setGenerationInfo({
+        source,
+        model: meta.model,
+        count: generatedQuestions.length,
+        postValidation,
+        quality,
+      });
+      setJobCandidatesForQuiz((prev) =>
+        prev.map((candidate) =>
+          candidate.candidateId === selectedQuizCandidateId
+            ? { ...candidate, hasQuiz: true, quizQuestionCount: generatedQuestions.length, quizSource: source }
+            : candidate
+        )
+      );
+      alert(`✅ ${generatedQuestions.length} questions generated with Mistral model: ${meta.model || "default"}.`);
+    } catch (error) {
+      console.error("Error generating quiz from AI service:", error);
+      const backendMessage = error.response?.data?.meta?.fallbackReason || error.response?.data?.message || error.message || "Failed to generate quiz.";
+      alert(`${backendMessage}\nMake sure Mistral is reachable and quiz_generation_service.py is running on port 5003.`);
+    } finally {
+      setIsGeneratingQuiz(false);
+    }
+  };
 
   // Fetch scheduled interviews for the job
   const fetchInterviews = async (jobId) => {
@@ -102,19 +228,62 @@ const EntrepriseProfile = () => {
 
   const openQuizFormModal = async (jobId) => {
     try {
-      const res = await axios.get(`http://localhost:3001/quiz/job/${jobId}`);
-      if (res.data && res.data.questions) {
+      const candidatesRes = await axios.get(`http://localhost:3001/Frontend/job-candidate-quizzes/${jobId}`);
+      const candidates = candidatesRes?.data?.candidates || [];
+
+      setJobCandidatesForQuiz(candidates);
+      setQuizJobId(jobId);
+      setGenerationInfo(null);
+
+      if (candidates.length > 0) {
+        const firstCandidateId = String(candidates[0].candidateId);
+        setSelectedQuizCandidateId(firstCandidateId);
+
+        try {
+          const candidateQuizRes = await axios.get(`http://localhost:3001/Frontend/candidate-quiz/${jobId}/${firstCandidateId}`);
+          if (candidateQuizRes.data?.questions?.length) {
+            setQuizQuestions(candidateQuizRes.data.questions);
+          } else {
+            setQuizQuestions([{ question: "", options: ["", "", "", ""], correctAnswer: 0 }]);
+          }
+        } catch {
+          setQuizQuestions([{ question: "", options: ["", "", "", ""], correctAnswer: 0 }]);
+        }
+      } else {
+        setSelectedQuizCandidateId("");
+        setQuizQuestions([{ question: "", options: ["", "", "", ""], correctAnswer: 0 }]);
+      }
+
+      setShowQuizFormModal(true);
+    } catch (err) {
+      console.error("Error fetching candidate quizzes:", err);
+      setJobCandidatesForQuiz([]);
+      setSelectedQuizCandidateId("");
+      setQuizQuestions([{ question: "", options: ["", "", "", ""], correctAnswer: 0 }]);
+      setQuizJobId(jobId);
+      setShowQuizFormModal(true);
+    }
+  };
+
+  const handleSelectQuizCandidate = async (candidateId) => {
+    const normalizedId = String(candidateId || "");
+    setSelectedQuizCandidateId(normalizedId);
+    setGenerationInfo(null);
+
+    if (!normalizedId || !quizJobId) {
+      setQuizQuestions([{ question: "", options: ["", "", "", ""], correctAnswer: 0 }]);
+      return;
+    }
+
+    try {
+      const res = await axios.get(`http://localhost:3001/Frontend/candidate-quiz/${quizJobId}/${normalizedId}`);
+      if (res.data?.questions?.length) {
         setQuizQuestions(res.data.questions);
       } else {
         setQuizQuestions([{ question: "", options: ["", "", "", ""], correctAnswer: 0 }]);
       }
-      setQuizJobId(jobId);
-      setShowQuizFormModal(true);
-    } catch (err) {
-      console.error("Error fetching quiz:", err);
+    } catch {
       setQuizQuestions([{ question: "", options: ["", "", "", ""], correctAnswer: 0 }]);
-      setQuizJobId(jobId);
-      setShowQuizFormModal(true);
     }
   };
 
@@ -206,6 +375,90 @@ const EntrepriseProfile = () => {
     }
   };
 
+  const handleEditJob = (job) => {
+    setEditingJobCardId(job._id);
+    setEditingJobCardData({
+      title: job.title || "",
+      description: job.description || "",
+      location: job.location || "",
+      salary: job.salary || "",
+      languages: Array.isArray(job.languages) ? job.languages.join(", ") : "",
+      skills: Array.isArray(job.skills) ? job.skills.join(", ") : "",
+    });
+  };
+
+  const handleEditJobCardChange = (e) => {
+    const { name, value } = e.target;
+    setEditingJobCardData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleCancelEditJobCard = () => {
+    setEditingJobCardId(null);
+    setEditingJobCardData({
+      title: "",
+      description: "",
+      location: "",
+      salary: "",
+      languages: "",
+      skills: "",
+    });
+  };
+
+  const handleSaveEditJobCard = async (jobId) => {
+    try {
+      await axios.put(`http://localhost:3001/Frontend/update-job/${jobId}`, {
+        entrepriseId: id,
+        title: editingJobCardData.title,
+        description: editingJobCardData.description,
+        location: editingJobCardData.location,
+        salary: editingJobCardData.salary,
+        languages: editingJobCardData.languages.split(",").map((lang) => lang.trim()).filter(Boolean),
+        skills: editingJobCardData.skills.split(",").map((skill) => skill.trim()).filter(Boolean),
+      });
+
+      const res = await axios.get(`http://localhost:3001/Frontend/jobs-by-entreprise/${id}`);
+      setEnterpriseJobs(res.data);
+      handleCancelEditJobCard();
+      toast.success("Job updated successfully!");
+    } catch (error) {
+      console.error("Error updating job:", error);
+      toast.error(error?.response?.data?.message || "Failed to update job.");
+    }
+  };
+
+  const handleArchiveJob = async (jobId) => {
+    const confirmArchive = window.confirm("Archive this job? It will no longer be active for new applications.");
+    if (!confirmArchive) return;
+
+    try {
+      await axios.put(`http://localhost:3001/Frontend/archive-job/${jobId}`, {
+        entrepriseId: id,
+      });
+
+      const res = await axios.get(`http://localhost:3001/Frontend/jobs-by-entreprise/${id}`);
+      setEnterpriseJobs(res.data);
+      toast.success("Job archived successfully!");
+    } catch (error) {
+      console.error("Error archiving job:", error);
+      toast.error(error?.response?.data?.message || "Failed to archive job.");
+    }
+  };
+
+  const handleUnarchiveJob = async (jobId) => {
+    try {
+      await axios.put(`http://localhost:3001/Frontend/unarchive-job/${jobId}`, {
+        entrepriseId: id,
+      });
+
+      const res = await axios.get(`http://localhost:3001/Frontend/jobs-by-entreprise/${id}`);
+      setEnterpriseJobs(res.data);
+      toast.success("Job unarchived successfully!");
+    } catch (error) {
+      console.error("Error unarchiving job:", error);
+      toast.error(error?.response?.data?.message || "Failed to unarchive job.");
+    }
+  };
+
 const openApplicationModal = async (jobId) => {
   try {
     const res = await axios.get(`http://localhost:3001/Frontend/job-applications/${jobId}`);
@@ -221,18 +474,28 @@ const openApplicationModal = async (jobId) => {
       applications = [res.data];
     }
     
-    // Get quiz length - use first application or fallback
-    const quizLength = applications[0]?.quizLength || (jobQuizLengths[jobId] || 0);
-    const passingScore = Math.ceil(quizLength / 2);
+    const candidatesWithQuiz = applications.filter((app) => Number(app.quizLength || 0) > 0);
+
+    const enrichedCandidates = candidatesWithQuiz.map((app) => {
+      const quizLength = Number(app.quizLength || 0);
+      const passingScore = quizLength ? Math.ceil(quizLength / 2) : 0;
+      const quizScore = Number(app.quizScore || 0);
+      return {
+        ...app,
+        quizLength,
+        passingScore,
+        quizPercent: quizLength ? Math.round((quizScore / quizLength) * 100) : 0,
+        isQualified: quizLength ? quizScore >= passingScore : false,
+      };
+    });
   
     // Get job details for ML prediction
     const jobRes = await axios.get(`http://localhost:3001/Frontend/job/${jobId}`);
     const job = jobRes.data;
 
-    // Filter and enhance qualified candidates with ML predictions
+    // Enhance candidates with ML predictions
     const qualifiedCandidates = await Promise.all(
-      applications
-        .filter(app => app.quizScore !== undefined && app.quizScore >= passingScore)
+      enrichedCandidates
         .map(async (app) => {
           try {
             // Get ML prediction for each candidate
@@ -267,6 +530,9 @@ const openApplicationModal = async (jobId) => {
     qualifiedCandidates.sort((a, b) => {
       if (a.mlPrediction && b.mlPrediction) {
         return b.mlPrediction.confidence - a.mlPrediction.confidence;
+      }
+      if (a.isQualified !== b.isQualified) {
+        return a.isQualified ? -1 : 1;
       }
       return 0;
     });
@@ -363,6 +629,114 @@ const openApplicationModal = async (jobId) => {
     }
   };
 
+  const handleManualGradeAnswer = async ({ jobId, candidateId, questionIndex, isCorrect }) => {
+    try {
+      const normalizedJobId = normalizeMongoId(jobId);
+      const normalizedCandidateId = normalizeMongoId(candidateId);
+
+      const response = await axios.put("http://localhost:3001/Frontend/manual-grade-quiz-answer", {
+        jobId: normalizedJobId,
+        candidateId: normalizedCandidateId,
+        questionIndex,
+        isCorrect,
+      });
+
+      const newScore = Number(response?.data?.quizScore || 0);
+      const pendingCount = Number(response?.data?.reviewRequiredCount || 0);
+
+      setSelectedApplications((prev) =>
+        prev.map((application) => {
+          const appCandidateId = normalizeMongoId(application?.candidateId);
+          const appJobId = normalizeMongoId(application?.jobId);
+          if (appJobId !== normalizedJobId || appCandidateId !== normalizedCandidateId) {
+            return application;
+          }
+
+          const updatedAnswers = Array.isArray(application.quizAnswers)
+            ? application.quizAnswers.map((answer) =>
+                Number(answer.questionIndex) === Number(questionIndex)
+                  ? {
+                      ...answer,
+                      isCorrect,
+                      needsHumanReview: false,
+                      evaluationMode: "rh-manual",
+                    }
+                  : answer
+              )
+            : [];
+
+          const quizLength = Number(application.quizLength || updatedAnswers.length || 0);
+          const passingScore = quizLength ? Math.ceil(quizLength / 2) : 0;
+
+          return {
+            ...application,
+            quizAnswers: updatedAnswers,
+            quizScore: newScore,
+            quizReviewPendingCount: pendingCount,
+            quizPercent: quizLength ? Math.round((newScore / quizLength) * 100) : 0,
+            isQualified: quizLength ? newScore >= passingScore : false,
+          };
+        })
+      );
+    } catch (error) {
+      console.error("Error while manually grading answer:", error);
+      alert(error?.response?.data?.message || "Failed to save manual grading.");
+    }
+  };
+
+  const handleAiGradeAnswer = async ({ jobId, candidateId, questionIndex }) => {
+    try {
+      const normalizedJobId = normalizeMongoId(jobId);
+      const normalizedCandidateId = normalizeMongoId(candidateId);
+
+      const response = await axios.put("http://localhost:3001/Frontend/ai-grade-quiz-answer", {
+        jobId: normalizedJobId,
+        candidateId: normalizedCandidateId,
+        questionIndex,
+      });
+
+      const newScore = Number(response?.data?.quizScore || 0);
+      const pendingCount = Number(response?.data?.reviewRequiredCount || 0);
+      const updatedAnswer = response?.data?.updatedAnswer || null;
+
+      setSelectedApplications((prev) =>
+        prev.map((application) => {
+          const appCandidateId = normalizeMongoId(application?.candidateId);
+          const appJobId = normalizeMongoId(application?.jobId);
+          if (appJobId !== normalizedJobId || appCandidateId !== normalizedCandidateId) {
+            return application;
+          }
+
+          const updatedAnswers = Array.isArray(application.quizAnswers)
+            ? application.quizAnswers.map((answer) =>
+                Number(answer.questionIndex) === Number(questionIndex)
+                  ? {
+                      ...answer,
+                      ...(updatedAnswer || {}),
+                    }
+                  : answer
+              )
+            : [];
+
+          const quizLength = Number(application.quizLength || updatedAnswers.length || 0);
+          const passingScore = quizLength ? Math.ceil(quizLength / 2) : 0;
+
+          return {
+            ...application,
+            quizAnswers: updatedAnswers,
+            quizScore: newScore,
+            quizReviewPendingCount: pendingCount,
+            quizPercent: quizLength ? Math.round((newScore / quizLength) * 100) : 0,
+            isQualified: quizLength ? newScore >= passingScore : false,
+          };
+        })
+      );
+    } catch (error) {
+      console.error("Error while AI grading answer:", error);
+      alert(error?.response?.data?.message || "Failed to run AI grading.");
+    }
+  };
+
   const handleChooseImage = () => fileInputRef.current.click();
 
   const handleCancelImage = () => {
@@ -420,14 +794,26 @@ const openApplicationModal = async (jobId) => {
   };
 
   const handleSubmitQuiz = async () => {
+    if (!selectedQuizCandidateId) {
+      alert("Please select a candidate before saving quiz.");
+      return;
+    }
+
     try {
-      await axios.post("http://localhost:3001/Frontend/create-quiz", {
+      await axios.post("http://localhost:3001/Frontend/save-candidate-quiz", {
         jobId: quizJobId,
+        candidateId: selectedQuizCandidateId,
         questions: quizQuestions,
+        source: generationInfo?.source || "manual",
       });
-      alert("🎉 Quiz saved successfully!");
-      setShowQuizFormModal(false);
-      fetchQuizLengths(); // Refresh quiz lengths
+      setJobCandidatesForQuiz((prev) =>
+        prev.map((candidate) =>
+          String(candidate.candidateId) === String(selectedQuizCandidateId)
+            ? { ...candidate, hasQuiz: true, quizQuestionCount: quizQuestions.length }
+            : candidate
+        )
+      );
+      alert("🎉 Candidate quiz saved successfully!");
     } catch (error) {
       console.error("Error saving quiz:", error);
       alert("Failed to save quiz. Please try again.");
@@ -499,9 +885,25 @@ const openApplicationModal = async (jobId) => {
       !selectedSkills.some((item) => item.toLowerCase() === skill.toLowerCase())
   );
 
-  const handleAddJob = async () => {
+  const resetJobForm = () => {
+    setNewJob({
+      title: "",
+      description: "",
+      location: "",
+      salary: "",
+      languages: "",
+      skills: "",
+    });
+    setSelectedLanguages([]);
+    setSelectedSkills([]);
+    setLanguageInput("");
+    setSkillInput("");
+    setShowJobForm(false);
+  };
+
+  const handleSubmitJob = async () => {
     try {
-      await axios.post("http://localhost:3001/Frontend/add-job", {
+      const payload = {
         title: newJob.title,
         description: newJob.description,
         location: newJob.location,
@@ -509,27 +911,18 @@ const openApplicationModal = async (jobId) => {
         skills: newJob.skills.split(",").map((skill) => skill.trim()),
         languages: newJob.languages.split(",").map((lang) => lang.trim()),
         entrepriseId: id,
-      });
+      };
+
+      await axios.post("http://localhost:3001/Frontend/add-job", payload);
 
       const res = await axios.get(`http://localhost:3001/Frontend/jobs-by-entreprise/${id}`);
       setEnterpriseJobs(res.data);
 
       alert("New job added successfully!");
-      setNewJob({
-        title: "",
-        description: "",
-        location: "",
-        salary: "",
-        languages: "",
-        skills: "",
-      });
-      setSelectedLanguages([]);
-      setSelectedSkills([]);
-      setLanguageInput("");
-      setSkillInput("");
-      setShowJobForm(false);
+      resetJobForm();
     } catch (err) {
-      console.error("Error adding job:", err);
+      console.error("Error saving job:", err);
+      alert(err?.response?.data?.message || "Failed to save job.");
     }
   };
 
@@ -632,7 +1025,13 @@ const openApplicationModal = async (jobId) => {
 
                   <button
                     className="btn btn-add-job mt-4 w-100"
-                    onClick={() => setShowJobForm(!showJobForm)}
+                    onClick={() => {
+                      if (showJobForm) {
+                        resetJobForm();
+                      } else {
+                        setShowJobForm(true);
+                      }
+                    }}
                   >
                     <FontAwesomeIcon icon={showJobForm ? faMinus : faPlus} className="me-2" />
                     {showJobForm ? "Hide" : "Add Job"}
@@ -968,7 +1367,7 @@ const openApplicationModal = async (jobId) => {
                   <div className="text-end mt-4">
                     <button
                       className="btn btn-success"
-                      onClick={handleAddJob}
+                      onClick={handleSubmitJob}
                       disabled={!newJob.title || !newJob.description}
                     >
                       <FontAwesomeIcon icon={faPlusCircle} className="me-2" />
@@ -987,36 +1386,43 @@ const openApplicationModal = async (jobId) => {
               <h4 className="mb-4">
                 <i className="fas fa-briefcase icon"></i>Jobs posted by your company
               </h4>
-              <span className="jobs-count-pill">{enterpriseJobs.length} Active</span>
+              <span className="jobs-count-pill">{activeJobsCount} Active • {archivedJobsCount} Archived</span>
             </div>
             <div className="jobs-grid">
-              {enterpriseJobs.map((job, index) => {
+              {activeJobs.map((job, index) => {
                 const cleanedDescription = typeof job.description === "string" ? job.description.trim() : "";
                 const hasDescription = cleanedDescription.length > 0;
+                const isEditingThisCard = editingJobCardId === job._id;
 
                 return (
                 <div key={job._id} className="job-card" style={{ animationDelay: `${index * 0.1}s` }}>
-                  <div className="card-header position-relative d-flex justify-content-between align-items-center">
-                    <h5 className="card-title d-flex align-items-center gap-2">{job.title}</h5>
+                  <div className="card-header d-flex justify-content-between align-items-start gap-3">
+                    <h5 className="card-title">
+                      <span className="card-title-text">{job.title}</span>
+                    </h5>
 
-                    {applicationCounts[job._id] > 0 && (
+                    <div className="job-card-header-actions">
+                      {applicationCounts[job._id] > 0 && (
+                        <button
+                          type="button"
+                          className="view-applications-btn"
+                          onClick={() => openApplicationModal(job._id)}
+                          title="View applications"
+                        >
+                          <span>View Applications</span>
+                          <span className="notif-count">{applicationCounts[job._id]}</span>
+                        </button>
+                      )}
+
                       <button
                         type="button"
-                        className="view-applications-btn"
-                        onClick={() => openApplicationModal(job._id)}
-                        title="View applications"
+                        className="delete-job-btn"
+                        onClick={() => handleDeleteJob(job._id)}
+                        title="Delete this job"
                       >
-                        <span>View Applications</span>
-                        <span className="notif-count">{applicationCounts[job._id]}</span>
+                        <FontAwesomeIcon icon={faTrashCan} />
                       </button>
-                    )}
-
-                    <FontAwesomeIcon
-                      icon={faTrashCan}
-                      className="delete-icon-top"
-                      onClick={() => handleDeleteJob(job._id)}
-                      title="Delete this job"
-                    />
+                    </div>
                   </div>
 
                   <div className="job-meta-row">
@@ -1025,6 +1431,100 @@ const openApplicationModal = async (jobId) => {
                     </span>
                     <span className="meta-pill salary-pill">{job.salary ? `${job.salary} €` : "Salary N/A"}</span>
                   </div>
+
+                  <div className="job-action-row mb-3">
+                    <button
+                      className="btn btn-sm btn-outline-info"
+                      onClick={() => handleEditJob(job)}
+                    >
+                      <FontAwesomeIcon icon={faEdit} className="me-1" /> Modify
+                    </button>
+                    <button
+                      className="btn btn-sm btn-outline-secondary"
+                      onClick={() => handleArchiveJob(job._id)}
+                    >
+                      <FontAwesomeIcon icon={faBoxArchive} className="me-1" /> Archive
+                    </button>
+                  </div>
+
+                  {isEditingThisCard && (
+                    <div className="job-inline-editor mb-3">
+                      <div className="row g-2">
+                        <div className="col-md-6">
+                          <label className="form-label">Title</label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            name="title"
+                            value={editingJobCardData.title}
+                            onChange={handleEditJobCardChange}
+                          />
+                        </div>
+                        <div className="col-md-3">
+                          <label className="form-label">Location</label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            name="location"
+                            value={editingJobCardData.location}
+                            onChange={handleEditJobCardChange}
+                          />
+                        </div>
+                        <div className="col-md-3">
+                          <label className="form-label">Salary (€)</label>
+                          <input
+                            type="number"
+                            className="form-control"
+                            name="salary"
+                            value={editingJobCardData.salary}
+                            onChange={handleEditJobCardChange}
+                          />
+                        </div>
+                        <div className="col-12">
+                          <label className="form-label">Description</label>
+                          <textarea
+                            className="form-control"
+                            rows="3"
+                            name="description"
+                            value={editingJobCardData.description}
+                            onChange={handleEditJobCardChange}
+                          />
+                        </div>
+                        <div className="col-md-6">
+                          <label className="form-label">Languages (comma separated)</label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            name="languages"
+                            value={editingJobCardData.languages}
+                            onChange={handleEditJobCardChange}
+                          />
+                        </div>
+                        <div className="col-md-6">
+                          <label className="form-label">Skills (comma separated)</label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            name="skills"
+                            value={editingJobCardData.skills}
+                            onChange={handleEditJobCardChange}
+                          />
+                        </div>
+                      </div>
+                      <div className="d-flex gap-2 mt-3 justify-content-end">
+                        <button
+                          className="btn btn-sm btn-success"
+                          onClick={() => handleSaveEditJobCard(job._id)}
+                          disabled={!editingJobCardData.title || !editingJobCardData.description}
+                        >
+                          <FontAwesomeIcon icon={faSave} className="me-1" /> Save
+                        </button>
+                        <button className="btn btn-sm btn-outline-light" onClick={handleCancelEditJobCard}>
+                          <FontAwesomeIcon icon={faTimes} className="me-1" /> Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="card-body">
                     <div className="job-detail job-description">
@@ -1035,13 +1535,6 @@ const openApplicationModal = async (jobId) => {
                         </p>
                       </div>
                     </div>
-                    <div className="job-detail">
-                      <strong>
-                        <i className="fas fa-map-marker-alt me-2"></i>Location:
-                      </strong>{" "}
-                      {job.location}
-                    </div>
-
                     {job.languages?.length > 0 && (
                       <div className="job-detail">
                         <strong>Languages:</strong>
@@ -1067,6 +1560,7 @@ const openApplicationModal = async (jobId) => {
                           <button
                             className="btn btn-outline-warning mt-2"
                             onClick={() => openQuizFormModal(job._id)}
+                            disabled={job.status === "CLOSED" || isEditingThisCard}
                           >
                             {jobQuizLengths[job._id] ? `Edit Quiz (${jobQuizLengths[job._id]} questions)` : "Add Quiz"}
                           </button>
@@ -1077,6 +1571,38 @@ const openApplicationModal = async (jobId) => {
                 </div>
               );})}
             </div>
+
+            {archivedJobs.length > 0 && (
+              <div className="mt-4">
+                <h5 className="mb-3">Archived Jobs</h5>
+                <div className="jobs-grid">
+                  {archivedJobs.map((job, index) => (
+                    <div key={`archived-${job._id}`} className="job-card" style={{ animationDelay: `${index * 0.05}s` }}>
+                      <div className="card-header d-flex justify-content-between align-items-start gap-3">
+                        <h5 className="card-title">
+                          <span className="card-title-text">{job.title}</span>
+                          <span className="job-status-badge is-archived">Archived</span>
+                        </h5>
+                        <button
+                          className="btn btn-sm btn-outline-success"
+                          onClick={() => handleUnarchiveJob(job._id)}
+                        >
+                          <FontAwesomeIcon icon={faRotateLeft} className="me-1" /> Unarchive
+                        </button>
+                      </div>
+                      <div className="card-body">
+                        <div className="job-detail">
+                          <strong><i className="fas fa-map-marker-alt me-2"></i>Location:</strong> {job.location || "Remote"}
+                        </div>
+                        <div className="job-detail">
+                          <strong>Salary:</strong> {job.salary ? `${job.salary} €` : "Salary N/A"}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1084,7 +1610,7 @@ const openApplicationModal = async (jobId) => {
   <div className="custom-modal-overlay">
     <div className="custom-modal">
       <div className="modal-header">
-        <h5>Qualified Candidates for this Job</h5>
+        <h5>Candidates Quiz Insights (All Applicants)</h5>
         <button className="close-button" onClick={() => setShowModal(false)}>
           ✖
         </button>
@@ -1092,7 +1618,7 @@ const openApplicationModal = async (jobId) => {
       <div className="modal-body">
         {selectedApplications.length > 0 ? (
           selectedApplications.map((app) => {
-            const quizPercent = app.quizLength ? Math.round((app.quizScore / app.quizLength) * 100) : 0;
+            const quizPercent = app.quizPercent || 0;
             const candidateName = app.candidateId?.name || "Candidate";
             const candidateInitial = candidateName.charAt(0).toUpperCase();
 
@@ -1109,6 +1635,9 @@ const openApplicationModal = async (jobId) => {
 
                   <div className="candidate-badges">
                     <span className="status-pill status-pill-quiz">Quiz {quizPercent}%</span>
+                    <span className={`status-pill ${app.isQualified ? "status-pill-recommended" : "status-pill-not-recommended"}`}>
+                      {app.isQualified ? "Qualified" : "Not Qualified"}
+                    </span>
                     {app.mlPrediction && (
                       <span className={`status-pill ${app.mlPrediction.hired ? "status-pill-recommended" : "status-pill-not-recommended"}`}>
                         {app.mlPrediction.hired ? "Recommended" : "Not Recommended"} ({app.mlPrediction.confidence}%)
@@ -1126,11 +1655,132 @@ const openApplicationModal = async (jobId) => {
                     <span className="detail-label">Quiz Score</span>
                     <span className="detail-value">{app.quizScore}/{app.quizLength} ({quizPercent}%)</span>
                   </div>
+                  <div className="detail-item">
+                    <span className="detail-label">Quiz Time</span>
+                    <span className="detail-value">{formatQuizDuration(app.quizTimeSpentSeconds)}</span>
+                  </div>
+                  <div className="detail-item">
+                    <span className="detail-label">RH Review</span>
+                    <span className="detail-value">{Number(app.quizReviewPendingCount || 0)} pending</span>
+                  </div>
                   <div className="detail-item detail-item-full">
                     <span className="detail-label">Qualification</span>
-                    <span className="qualified-text">✅ Qualified (Needed {app.passingScore} correct answers)</span>
+                    <span className="qualified-text">
+                      {app.isQualified ? "✅ Qualified" : "❌ Not Qualified"} (Needed {app.passingScore} correct answers)
+                    </span>
+                  </div>
+                  <div className="detail-item detail-item-full">
+                    <span className="detail-label">Why this quiz was generated</span>
+                    <span className="detail-value">{app.quizRationale || "Generated from candidate profile and job requirements."}</span>
                   </div>
                 </div>
+
+                {Array.isArray(app.quizSkillsUsed) && app.quizSkillsUsed.length > 0 && (
+                  <div className="match-details">
+                    <div className="match-item" style={{ width: "100%" }}>
+                      <span>Skills used by model</span>
+                      <strong>{app.quizSkillsUsed.join(", ")}</strong>
+                    </div>
+                  </div>
+                )}
+
+                {Array.isArray(app.quizAnswers) && app.quizAnswers.length > 0 && (
+                  <details className="mb-3">
+                    <summary className="fw-semibold">View submitted answers ({app.quizAnswers.length})</summary>
+                    <div className="mt-2">
+                      {app.quizAnswers.map((answer, index) => (
+                        <div key={`${app._id || app.candidateId?._id}-answer-${index}`} className="p-3 border rounded mb-3" style={{ backgroundColor: answer.isCorrect ? "#f0f8f7" : answer.needsHumanReview ? "#fffbf0" : "#fef5f5" }}>
+                          <div className="mb-2"><strong>Q{answer.questionIndex + 1}:</strong> {answer.question || "Question"}</div>
+                          
+                          {/* Answer Comparison Section */}
+                          <div className="row g-2 mb-3">
+                            {/* User's Answer */}
+                            <div className="col-md-6">
+                              <div className="p-2 border rounded" style={{ backgroundColor: "#f9f9f9" }}>
+                                <div><small className="text-muted">👤 User's Answer:</small></div>
+                                <div className="mt-1">{answer.selectedAnswerText || (answer.selectedAnswerIndex !== null && answer.selectedAnswerIndex !== undefined ? `Option ${Number(answer.selectedAnswerIndex) + 1}` : "No answer")}
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Expected Answer */}
+                            <div className="col-md-6">
+                              <div className="p-2 border rounded" style={{ backgroundColor: "#f0f9f7" }}>
+                                <div><small className="text-muted">✓ Correct Answer:</small></div>
+                                <div className="mt-1">{answer.expectedAnswer || "N/A"}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* AI Assessment Result */}
+                          <div className="d-flex align-items-center justify-content-between mb-2">
+                            <div>
+                              <strong>AI Assessment:</strong> {answer.isCorrect ? "✅ Correct" : "❌ Incorrect"}
+                              {answer.needsHumanReview && " • 🟡 Needs RH Review"}
+                              {answer.evaluationMode === "rh-manual" && " • 👤 RH Validated"}
+                            </div>
+                            {typeof answer.aiConfidence === "number" && (
+                              <span className="badge" style={{ backgroundColor: answer.aiConfidence > 70 ? "#198754" : answer.aiConfidence > 40 ? "#ffc107" : "#dc3545" }}>
+                                Confidence: {answer.aiConfidence}%
+                              </span>
+                            )}
+                          </div>
+
+                          {answer.needsHumanReview && (
+                            <div className="alert alert-warning py-2 mb-2 small">
+                              ⚠️ AI is uncertain about this answer. As RH, please review and confirm if user's answer is correct or incorrect.
+                            </div>
+                          )}
+                          {(answer.questionType === "réponse courte" || answer.questionType === "mini-exercice") && (
+                            <div className="d-flex gap-2 mt-2">
+                              <button
+                                className="btn btn-sm btn-outline-primary"
+                                type="button"
+                                onClick={() =>
+                                  handleAiGradeAnswer({
+                                    jobId: normalizeMongoId(app.jobId),
+                                    candidateId: normalizeMongoId(app.candidateId),
+                                    questionIndex: Number(answer.questionIndex),
+                                  })
+                                }
+                              >
+                                AI Check
+                              </button>
+                              <button
+                                className="btn btn-sm btn-outline-success"
+                                type="button"
+                                onClick={() =>
+                                  handleManualGradeAnswer({
+                                    jobId: normalizeMongoId(app.jobId),
+                                    candidateId: normalizeMongoId(app.candidateId),
+                                    questionIndex: Number(answer.questionIndex),
+                                    isCorrect: true,
+                                  })
+                                }
+                              >
+                                Mark Correct
+                              </button>
+                              <button
+                                className="btn btn-sm btn-outline-danger"
+                                type="button"
+                                onClick={() =>
+                                  handleManualGradeAnswer({
+                                    jobId: normalizeMongoId(app.jobId),
+                                    candidateId: normalizeMongoId(app.candidateId),
+                                    questionIndex: Number(answer.questionIndex),
+                                    isCorrect: false,
+                                  })
+                                }
+                              >
+                                Mark Incorrect
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
 
                 {app.mlPrediction && (
                   <div className="match-details">
@@ -1187,7 +1837,7 @@ const openApplicationModal = async (jobId) => {
           })
         ) : (
           <div className="alert alert-info">
-            No qualified candidates found for this job. Candidates need to complete and pass the quiz to be eligible.
+            No generated quizzes found for this job yet.
           </div>
         )}
       </div>
@@ -1367,10 +2017,73 @@ const openApplicationModal = async (jobId) => {
 
         {showQuizFormModal && (
           <div className="quiz-modal">
-            <h4>Add/Edit Quiz for this Job</h4>
+            <h4>Add/Edit Quiz for this Job (Per Candidate)</h4>
             <p className="text-muted mb-3">
               The quiz will have {quizQuestions.length} questions. Candidates need to answer at least {Math.ceil(quizQuestions.length / 2)} correctly to qualify.
             </p>
+            <div className="mb-3">
+              <label className="form-label mb-1">Candidate</label>
+              <select
+                className="form-select"
+                value={selectedQuizCandidateId}
+                onChange={(e) => handleSelectQuizCandidate(e.target.value)}
+              >
+                {jobCandidatesForQuiz.length === 0 ? (
+                  <option value="">No candidate applied to this job yet</option>
+                ) : (
+                  jobCandidatesForQuiz.map((candidate) => (
+                    <option key={candidate.candidateId} value={candidate.candidateId}>
+                      {candidate.name} ({candidate.email}) {candidate.hasQuiz ? `- Quiz: ${candidate.quizQuestionCount} Q` : "- No quiz yet"}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            <div className="d-flex flex-wrap gap-2 align-items-end mb-3">
+              <div>
+                <label className="form-label mb-1">Number of questions</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  className="form-control"
+                  value={quizBlueprint.totalQuestions}
+                  onChange={(e) =>
+                    setQuizBlueprint((prev) => ({
+                      ...prev,
+                      totalQuestions: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <button
+                className="btn btn-outline-primary"
+                type="button"
+                onClick={generateQuizFromBlueprint}
+                disabled={isGeneratingQuiz || !selectedQuizCandidateId}
+              >
+                {isGeneratingQuiz ? "⏳ Generating with Mistral..." : "⚡ Generate Quiz (Mistral)"}
+              </button>
+            </div>
+            {generationInfo && (
+              <div className="quiz-generation-summary mb-2">
+                <div className="small text-success mb-1">
+                  Source: {generationInfo.source} • Model: {generationInfo.model || "n/a"} • Questions: {generationInfo.count}
+                </div>
+                <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
+                  <span className={`quiz-quality-badge ${generationInfo?.quality?.className || "quiz-quality-good"}`}>
+                    Qualité: {generationInfo?.quality?.label || "n/a"} ({generationInfo?.quality?.score ?? "-"}/100)
+                  </span>
+                </div>
+                <div className="quiz-generation-metrics small text-muted">
+                  <span>Duplicates removed: {generationInfo?.postValidation?.semanticDuplicatesRemoved ?? 0}</span>
+                  <span>Difficulty fixes: {generationInfo?.postValidation?.difficultyFixCount ?? 0}</span>
+                  <span>
+                    Time budget: {generationInfo?.postValidation?.timeBudget?.actualAfter ?? "-"}s / {generationInfo?.postValidation?.timeBudget?.target ?? "-"}s
+                  </span>
+                </div>
+              </div>
+            )}
             
             {quizQuestions.map((q, idx) => (
               <div key={idx} className="mb-3 p-3 border rounded">
@@ -1391,14 +2104,18 @@ const openApplicationModal = async (jobId) => {
                   type="text"
                   className="form-control mb-2"
                   placeholder="Enter question"
-                  value={q.question}
+                  value={q.title || q.question}
                   onChange={(e) => {
                     const updated = [...quizQuestions];
+                    updated[idx].title = e.target.value;
                     updated[idx].question = e.target.value;
                     setQuizQuestions(updated);
                   }}
                   required
                 />
+                <div className="small text-muted mb-2">
+                  Type: {q.type || "QCM"} • Domain: {q.domain || "general"} • Difficulty: {q.difficulty || "moyen"} • Score: {q.score || 1} • Time: {q.timeLimit || 60}s
+                </div>
                 
                 <div className="options-container">
                   {q.options.map((opt, i) => (
@@ -1452,16 +2169,21 @@ const openApplicationModal = async (jobId) => {
               <div>
                 <button
                   className="btn btn-danger me-2"
-                  onClick={() => setShowQuizFormModal(false)}
+                  onClick={() => {
+                    setShowQuizFormModal(false);
+                    setSelectedQuizCandidateId("");
+                    setJobCandidatesForQuiz([]);
+                    setGenerationInfo(null);
+                  }}
                 >
                   Cancel
                 </button>
                 <button 
                   className="btn btn-success" 
                   onClick={handleSubmitQuiz}
-                  disabled={quizQuestions.some(q => !q.question || q.options.some(opt => !opt))}
+                  disabled={!selectedQuizCandidateId || quizQuestions.some(q => !q.question || (q.type === "QCM" && q.options.some(opt => !opt)))}
                 >
-                  Save Quiz ({quizQuestions.length} questions)
+                  Save Candidate Quiz ({quizQuestions.length} questions)
                 </button>
               </div>
             </div>
