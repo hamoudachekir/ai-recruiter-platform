@@ -2,14 +2,16 @@ import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader } from "./card";
 import { Avatar } from "./avatar";
 import { Skeleton } from "./skeleton";
-import { FaCamera, FaCheckCircle, FaTimesCircle, FaUpload, FaFilePdf, FaCog, FaUser, FaEnvelope, FaPhone, FaGlobe, FaBriefcase } from "react-icons/fa";
-import { useNavigate } from "react-router-dom";
+import { FaCamera, FaCheckCircle, FaTimesCircle, FaUpload, FaFilePdf, FaCog, FaUser, FaEnvelope, FaPhone, FaGlobe, FaBriefcase, FaLinkedinIn } from "react-icons/fa";
+import { useNavigate, useParams } from "react-router-dom";
 import Navbar from "../components/Navbar/Navbar";
 import Footer from "../components/Footer/Footer";
+import LinkedInSection from "../components/LinkedInSection";
 import "./Profile.css";
 
 const Profile = () => {
-  const id = localStorage.getItem("userId");
+  const { id: routeId } = useParams();
+  const id = routeId || localStorage.getItem("userId");
   const role = localStorage.getItem("role");
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -25,6 +27,7 @@ const Profile = () => {
   const [pictureStatus, setPictureStatus] = useState("");
   const [applications, setApplications] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
+  const [linkedinData, setLinkedinData] = useState(null);
   
   useEffect(() => {
     const fetchUser = async () => {
@@ -32,6 +35,7 @@ const Profile = () => {
         const res = await fetch(`http://localhost:3001/Frontend/getUser/${id}`);
         const data = await res.json();
         setUser(data);
+        setLinkedinData(data.linkedin || null);
         setResumeUrl(data.profile?.resume || "");
         setPicture(data.picture || "/images/team-1.jpg");
         setLoading(false);
@@ -240,6 +244,15 @@ const Profile = () => {
 
               {user.role === "CANDIDATE" && (
                 <button
+                  className={activeTab === "linkedin" ? "tab active" : "tab"}
+                  onClick={() => setActiveTab("linkedin")}
+                >
+                  <FaLinkedinIn /> LinkedIn
+                </button>
+              )}
+
+              {user.role === "CANDIDATE" && (
+                <button
                   className={activeTab === "candidatures" ? "tab active" : "tab"}
                   onClick={() => setActiveTab("candidatures")}
                 >
@@ -407,6 +420,19 @@ const Profile = () => {
                       </>
                     )}
                     {uploadStatus && <p className={uploadStatus.includes("success") ? "text-success" : "text-danger"}>{uploadStatus}</p>}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "linkedin" && user.role === "CANDIDATE" && (
+                <div className="profile-detail" style={{ display: "block" }}>
+                  <div className="detail-content" style={{ width: "100%" }}>
+                    <LinkedInSection
+                      candidateId={id}
+                      linkedinData={linkedinData}
+                      onUpdate={setLinkedinData}
+                      onError={(error) => console.error("LinkedIn error:", error)}
+                    />
                   </div>
                 </div>
               )}

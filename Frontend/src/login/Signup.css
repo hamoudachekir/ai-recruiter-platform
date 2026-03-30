@@ -611,6 +611,8 @@
 /* Enhanced 3D Submit Button */
 .futuristic-signup-button {
   width: 100%;
+  min-height: 52px;
+  max-height: 56px;
   padding: 16px;
   border: none;
   border-radius: 12px;
@@ -628,11 +630,16 @@
     0 4px 8px rgba(0, 0, 0, 0.1);
   letter-spacing: 1px;
   transform-style: preserve-3d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .button-text {
   position: relative;
   z-index: 2;
+  white-space: nowrap;
+  line-height: 1.2;
 }
 
 .button-3d-effect {

@@ -1,12 +1,11 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader } from "./card";
-import { FaCamera, FaSave, FaCog } from "react-icons/fa";
-import Select from "react-select";
+import { FaCamera, FaSave } from "react-icons/fa";
+import CreatableSelect from "react-select/creatable";
 import "./EditProfile.css";
 import Navbar from "../components/Navbar/Navbar";
 import Footer from "../components/Footer/Footer";
-import VoiceInputAI from "../components/VoiceInputAI";
 
 const skillsList = [
   { value: "JavaScript", label: "JavaScript" }, { value: "Python", label: "Python" },
@@ -21,6 +20,52 @@ const skillsList = [
   { value: "Rust", label: "Rust" }, { value: "Shell Scripting", label: "Shell Scripting" }
 ];
 
+const formatExperienceForTextarea = (rawExperience) => {
+  if (typeof rawExperience === "string") {
+    return rawExperience;
+  }
+
+  if (Array.isArray(rawExperience)) {
+    const lines = rawExperience
+      .map((item) => {
+        if (typeof item === "string") {
+          return item.trim();
+        }
+
+        if (item && typeof item === "object") {
+          const title = String(item.title || "").trim();
+          const company = String(item.company || "").trim();
+          const duration = String(item.duration || "").trim();
+          const description = String(item.description || "").trim();
+
+          const head = [title, company ? `at ${company}` : "", duration ? `(${duration})` : ""]
+            .filter(Boolean)
+            .join(" ")
+            .trim();
+
+          return [head, description]
+            .filter(Boolean)
+            .join(" - ")
+            .trim();
+        }
+
+        return "";
+      })
+      .filter(Boolean);
+
+    return lines.join("\n");
+  }
+
+  if (rawExperience && typeof rawExperience === "object") {
+    return Object.values(rawExperience)
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return "";
+};
+
 const EditProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -32,9 +77,28 @@ const EditProfile = () => {
   const [oldPassword, setOldPassword] = useState("");
   const [newPicture, setNewPicture] = useState(null);
 
+  const skillOptions = useMemo(() => {
+    const fromProfile = Array.isArray(formData.profile?.skills)
+      ? formData.profile.skills.map((skill) => ({ value: skill, label: skill }))
+      : [];
+
+    return [...skillsList, ...fromProfile].reduce((acc, option) => {
+      if (!option?.value) return acc;
+      if (!acc.some((item) => item.value.toLowerCase() === String(option.value).toLowerCase())) {
+        acc.push({ value: String(option.value), label: String(option.label || option.value) });
+      }
+      return acc;
+    }, []);
+  }, [formData.profile?.skills]);
+
+  const selectedSkillOptions = useMemo(() => {
+    const selectedSkills = Array.isArray(formData.profile?.skills) ? formData.profile.skills : [];
+    return selectedSkills.map((skill) => ({ value: skill, label: skill }));
+  }, [formData.profile?.skills]);
+
   useEffect(() => {
     fetch(`http://localhost:3001/Frontend/getUser/${id}`)
-      .then((res) => res.ok ? res.json() : Promise.reject(res.status))
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`Failed to load user: ${res.status}`))))
       .then((data) => {
         setUser(data);
         setFormData({
@@ -45,7 +109,7 @@ const EditProfile = () => {
             availability: data.profile?.availability ?? "Full-time",
             skills: data.profile?.skills ?? [],
             languages: data.profile?.languages ?? [],
-            experience: data.profile?.experience ?? "",
+            experience: formatExperienceForTextarea(data.profile?.experience),
             resume: data.profile?.resume ?? "",
             phone: data.profile?.phone ?? "",
           },
@@ -60,10 +124,18 @@ const EditProfile = () => {
 
   const handleSave = async () => {
     try {
+      const payload = {
+        ...formData,
+        profile: {
+          ...formData.profile,
+          skills: Array.isArray(formData.profile?.skills) ? formData.profile.skills : [],
+        },
+      };
+
       const response = await fetch(`http://localhost:3001/Frontend/updateUser/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
@@ -96,49 +168,31 @@ const EditProfile = () => {
       ...prev,
       profile: {
         ...prev.profile,
-        skills: selectedOptions.map(option => option.value),
+        skills: (selectedOptions || []).map((option) => option.value),
       },
     }));
   };
 
-  const handleExperienceChange = async (text) => {
-    setFormData((prev) => ({
-      ...prev,
-      profile: { ...prev.profile, experience: text },
-    }));
+  const handleCreateSkill = (inputValue) => {
+    const newSkill = String(inputValue || "").trim();
+    if (!newSkill) return;
 
-    if (!text.trim()) return;
+    setFormData((prev) => {
+      const currentSkills = Array.isArray(prev.profile?.skills) ? prev.profile.skills : [];
+      const alreadyExists = currentSkills.some(
+        (skill) => String(skill).toLowerCase() === newSkill.toLowerCase()
+      );
 
-    clearTimeout(window.correctionTimeout);
-    window.correctionTimeout = setTimeout(async () => {
-      try {
-        const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-        if (!apiKey) return;
+      if (alreadyExists) return prev;
 
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "gpt-4",
-            messages: [{ role: "user", content: `Improve this experience description:\n\n${text}` }],
-            temperature: 0.7,
-          }),
-        });
-
-        const data = await response.json();
-        if (data.choices?.[0]?.message?.content) {
-          setFormData((prev) => ({
-            ...prev,
-            profile: { ...prev.profile, experience: data.choices[0].message.content },
-          }));
-        }
-      } catch (error) {
-        console.error("❌ Error calling OpenAI API:", error);
-      }
-    }, 1000);
+      return {
+        ...prev,
+        profile: {
+          ...prev.profile,
+          skills: [...currentSkills, newSkill],
+        },
+      };
+    });
   };
 
   const handleCameraClick = () => {
@@ -156,8 +210,8 @@ const EditProfile = () => {
     reader.readAsDataURL(selectedFile);
   };
 
-  if (loading) return <p>Loading...</p>;
-  if (!user) return <p>User not found.</p>;
+  if (loading) return <p className="edit-profile-feedback">Loading profile...</p>;
+  if (!user) return <p className="edit-profile-feedback">User not found.</p>;
 
 
   return (
@@ -165,7 +219,7 @@ const EditProfile = () => {
       <Navbar />
   
       <div className="profile-container">
-        <Card className="card">
+        <Card className="card edit-profile-card">
   
           {/* Header avec Avatar et Email */}
           <CardHeader className="card-header">
@@ -173,11 +227,11 @@ const EditProfile = () => {
               <img
                 src={newPicture || `http://localhost:3001${user.picture}`}
                 className="avatar"
-                alt="Profile Picture"
+                alt="Profile"
               />
-              <label className="camera-icon" onClick={handleCameraClick}>
+              <button type="button" className="camera-icon" onClick={handleCameraClick}>
                 <FaCamera />
-              </label>
+              </button>
               <input
                 type="file"
                 ref={fileInputRef}
@@ -189,90 +243,105 @@ const EditProfile = () => {
   
             <h2 className="name">{user.name.toUpperCase()}</h2>
             <p className="email">{user.email}</p>
-  
-            <div style={{ marginTop: "10px", display: "flex", justifyContent: "center" }}>
-           
-            </div>
+            <p className="profile-subtitle">Keep your profile current to improve matching accuracy.</p>
           </CardHeader>
   
           {/* Contenu du formulaire */}
           <CardContent className="card-body">
-            <h2>🧾 Informations personnelles</h2>
-  
-            <div className="form-group">
-              <label>Nom:</label>
-              <input type="text" name="name" value={formData.name} onChange={handleInputChange} />
-            </div>
-  
-            <div className="form-group">
-              <label>Email:</label>
-              <input type="email" name="email" value={formData.email} onChange={handleInputChange} />
-            </div>
-  
-            <div className="form-group">
-              <label>Téléphone:</label>
-              <input
-                type="text"
-                name="phone"
-                value={formData.profile.phone}
-                onChange={handleInputChange}
-              />
-            </div>
-  
-            <h2>🛠️ Compétences</h2>
-            <div className="form-group">
-              <Select
-                isMulti
-                options={skillsList}
-                value={skillsList.filter(skill => formData.profile.skills.includes(skill.value))}
-                onChange={handleSkillSelection}
-              />
-            </div>
-  
-            <h2>💼 Expérience</h2>
-            <div className="form-group">
-              <textarea
-                name="experience"
-                value={formData.profile.experience}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    profile: { ...formData.profile, experience: e.target.value },
-                  })
-                }
-              />
-              <VoiceInputAI onTextChange={handleExperienceChange} />
-            </div>
-  
-            <h2>🔒 Sécurité</h2>
-            <div className="form-group">
-              <label>Ancien mot de passe:</label>
-              <input
-                type="password"
-                name="oldPassword"
-                value={oldPassword}
-                onChange={(e) => setOldPassword(e.target.value)}
-              />
-            </div>
-  
-            <div className="form-group">
-              <label>Nouveau mot de passe:</label>
-              <input
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    password: e.target.value,
-                  }))
-                }
-              />
-            </div>
-  
-            <div style={{ marginTop: "20px", textAlign: "center" }}>
+            <section className="profile-section">
+              <h2>Informations personnelles</h2>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label htmlFor="edit-name">Nom</label>
+                  <input id="edit-name" type="text" name="name" value={formData.name} onChange={handleInputChange} />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="edit-email">Email</label>
+                  <input id="edit-email" type="email" name="email" value={formData.email} onChange={handleInputChange} />
+                </div>
+
+                <div className="form-group form-group-full">
+                  <label htmlFor="edit-phone">Téléphone</label>
+                  <input
+                    id="edit-phone"
+                    type="text"
+                    name="phone"
+                    value={formData.profile.phone}
+                    onChange={handleInputChange}
+                  />
+                </div>
+              </div>
+            </section>
+
+            <section className="profile-section">
+              <h2>Skills</h2>
+              <div className="form-group">
+                <CreatableSelect
+                  isMulti
+                  options={skillOptions}
+                  value={selectedSkillOptions}
+                  onChange={handleSkillSelection}
+                  onCreateOption={handleCreateSkill}
+                  placeholder="Select or type to add skills"
+                  classNamePrefix="skills-select"
+                />
+              </div>
+            </section>
+
+            <section className="profile-section">
+              <h2>Experience</h2>
+              <div className="form-group">
+                <textarea
+                  name="experience"
+                  value={formData.profile.experience}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      profile: { ...prev.profile, experience: e.target.value },
+                    }))
+                  }
+                  rows={7}
+                  placeholder="Describe your experience, roles, and impact..."
+                />
+              </div>
+            </section>
+
+            <section className="profile-section">
+              <h2>Sécurité</h2>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label htmlFor="edit-old-password">Ancien mot de passe</label>
+                  <input
+                    id="edit-old-password"
+                    type="password"
+                    name="oldPassword"
+                    value={oldPassword}
+                    onChange={(e) => setOldPassword(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="edit-new-password">Nouveau mot de passe</label>
+                  <input
+                    id="edit-new-password"
+                    type="password"
+                    name="password"
+                    value={formData.password}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        password: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            </section>
+
+            <div className="save-row">
               <button className="save-button" onClick={handleSave}>
-                <FaSave /> Sauvegarder
+                <FaSave /> Sauvegarder les modifications
               </button>
             </div>
           </CardContent>

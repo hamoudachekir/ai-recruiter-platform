@@ -169,6 +169,10 @@ const UserSchema = new Schema({
         date: { type: Date, default: Date.now }
     }]
 });
+
+// Add LinkedIn profile support (Phase 1-3)
+const linkedinSchema = require('./linkedinSchema');
+UserSchema.add(linkedinSchema);
 const UserModel = mongoose.models.User || mongoose.model('User', UserSchema);
 
 // ✅ Nouveau modèle Interview principal
