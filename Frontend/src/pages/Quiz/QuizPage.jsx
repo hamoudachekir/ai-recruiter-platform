@@ -1,11 +1,27 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import "./QuizPage.css";
+import { useQuizFocusTracking } from "../../hooks/useQuizFocusTracking";
+import { useQuizSecurityLocks } from "../../hooks/useQuizSecurityLocks";
 
 const TARGET_QUIZ_QUESTION_COUNT = 20;
 const QUIZ_DURATION_SECONDS = 5 * 60;
 const QUESTIONS_PER_PAGE = 5;
+const QUIZ_LOCKED_MESSAGE = "Vous avez deja complete ce quiz. L'acces a cette evaluation est desormais ferme.";
+const QUIZ_SESSION_STORAGE_PREFIX = "quiz-session-v1";
+
+const getQuizSessionStorageKey = (jobId, candidateId) =>
+  `${QUIZ_SESSION_STORAGE_PREFIX}:${String(jobId || "unknown-job")}:${String(candidateId || "unknown-user")}`;
+
+const safeParseSession = (rawValue) => {
+  if (!rawValue || typeof rawValue !== "string") return null;
+  try {
+    return JSON.parse(rawValue);
+  } catch {
+    return null;
+  }
+};
 
 const cleanQuestionPrefix = (value) =>
   String(value || "")
@@ -26,6 +42,7 @@ const QuizPage = () => {
   const [responseHistory, setResponseHistory] = useState([]);
   const [submitted, setSubmitted] = useState(false);
   const [score, setScore] = useState(0);
+  const [passingScore, setPassingScore] = useState(0);
   const [quizStartTime, setQuizStartTime] = useState(null);
   const [currentPageStartedAt, setCurrentPageStartedAt] = useState(null);
   const [totalQuizTimeSeconds, setTotalQuizTimeSeconds] = useState(0);
@@ -41,18 +58,52 @@ const QuizPage = () => {
   const [hasMoreAdaptivePages, setHasMoreAdaptivePages] = useState(true);
   const [aiCoach, setAiCoach] = useState(null);
   const [showUnansweredHints, setShowUnansweredHints] = useState(false);
+  const [capturedSecurityEvents, setCapturedSecurityEvents] = useState([]);
+  const [sessionStorageKey, setSessionStorageKey] = useState("");
   const navigate = useNavigate();
+
+  const isSecurityTrackingEnabled = quizStarted && !submitted;
+
+  const onSecurityEvent = useCallback((event) => {
+    if (!event) return;
+    setCapturedSecurityEvents((previous) => ([
+      ...previous,
+      {
+        ...event,
+        timestamp: event?.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString(),
+      },
+    ].slice(-150)));
+  }, []);
+
+  const {
+    focusLossCount,
+    focusLossEvents,
+    securityEvents: focusTrackingSecurityEvents,
+    devToolsAccessDetected,
+  } = useQuizFocusTracking(onSecurityEvent, isSecurityTrackingEnabled);
+
+  const { copyPasteAttempts } = useQuizSecurityLocks(
+    "quiz-container-secure",
+    onSecurityEvent,
+    isSecurityTrackingEnabled
+  );
 
   useEffect(() => {
     const fetchQuiz = async () => {
       setIsLoadingQuiz(true);
       setQuizLoadError("");
 
+      let savedSession = null;
+
       try {
         const userId = localStorage.getItem("userId");
         if (!userId) {
           throw new Error("Utilisateur non connecté");
         }
+
+        const storageKey = getQuizSessionStorageKey(jobId, userId);
+        setSessionStorageKey(storageKey);
+        savedSession = safeParseSession(localStorage.getItem(storageKey));
 
         const adaptiveRes = await axios.post("http://localhost:3001/Frontend/adaptive-quiz-page", {
           jobId,
@@ -65,26 +116,48 @@ const QuizPage = () => {
         });
 
         const loadedQuestions = Array.isArray(adaptiveRes?.data?.questions) ? adaptiveRes.data.questions : [];
-        setQuestions(loadedQuestions);
-        setQuestionOrder(loadedQuestions.map((question) => question?.questionKey));
-        setResponseHistory([]);
+        const fallbackQuestions = Array.isArray(savedSession?.questions) ? savedSession.questions : [];
+        const effectiveQuestions = loadedQuestions.length > 0 ? loadedQuestions : fallbackQuestions;
+        const restoredQuestionOrder = Array.isArray(savedSession?.questionOrder) ? savedSession.questionOrder : [];
+
+        setQuestions(effectiveQuestions);
+        setQuestionOrder(
+          loadedQuestions.length > 0
+            ? loadedQuestions.map((question) => question?.questionKey)
+            : restoredQuestionOrder
+        );
+        setResponseHistory(Array.isArray(savedSession?.responseHistory) ? savedSession.responseHistory : []);
         setHasMoreAdaptivePages(!adaptiveRes?.data?.completed);
         const backendTarget = Math.max(
           TARGET_QUIZ_QUESTION_COUNT,
           Number(adaptiveRes?.data?.totalQuestions) || TARGET_QUIZ_QUESTION_COUNT
         );
-        setTotalQuestionTarget(backendTarget);
+        setTotalQuestionTarget(Math.max(backendTarget, Number(savedSession?.totalQuestionTarget) || 0));
 
-        const normalizedQuizTime = loadedQuestions.length > 0 ? QUIZ_DURATION_SECONDS : 0;
+        const normalizedQuizTime = effectiveQuestions.length > 0 ? QUIZ_DURATION_SECONDS : 0;
         setTotalQuizTimeSeconds(normalizedQuizTime);
-        setTimeLeftSeconds(normalizedQuizTime);
-        setQuizStartTime(null);
-        setCurrentPageStartedAt(null);
-        setQuizStarted(false);
-        setCurrentPage(1);
-        setAnswers({});
+        const restoredQuizStarted = Boolean(savedSession?.quizStarted) && !savedSession?.submitted;
+        const restoredStartTime = Number(savedSession?.quizStartTime) || null;
+        const restoredAnswers = savedSession?.answers && typeof savedSession.answers === "object"
+          ? savedSession.answers
+          : {};
 
-        if (!loadedQuestions.length) {
+        setQuizStarted(restoredQuizStarted);
+        setQuizStartTime(restoredQuizStarted ? restoredStartTime : null);
+        setCurrentPageStartedAt(Number(savedSession?.currentPageStartedAt) || null);
+        setCurrentPage(Math.max(1, Number(savedSession?.currentPage) || 1));
+        setAnswers(restoredAnswers);
+        setSubmitted(false);
+
+        if (restoredQuizStarted && restoredStartTime) {
+          const elapsedSeconds = Math.max(0, Math.floor((Date.now() - restoredStartTime) / 1000));
+          const recoveredRemaining = Math.max(0, normalizedQuizTime - elapsedSeconds);
+          setTimeLeftSeconds(recoveredRemaining);
+        } else {
+          setTimeLeftSeconds(normalizedQuizTime);
+        }
+
+        if (!effectiveQuestions.length) {
           setQuizLoadError("Aucun quiz disponible pour cette candidature. Réessayez dans quelques secondes.");
         } else {
           setQuizLoadError("");
@@ -97,10 +170,41 @@ const QuizPage = () => {
         setHasMoreAdaptivePages(true);
         setTotalQuestionTarget(TARGET_QUIZ_QUESTION_COUNT);
         setTotalQuizTimeSeconds(0);
-        setTimeLeftSeconds(0);
-        setQuizStartTime(null);
-        setCurrentPageStartedAt(null);
-        setQuizLoadError("Impossible de charger votre quiz pour le moment.");
+        const hasSavedQuestions = Array.isArray(savedSession?.questions) && savedSession.questions.length > 0;
+        if (hasSavedQuestions) {
+          const restoredStartTime = Number(savedSession?.quizStartTime) || null;
+          const recoveredTotalQuizTime = Number(savedSession?.totalQuizTimeSeconds) || QUIZ_DURATION_SECONDS;
+          const elapsedSeconds = restoredStartTime ? Math.max(0, Math.floor((Date.now() - restoredStartTime) / 1000)) : 0;
+          const recoveredRemaining = Math.max(0, recoveredTotalQuizTime - elapsedSeconds);
+
+          setQuestions(savedSession.questions);
+          setQuestionOrder(Array.isArray(savedSession?.questionOrder) ? savedSession.questionOrder : []);
+          setAnswers(savedSession?.answers && typeof savedSession.answers === "object" ? savedSession.answers : {});
+          setResponseHistory(Array.isArray(savedSession?.responseHistory) ? savedSession.responseHistory : []);
+          setQuizStarted(Boolean(savedSession?.quizStarted));
+          setQuizStartTime(restoredStartTime);
+          setCurrentPageStartedAt(Number(savedSession?.currentPageStartedAt) || Date.now());
+          setCurrentPage(Math.max(1, Number(savedSession?.currentPage) || 1));
+          setTotalQuizTimeSeconds(recoveredTotalQuizTime);
+          setTimeLeftSeconds(recoveredRemaining);
+          setTotalQuestionTarget(Number(savedSession?.totalQuestionTarget) || TARGET_QUIZ_QUESTION_COUNT);
+          setHasMoreAdaptivePages(Boolean(savedSession?.hasMoreAdaptivePages));
+          setQuizLoadError("Connexion indisponible. Session quiz restauree localement.");
+        } else {
+          setTimeLeftSeconds(0);
+          setQuizStartTime(null);
+          setCurrentPageStartedAt(null);
+        }
+
+        const reason = err?.response?.data?.reason;
+        const status = err?.response?.status;
+        if (reason === "quiz-already-completed" || status === 403) {
+          setQuizLoadError(QUIZ_LOCKED_MESSAGE);
+        } else if (!hasSavedQuestions) {
+          setQuizLoadError("Impossible de charger votre quiz pour le moment.");
+        } else {
+          setSubmitError("Mode hors ligne active: vos reponses restent sauvegardees.");
+        }
       } finally {
         setIsLoadingQuiz(false);
       }
@@ -115,10 +219,13 @@ const QuizPage = () => {
     }
 
     setQuizStarted(true);
-    setQuizStartTime(Date.now());
-    setCurrentPageStartedAt(Date.now());
+    const now = Date.now();
+    setQuizStartTime(now);
+    setCurrentPageStartedAt(now);
+    setTimeLeftSeconds(totalQuizTimeSeconds || QUIZ_DURATION_SECONDS);
     setSubmitError("");
     setCurrentPage(1);
+    setCapturedSecurityEvents([]);
   };
 
   const handleAnswer = (qIndex, answerIndex) => {
@@ -190,47 +297,105 @@ const QuizPage = () => {
         answersByQuestionKey,
         timeSpentSeconds,
         requireComplete: !triggeredByTimer,
+        completionType: triggeredByTimer ? "timeout" : "normal",
+        totalQuestions: Math.max(totalQuestionTarget, questionOrder.length, questions.length),
+        focusLossCount,
+        focusLossEvents,
+        copyPasteAttempts,
+        devToolsAccess: devToolsAccessDetected,
+        securityEvents: [
+          ...(Array.isArray(focusTrackingSecurityEvents) ? focusTrackingSecurityEvents : []),
+          ...(Array.isArray(capturedSecurityEvents) ? capturedSecurityEvents : []),
+        ],
       });
 
       const computedScore = submitRes?.data?.score ?? 0;
+      const computedPassingScore = submitRes?.data?.passingScore ?? Math.ceil((questions?.length || 0) / 2);
       setScore(computedScore);
+      setPassingScore(computedPassingScore);
       setAiCoach(submitRes?.data?.aiCoach || null);
       setSubmitted(true);
       setShowUnansweredHints(false);
 
+      if (sessionStorageKey) {
+        localStorage.removeItem(sessionStorageKey);
+      }
+
       if (triggeredByTimer) {
         console.log("⏱️ Quiz auto-submitted because timer reached zero.");
       }
-
-      setTimeout(() => {
-        navigate("/");
-      }, 12000);
     } catch (err) {
       console.error("Erreur lors de l'envoi du score :", err);
-      setSubmitError("Impossible de soumettre le quiz. Veuillez réessayer.");
+      const backendMessage = err?.response?.data?.message;
+      setSubmitError(backendMessage || "Impossible de soumettre le quiz. Veuillez réessayer.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
   useEffect(() => {
-    if (submitted || isSubmitting || !quizStarted || timeLeftSeconds <= 0 || questions.length === 0) {
+    if (submitted || isSubmitting || !quizStarted || !quizStartTime || questions.length === 0) {
       return;
     }
 
     const interval = setInterval(() => {
-      setTimeLeftSeconds((previousValue) => {
-        if (previousValue <= 1) {
-          clearInterval(interval);
-          handleSubmit(true);
-          return 0;
-        }
-        return previousValue - 1;
-      });
+      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - quizStartTime) / 1000));
+      const remaining = Math.max(0, (totalQuizTimeSeconds || QUIZ_DURATION_SECONDS) - elapsedSeconds);
+
+      setTimeLeftSeconds(remaining);
+
+      if (remaining <= 0) {
+        clearInterval(interval);
+        handleSubmit(true);
+      }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [submitted, isSubmitting, quizStarted, questions.length, timeLeftSeconds]);
+  }, [submitted, isSubmitting, quizStarted, quizStartTime, totalQuizTimeSeconds, questions.length]);
+
+  useEffect(() => {
+    if (!sessionStorageKey) return;
+    if (submitted) {
+      localStorage.removeItem(sessionStorageKey);
+      return;
+    }
+
+    const sessionSnapshot = {
+      jobId,
+      questions,
+      questionOrder,
+      answers,
+      responseHistory,
+      quizStarted,
+      quizStartTime,
+      currentPageStartedAt,
+      totalQuizTimeSeconds,
+      timeLeftSeconds,
+      currentPage,
+      hasMoreAdaptivePages,
+      totalQuestionTarget,
+      submitted,
+      savedAt: Date.now(),
+    };
+
+    localStorage.setItem(sessionStorageKey, JSON.stringify(sessionSnapshot));
+  }, [
+    sessionStorageKey,
+    submitted,
+    jobId,
+    questions,
+    questionOrder,
+    answers,
+    responseHistory,
+    quizStarted,
+    quizStartTime,
+    currentPageStartedAt,
+    totalQuizTimeSeconds,
+    timeLeftSeconds,
+    currentPage,
+    hasMoreAdaptivePages,
+    totalQuestionTarget,
+  ]);
 
   const answeredCount = questions.reduce(
     (count, question, idx) => (isQuestionAnswered(question, answers[idx]) ? count + 1 : count),
@@ -241,7 +406,14 @@ const QuizPage = () => {
   const minutes = Math.floor(timeLeftSeconds / 60);
   const seconds = timeLeftSeconds % 60;
   const formattedTime = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  const isTimeWarning = timeLeftSeconds <= 300;
+  const isTimeWarning = timeLeftSeconds <= 180;
+  const isTimeCritical = timeLeftSeconds <= 60;
+  let timerUrgencyClass = "";
+  if (isTimeCritical) {
+    timerUrgencyClass = "critical";
+  } else if (isTimeWarning) {
+    timerUrgencyClass = "warning";
+  }
   const totalMinutes = Math.floor(totalQuizTimeSeconds / 60);
   const totalSeconds = totalQuizTimeSeconds % 60;
   const formattedTotalTime = `${String(totalMinutes).padStart(2, "0")}:${String(totalSeconds).padStart(2, "0")}`;
@@ -251,6 +423,8 @@ const QuizPage = () => {
   const pageEndIndex = pageStartIndex + QUESTIONS_PER_PAGE;
   const visibleQuestions = questions.slice(pageStartIndex, pageEndIndex);
   const isLastPage = currentPageSafe === totalPages && !hasMoreAdaptivePages;
+  const isMistralCoach = aiCoach?.summary?.coachEngine === "mistral-llm";
+  const hasGoodScore = submitted && score >= Math.max(1, passingScore || Math.ceil((questions?.length || 0) / 2));
   const currentPageAnsweredCount = visibleQuestions.reduce((count, question, idx) => {
     const localIndex = pageStartIndex + idx;
     return isQuestionAnswered(question, answers?.[localIndex]) ? count + 1 : count;
@@ -356,7 +530,12 @@ const QuizPage = () => {
       }
     } catch (error) {
       console.error("Erreur chargement page adaptative:", error);
-      setSubmitError("Impossible de charger la page suivante du quiz.");
+      const reason = error?.response?.data?.reason;
+      if (reason === "quiz-already-completed") {
+        setSubmitError(QUIZ_LOCKED_MESSAGE);
+      } else {
+        setSubmitError("Impossible de charger la page suivante du quiz.");
+      }
     } finally {
       setIsLoadingNextPage(false);
     }
@@ -368,7 +547,7 @@ const QuizPage = () => {
   };
 
   return (
-    <div className="quiz-container">
+    <div id="quiz-container-secure" className="quiz-container">
       <h2 className="quiz-title">📝 Quiz Candidat</h2>
 
       {isLoadingQuiz && (
@@ -403,7 +582,7 @@ const QuizPage = () => {
             <span className="quiz-stat-label">Questions</span>
             <span className="quiz-stat-value">{answeredCount}/{totalQuestionTarget}</span>
           </div>
-          <div className={`quiz-timer ${isTimeWarning ? "warning" : ""}`}>
+          <div className={`quiz-timer ${timerUrgencyClass}`}>
             <span className="quiz-stat-label">Temps restant</span>
             <span className="quiz-stat-value">{formattedTime}</span>
           </div>
@@ -439,19 +618,20 @@ const QuizPage = () => {
               )}
               <div className="question-meta">Type: {q.type || "QCM"} • Temps recommandé: {q.timeLimit || 60}s</div>
               {Array.isArray(q.options) && q.options.some((opt) => String(opt || "").trim().length > 0) ? (
-                q.options.map((opt) => {
-                  if (!String(opt || "").trim()) return null;
-                  const optionIndex = q.options.findIndex((optionValue) => optionValue === opt);
-                  const optionKey = `${key}-${String(opt)}`;
+                q.options.map((opt, optionIndex) => {
+                  const optionKey = `${key}-${optionIndex}`;
+                  const isSelected = answers[globalIndex] === optionIndex;
+                  const displayOptionText = String(opt || "").trim() || `Option ${optionIndex + 1}`;
                   return (
-                    <div className="option" key={optionKey}>
+                    <label className={`option ${isSelected ? "selected" : ""}`} key={optionKey}>
+                      <span className="option-text">{displayOptionText}</span>
                       <input
                         type="radio"
                         name={`question-${globalIndex}`}
-                        checked={answers[globalIndex] === optionIndex}
+                        checked={isSelected}
                         onChange={() => handleAnswer(globalIndex, optionIndex)}
-                      /> {opt}
-                    </div>
+                      />
+                    </label>
                   );
                 })
               ) : (
@@ -486,12 +666,38 @@ const QuizPage = () => {
       ) : submitted ? (
         <div>
           <p className="success-message">✅ Vous avez obtenu {score} / {questions.length}</p>
-          {aiCoach && (
+          {hasGoodScore && (
+            <p className="application-success-message">
+              Votre candidature a ete effectuee avec succes. Nous vous contacterons prochainement.
+            </p>
+          )}
+          {aiCoach && isMistralCoach && (
             <div className="quiz-coach-card">
-              <h5>AI Coach Feedback</h5>
+              <h5>{aiCoach?.summary?.coachTitle || "AI Coach (Mistral)"}</h5>
+              {aiCoach?.summary?.hiringPerspective && (
+                <p className="quiz-coach-metric">{aiCoach.summary.hiringPerspective}</p>
+              )}
               <p className="quiz-coach-summary">{aiCoach?.summary?.narrative}</p>
               {typeof aiCoach?.summary?.openAnswerAverage === "number" && (
                 <p className="quiz-coach-metric">Open Answers Average: <strong>{aiCoach.summary.openAnswerAverage}/100</strong></p>
+              )}
+
+              {Array.isArray(aiCoach?.summary?.actionPlan) && aiCoach.summary.actionPlan.length > 0 && (
+                <div className="quiz-coach-section">
+                  <h6>Plan d'action pour ce poste</h6>
+                  {aiCoach.summary.actionPlan.map((tip, index) => (
+                    <div key={`action-plan-${index}`} className="quiz-coach-sub">• {tip}</div>
+                  ))}
+                </div>
+              )}
+
+              {Array.isArray(aiCoach?.summary?.futureApplicationTips) && aiCoach.summary.futureApplicationTips.length > 0 && (
+                <div className="quiz-coach-section">
+                  <h6>Coaching pour votre prochaine candidature</h6>
+                  {aiCoach.summary.futureApplicationTips.map((tip, index) => (
+                    <div key={`future-tip-${index}`} className="quiz-coach-sub">• {tip}</div>
+                  ))}
+                </div>
               )}
 
               {Array.isArray(aiCoach?.bySkill) && aiCoach.bySkill.length > 0 && (
@@ -521,8 +727,15 @@ const QuizPage = () => {
               )}
             </div>
           )}
-          <p className="redirect-message">🙏 Merci pour vos réponses. Vous devez maintenant attendre un email de l'entreprise.</p>
-          <p className="redirect-message">Redirection vers la page d'accueil...</p>
+          {aiCoach && !isMistralCoach && (
+            <div className="quiz-start-card">
+              <p className="quiz-empty-state">Le feedback AI Mistral est indisponible pour cette tentative.</p>
+            </div>
+          )}
+          <p className="redirect-message">🙏 Merci pour vos réponses. Utilisez ce coaching pour mieux vous préparer à ce poste et à vos prochaines candidatures.</p>
+          <div className="quiz-navigation">
+            <button className="start-btn" onClick={() => navigate("/")}>Retour à l'accueil</button>
+          </div>
         </div>
       ) : null}
     </div>

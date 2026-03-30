@@ -19,7 +19,59 @@ const quizResultSchema = new mongoose.Schema({
     },
   ],
   aiCoach: { type: mongoose.Schema.Types.Mixed, default: null },
-  submittedAt: { type: Date, default: Date.now }
+  submittedAt: { type: Date, default: Date.now },
+  // Security & Audit Trail Fields
+  auditTrail: {
+    ipAddress: { type: String, default: null },
+    userAgent: { type: String, default: null },
+    focusEvents: [
+      {
+        timestamp: { type: Date, default: Date.now },
+        type: { type: String, enum: ["lost", "restored"], required: true },
+        durationSeconds: { type: Number, default: 0 },
+      },
+    ],
+    securityEvents: [
+      {
+        timestamp: { type: Date, default: Date.now },
+        event: {
+          type: String,
+          enum: ["copy-attempt", "devtools-access", "paste-attempt"],
+          required: true,
+        },
+      },
+    ],
+    completionType: {
+      type: String,
+      enum: ["normal", "timeout", "interrupted"],
+      default: "normal",
+    },
+  },
+  submissionFlags: [
+    {
+      flag: {
+        type: String,
+        enum: [
+          "fast-completion",
+          "minimum-time-warning",
+          "multiple-focus-losses",
+          "copy-paste-attempts",
+          "devtools-access",
+          "suspicious-pattern",
+        ],
+        required: true,
+      },
+      severity: { type: String, enum: ["low", "medium", "high"], default: "medium" },
+      timestamp: { type: Date, default: Date.now },
+    },
+  ],
+  submissionValidation: {
+    totalTimeValid: { type: Boolean, default: true },
+    averageTimePerQuestion: { type: Number, default: 0 },
+    duplicateAnswerCount: { type: Number, default: 0 },
+    flagged: { type: Boolean, default: false },
+    flagReason: { type: String, default: null },
+  },
 });
 
 module.exports = mongoose.model("QuizResult", quizResultSchema);

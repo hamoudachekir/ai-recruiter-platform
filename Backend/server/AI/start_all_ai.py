@@ -1,9 +1,14 @@
 import subprocess
 import sys
 import time
+import os
 
 def start_services():
     print("Starting all AI Microservices...")
+    
+    # Get the directory where this script is located
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    SERVER_DIR = os.path.dirname(SCRIPT_DIR)  # Backend/server
     
     # List of python scripts to run
     services = [
@@ -19,12 +24,15 @@ def start_services():
     
     for service in services:
         print(f"Starting {service['name']}...")
-        # Start each script in the background
-        process = subprocess.Popen([sys.executable, service['script']])
+        # Start each script in the background with correct working directory
+        process = subprocess.Popen(
+            [sys.executable, service['script']],
+            cwd=SCRIPT_DIR  # Set working directory to AI folder
+        )
         processes.append(process)
         time.sleep(1) # Small delay to prevent output overlapping during startup
         
-    print("\n✅ All 5 AI microservices are running in the background!")
+    print("\n✅ All AI microservices are running in the background!")
     print("Press Ctrl+C to stop all services.\n")
     
     try:

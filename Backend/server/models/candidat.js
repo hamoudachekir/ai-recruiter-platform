@@ -37,6 +37,10 @@ CandidatSchema.pre('save', async function(next) {
     next();
 });
 
+// Add LinkedIn profile support (Phase 1-3)
+const linkedinSchema = require('./linkedinSchema');
+CandidatSchema.add(linkedinSchema);
+
 // Création du modèle à partir du schéma
 const CandidatModel = mongoose.model('Candidat', CandidatSchema);
 

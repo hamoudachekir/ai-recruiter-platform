@@ -33,7 +33,6 @@ import ResetPassword from "./login/assets/ResetPassword";
 import Profile from "./profileFront/profile";
 import EditProfile from "./profileFront/EditProfile";
 import VideoCallPage from "./interview/VideoCall";
-import ProtectedRoute from "./Dashboard/layouts/ProtectedRoute";
 import EntrepriseProfile from "./pages/Entreprise/EntrepriseProfile";
 import JobDetails from "./pages/JobDetails/JobDetails";
 import QuizPage from "./pages/Quiz/QuizPage";
@@ -43,18 +42,6 @@ import CandidateMessages from './pages/CandidateMessages';
 
 // ✅ Google Client ID
 const CLIENT_ID = "122105051479-dna9hfi1gskvlbobkhkpboiml67i4gl7.apps.googleusercontent.com";
-
-
-
-
-// ✅ OpenAI API Key Validation
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || "❌ Clé API non chargée !";
-console.log("🔑 OpenAI API Key Loaded:", OPENAI_API_KEY);
-if (!OPENAI_API_KEY) {
-  console.error("❌ OpenAI API Key is missing. Check your .env file!");
-} else {
-  console.log("🔑 OpenAI API Key Loaded");
-}
 
 // ✅ Dashboard Layout Wrapper
 const DashboardLayoutWrapper = () => (

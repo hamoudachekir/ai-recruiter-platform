@@ -15,8 +15,21 @@ except Exception:
         return False
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
-load_dotenv(os.path.join(BASE_DIR, "..", ".env"))
+PARENT_DIR = os.path.dirname(BASE_DIR)  # Backend/server
+
+# Try loading .env from multiple locations
+env_paths = [
+    os.path.join(BASE_DIR, ".env"),           # Backend/server/AI/.env
+    os.path.join(PARENT_DIR, ".env"),         # Backend/server/.env
+]
+
+for env_path in env_paths:
+    if os.path.exists(env_path):
+        print(f"[DEBUG] Loading .env from: {env_path}")
+        load_dotenv(env_path)
+        break
+else:
+    print(f"[DEBUG] No .env file found. Checked: {env_paths}")
 
 app = Flask(__name__)
 CORS(app)
@@ -31,8 +44,22 @@ QUIZ_PAGE_SIZE = max(1, int(os.getenv("QUIZ_PAGE_SIZE", "5")))
 QUIZ_VARIANTS_PER_QUESTION = max(2, min(3, int(os.getenv("QUIZ_VARIANTS_PER_QUESTION", "3"))))
 QUIZ_TARGET_TOTAL_SECONDS_FOR_20 = max(120, int(os.getenv("QUIZ_TARGET_TOTAL_SECONDS_FOR_20", "300")))
 QUIZ_QUALITY_THRESHOLD = float(os.getenv("QUIZ_QUALITY_THRESHOLD", "4.2"))
+QUIZ_JOB_ONLY_MODE = os.getenv("QUIZ_JOB_ONLY_MODE", "true").strip().lower() in {"1", "true", "yes", "on"}
 # Configuration for question types to include. Comma-separated: "QCM,vrai-faux,réponse courte,mini-exercice"
 QUIZ_ALLOWED_TYPES = [t.strip() for t in os.getenv("QUIZ_ALLOWED_TYPES", "QCM").split(",") if t.strip()]
+
+# Debug output
+print(f"[CONFIG] MISTRAL_API_KEY loaded: {'OK' if MISTRAL_API_KEY else 'MISSING'}")
+print(f"[CONFIG] MISTRAL_MODEL: {MISTRAL_MODEL}")
+print(f"[CONFIG] QUIZ_JOB_ONLY_MODE: {QUIZ_JOB_ONLY_MODE}")
+print(f"[CONFIG] QUIZ_USE_MISTRAL: {QUIZ_USE_MISTRAL}")
+
+KNOWN_AI_TOOLS = [
+    "chatgpt", "gpt", "openai", "copilot", "github copilot", "cursor", "claude",
+    "gemini", "mistral", "langchain", "llamaindex", "hugging face", "transformers",
+    "prompt engineering", "vector database", "rag", "pinecone", "weaviate", "chroma",
+    "azure openai", "vertex ai", "bedrock",
+]
 
 QUESTION_BANK = [
     {
@@ -169,6 +196,42 @@ def normalize(items):
     if not isinstance(items, list):
         return []
     return [str(item).strip().lower() for item in items if str(item).strip()]
+
+
+def extract_ai_tools_from_job(job):
+    job_text = " ".join([
+        str(job.get("title", "")),
+        str(job.get("description", "")),
+        " ".join([str(item) for item in job.get("skills", [])]) if isinstance(job.get("skills", []), list) else "",
+    ]).lower()
+
+    detected = []
+    for tool in KNOWN_AI_TOOLS:
+        if tool in job_text:
+            detected.append(tool)
+
+    normalized = []
+    for value in detected:
+        if value == "gpt":
+            normalized.append("chatgpt")
+        elif value == "github copilot":
+            normalized.append("copilot")
+        else:
+            normalized.append(value)
+
+    return sorted(dict.fromkeys(normalized))
+
+
+def build_job_skill_stack(job):
+    job_skills = normalize(job.get("skills", []))
+    ai_tools = extract_ai_tools_from_job(job)
+
+    ranked = []
+    for skill in job_skills + ai_tools:
+        if skill not in ranked:
+            ranked.append(skill)
+
+    return ranked, ai_tools
 
 
 def extract_candidate_skills(candidate_profiles):
@@ -408,50 +471,60 @@ Retourne UNIQUEMENT du JSON valide, sans texte additionnel:
 
 
 def _call_mistral_json(system_prompt, user_prompt, max_tokens=2200, temperature=0.3):
-    payload = {
-        "model": MISTRAL_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
-    }
-
     headers = {
         "Authorization": f"Bearer {MISTRAL_API_KEY}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
 
-    response = requests.post(
-        MISTRAL_API_URL,
-        headers=headers,
-        json=payload,
-        timeout=MISTRAL_TIMEOUT,
-    )
-    response.raise_for_status()
-    response_json = response.json()
-    content = (
-        response_json.get("choices", [{}])[0]
-        .get("message", {})
-        .get("content", "")
-    )
-    parsed_text = _extract_json_text(content)
-    return json.loads(parsed_text)
+    last_error = None
+    for attempt in range(2):
+        attempt_user_prompt = user_prompt
+        if attempt == 1:
+            attempt_user_prompt = (
+                f"{user_prompt}\n\n"
+                "IMPORTANT: Return STRICT valid JSON only. "
+                "No markdown, no code fences, no extra commentary."
+            )
+
+        payload = {
+            "model": MISTRAL_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": attempt_user_prompt},
+            ],
+            "temperature": temperature if attempt == 0 else 0.2,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+
+        try:
+            response = requests.post(
+                MISTRAL_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=MISTRAL_TIMEOUT,
+            )
+            response.raise_for_status()
+            response_json = response.json()
+            content = (
+                response_json.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            parsed_text = _extract_json_text(content)
+            return json.loads(parsed_text)
+        except Exception as exc:
+            last_error = exc
+
+    raise last_error
 
 
-def _build_quiz_plan_prompt(job, ranked_skills, total_questions, difficulty_mix, candidate_context=None):
+def _build_quiz_plan_prompt(job, ranked_skills, total_questions, difficulty_mix):
     job_title = job.get("title", "")
     job_desc = job.get("description", "")
     job_skills = job.get("skills", [])
-    candidate_context = candidate_context or {}
-    candidate_domains = candidate_context.get("domains", [])
-    experience = candidate_context.get("experience", {}) if isinstance(candidate_context.get("experience", {}), dict) else {}
-    experience_level = experience.get("level", "intermediaire")
-    avg_years = experience.get("avgYears")
-    experience_samples = experience.get("samples", [])
+    ai_tools = extract_ai_tools_from_job(job)
 
     return f"""
 Tu dois créer un PLAN de quiz technique, pas les questions finales.
@@ -460,10 +533,8 @@ Contexte:
 - Poste: {job_title}
 - Description: {job_desc}
 - Skills du poste: {job_skills}
-- Skills candidats observés: {ranked_skills[:12]}
-- Domaines candidats observés: {candidate_domains[:8]}
-- Niveau expérience estimé: {experience_level} (années moyennes: {avg_years})
-- Extraits expérience candidats: {experience_samples[:4]}
+- Skills à couvrir (job uniquement): {ranked_skills[:12]}
+- Outils IA détectés dans le job: {ai_tools}
 - totalQuestions: {total_questions}
 - difficultyMix: {difficulty_mix}
 - pageSize: {QUIZ_PAGE_SIZE}
@@ -472,9 +543,10 @@ Règles:
 - Produis un plan découpé en pages.
 - Chaque slot représente UNE question future.
 - Respecte la répartition des difficultés.
-- Ajuste la profondeur technique selon le niveau d'expérience estimé.
 - Varie les types: QCM, vrai-faux, réponse courte, mini-exercice.
 - timeLimit recommandé entre 20 et 120 secondes.
+- Génère uniquement selon le poste (aucune personnalisation candidat).
+- Si des outils IA sont présents, inclure explicitement des slots sur ces outils.
 
 Format JSON strict (sans texte hors JSON):
 {{
@@ -519,7 +591,7 @@ def _default_quiz_plan(total_questions, ranked_skills, difficulty_mix):
 
     for page_index in range(page_count):
         slots = []
-        for slot_index in range(QUIZ_PAGE_SIZE):
+        for _ in range(QUIZ_PAGE_SIZE):
             if question_number > total_questions:
                 break
             skill = prioritized[(question_number - 1) % len(prioritized)]
@@ -616,15 +688,11 @@ def _normalize_quiz_plan(plan_data, total_questions, ranked_skills, difficulty_m
     return {"pages": normalized_pages}
 
 
-def _build_page_generation_prompt(job, page, variants_per_question, candidate_context=None):
+def _build_page_generation_prompt(job, page, variants_per_question):
     job_title = job.get("title", "")
     job_desc = job.get("description", "")
     slots = page.get("slots", [])
-    candidate_context = candidate_context or {}
-    candidate_domains = candidate_context.get("domains", [])
-    experience = candidate_context.get("experience", {}) if isinstance(candidate_context.get("experience", {}), dict) else {}
-    experience_level = experience.get("level", "intermediaire")
-    avg_years = experience.get("avgYears")
+    ai_tools = extract_ai_tools_from_job(job)
 
     return f"""
 Tu génères des questions de quiz à partir de slots prédéfinis.
@@ -632,8 +700,7 @@ Tu génères des questions de quiz à partir de slots prédéfinis.
 Contexte job:
 - title: {job_title}
 - description: {job_desc}
-- domaines candidats prioritaires: {candidate_domains[:8]}
-- niveau expérience estimé: {experience_level} (années moyennes: {avg_years})
+- outils IA détectés dans le job: {ai_tools}
 
 Slots à générer (page {page.get("pageNumber")}):
 {json.dumps(slots, ensure_ascii=False)}
@@ -647,6 +714,8 @@ Règles:
 - vrai-faux: options ["Vrai", "Faux", "", ""], correctAnswer 0 ou 1.
 - réponse courte/mini-exercice: options ["", "", "", ""], correctAnswer 0.
 - score = 1.
+- Générer des questions strictement basées sur les exigences du poste.
+- Si un slot mentionne un outil IA détecté, proposer une question appliquée à cet outil.
 
 Format JSON strict:
 {{
@@ -824,7 +893,7 @@ def _regenerate_weak_slots(job, weak_slots, used_titles, candidate_context=None)
             "title": "Weak-slot-regeneration",
             "slots": chunk,
         }
-        prompt = _build_page_generation_prompt(job, chunk_page, QUIZ_VARIANTS_PER_QUESTION, candidate_context=candidate_context)
+        prompt = _build_page_generation_prompt(job, chunk_page, QUIZ_VARIANTS_PER_QUESTION)
         try:
             generated = _call_mistral_json(
                 system_prompt="Tu régénères uniquement des questions faibles, JSON strict.",
@@ -944,7 +1013,7 @@ def _score_question_quality(question, slot, existing_titles, candidate_context=N
 
 
 def _generate_with_two_step_pipeline(job, ranked_skills, total_questions, difficulty_mix, candidate_context=None):
-    plan_prompt = _build_quiz_plan_prompt(job, ranked_skills, total_questions, difficulty_mix, candidate_context=candidate_context)
+    plan_prompt = _build_quiz_plan_prompt(job, ranked_skills, total_questions, difficulty_mix)
     plan_raw = _call_mistral_json(
         system_prompt="Tu crées des plans de quiz RH en JSON strict.",
         user_prompt=plan_prompt,
@@ -969,7 +1038,7 @@ def _generate_with_two_step_pipeline(job, ranked_skills, total_questions, diffic
                 "title": page.get("title"),
                 "slots": slot_chunk,
             }
-            page_prompt = _build_page_generation_prompt(job, chunk_page, QUIZ_VARIANTS_PER_QUESTION, candidate_context=candidate_context)
+            page_prompt = _build_page_generation_prompt(job, chunk_page, QUIZ_VARIANTS_PER_QUESTION)
             try:
                 generated_page = _call_mistral_json(
                     system_prompt="Tu génères des questions de quiz en respectant des slots imposés, JSON strict.",
@@ -1330,8 +1399,8 @@ def _select_adaptive_questions(questions, response_history, asked_question_keys,
         "remainingCount": max(0, len(scored) - len(selected_questions)),
         "adaptation": {
             "targetDifficulty": perf["targetDifficulty"],
-            "penalizedSkills": sorted(list(perf["penalizedSkills"])),
-            "boostedSkills": sorted(list(perf["boostedSkills"])),
+            "penalizedSkills": sorted(perf["penalizedSkills"]),
+            "boostedSkills": sorted(perf["boostedSkills"]),
             "totalAnswered": perf["totalAnswered"],
             "totalAccuracy": round(perf["totalAccuracy"], 2),
             "easyAccuracy": round(perf["easyAccuracy"], 2),
@@ -1349,6 +1418,7 @@ def health():
             "bank_size": len(QUESTION_BANK),
             "mistral_enabled": QUIZ_USE_MISTRAL,
             "mistral_required": QUIZ_REQUIRE_MISTRAL,
+            "job_only_mode": QUIZ_JOB_ONLY_MODE,
             "mistral_configured": bool(MISTRAL_API_KEY),
             "mistral_model": MISTRAL_MODEL,
         }
@@ -1362,15 +1432,8 @@ def generate_quiz():
     job = payload.get("job", {})
     total_questions = int(payload.get("totalQuestions", 10))
     total_questions = max(1, min(20, total_questions))
-    force_mistral = bool(payload.get("forceMistral", False)) or QUIZ_REQUIRE_MISTRAL
-
-    job_skills = normalize(job.get("skills", []))
-    candidate_profiles = payload.get("candidateProfiles", [])
-    candidate_skills = extract_candidate_skills(candidate_profiles)
-    candidate_context = build_candidate_context(candidate_profiles)
-
-    skill_counter = Counter(candidate_skills + job_skills)
-    ranked_skills = [skill for skill, _ in skill_counter.most_common()]
+    force_mistral = bool(payload.get("forceMistral", False)) or QUIZ_REQUIRE_MISTRAL or QUIZ_JOB_ONLY_MODE
+    ranked_skills, ai_tools_detected = build_job_skill_stack(job)
 
     difficulty_mix = get_difficulty_mix(total_questions)
 
@@ -1379,28 +1442,26 @@ def generate_quiz():
         ranked_skills=ranked_skills,
         total_questions=total_questions,
         difficulty_mix=difficulty_mix,
-        candidate_context=candidate_context,
+        candidate_context=None,
     )
 
-    if mistral_questions:
-        normalized = mistral_questions
-        source = "mistral-api"
-        fallback_reason = None
-    else:
-        if force_mistral:
-            return jsonify(
-                {
-                    "message": "Mistral is required for this request but generation failed.",
-                    "meta": {
-                        "source": "mistral-required-error",
-                        "fallbackReason": mistral_status,
-                        "model": MISTRAL_MODEL,
-                    },
-                }
-            ), 503
-        normalized = _generate_from_local_bank(total_questions, ranked_skills, difficulty_mix)
-        source = "local-bank-fallback"
-        fallback_reason = mistral_status
+    if not mistral_questions:
+        return jsonify(
+            {
+                "message": "Quiz generation failed: Mistral is required in job-only mode.",
+                "meta": {
+                    "source": "mistral-required-error",
+                    "fallbackReason": mistral_status,
+                    "model": MISTRAL_MODEL,
+                    "jobOnlyMode": QUIZ_JOB_ONLY_MODE,
+                    "forceMistral": force_mistral,
+                },
+            }
+        ), 503
+
+    normalized = mistral_questions
+    source = "mistral-job-only"
+    fallback_reason = None
 
     normalized, post_validation = _post_validate_questions(normalized, total_questions)
 
@@ -1410,15 +1471,15 @@ def generate_quiz():
             "meta": {
                 "jobTitle": job.get("title", ""),
                 "skillsUsed": ranked_skills[:10],
-                "domainsUsed": candidate_context.get("domains", [])[:8],
-                "experienceProfile": candidate_context.get("experience", {}),
+                "aiToolsDetected": ai_tools_detected,
                 "difficultyMix": difficulty_mix,
                 "source": source,
                 "fallbackReason": fallback_reason,
                 "model": MISTRAL_MODEL,
+                "jobOnlyMode": QUIZ_JOB_ONLY_MODE,
                 "pageSize": QUIZ_PAGE_SIZE,
                 "variantsPerQuestion": QUIZ_VARIANTS_PER_QUESTION,
-                "generationTrace": generation_trace if source == "mistral-api" else None,
+                "generationTrace": generation_trace if source == "mistral-job-only" else None,
                 "postValidation": post_validation,
             },
         }

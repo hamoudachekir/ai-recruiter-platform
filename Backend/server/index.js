@@ -22,6 +22,8 @@ const socketIO = require('socket.io');
 const { exec } = require('child_process');
 const ApplicationModel = require('./models/Application'); // Chemin exact vers le model
 const uploadCV = require("./middleware/uploadCV");
+const quizRateLimiter = require("./middleware/quizRateLimit");
+const validateQuizSubmission = require("./middleware/quizSecurityValidation");
 const QuizModel = require("./models/Quiz");
 const CandidateQuizModel = require("./models/CandidateQuiz");
 const QuizResultModel = require("./models/QuizResultModel");
@@ -164,20 +166,18 @@ const sanitizeToQcmQuestions = (questions = []) => {
 
 const buildQuizRationale = ({ job, candidateProfile = {}, meta = {} }) => {
   const jobSkillsRaw = Array.isArray(job?.skills) ? job.skills : [];
-  const candidateSkillsRaw = Array.isArray(candidateProfile?.skills) ? candidateProfile.skills : [];
   const jobSkills = normalizeSkillList(jobSkillsRaw);
-  const candidateSkills = normalizeSkillList(candidateSkillsRaw);
-  const matchedSkills = jobSkills.filter((skill) => candidateSkills.includes(skill));
+  const matchedSkills = [];
   const prioritizedSkills = Array.isArray(meta?.skillsUsed) ? meta.skillsUsed.slice(0, 6) : [];
 
   const rationaleParts = [
     `Quiz généré pour le poste "${job?.title || "N/A"}".`,
-    matchedSkills.length
-      ? `Compétences communes poste/candidat: ${matchedSkills.join(", ")}.`
-      : "Peu de compétences communes explicites détectées, le quiz couvre donc les exigences principales du poste.",
+    jobSkills.length
+      ? `Compétences du poste ciblées: ${jobSkills.slice(0, 8).join(", ")}.`
+      : "Le quiz couvre les exigences clés présentes dans la description du poste.",
     prioritizedSkills.length
       ? `Le modèle a priorisé: ${prioritizedSkills.join(", ")}.`
-      : "Le modèle a priorisé les compétences techniques les plus fréquentes dans le profil et le poste.",
+      : "Le modèle a priorisé les compétences techniques explicites du poste.",
   ];
 
   return {
@@ -269,6 +269,44 @@ const buildServerFallbackQuestions = ({ job = {}, candidateProfile = {}, totalQu
   });
 };
 
+const selectAdaptivePageFallback = ({
+  questions = [],
+  page = 1,
+  pageSize = 5,
+  askedQuestionKeys = [],
+}) => {
+  const safeQuestions = Array.isArray(questions) ? questions : [];
+  const safePageSize = Math.max(1, Math.min(10, Number(pageSize) || 5));
+  const safePage = Math.max(1, Number(page) || 1);
+  const askedSet = new Set(
+    (Array.isArray(askedQuestionKeys) ? askedQuestionKeys : []).map((key) => Number(key)).filter(Number.isFinite)
+  );
+
+  const remaining = safeQuestions.filter((question) => {
+    const key = Number(question?.questionKey);
+    if (!Number.isFinite(key)) return true;
+    return !askedSet.has(key);
+  });
+
+  const start = Math.max(0, (safePage - 1) * safePageSize);
+  const selected = remaining.slice(start, start + safePageSize);
+  const remainingCount = Math.max(0, remaining.length - (start + selected.length));
+
+  return {
+    success: true,
+    page: safePage,
+    pageSize: safePageSize,
+    totalQuestions: safeQuestions.length,
+    questions: selected,
+    adaptation: {
+      mode: "fallback-local-pagination",
+      reason: "adaptive-ai-unavailable",
+    },
+    remainingCount,
+    completed: selected.length === 0 || remainingCount === 0,
+  };
+};
+
 const saveCandidateQuizFromAI = async ({
   jobId,
   candidateId,
@@ -324,20 +362,12 @@ const generateCandidateQuizForJobCandidate = async ({
   }
 
   const candidate = await UserModel.findById(candidateId)
-    .select("name profile.skills profile.shortDescription profile.domain profile.experience")
+    .select("_id")
     .lean();
 
   if (!candidate) {
     throw new Error("Candidate not found");
   }
-
-  const candidateProfile = {
-    name: candidate?.name || "",
-    domain: candidate?.profile?.domain || "",
-    shortDescription: candidate?.profile?.shortDescription || "",
-    skills: Array.isArray(candidate?.profile?.skills) ? candidate.profile.skills : [],
-    experience: Array.isArray(candidate?.profile?.experience) ? candidate.profile.experience : [],
-  };
 
   const aiPayload = {
     job: {
@@ -346,38 +376,32 @@ const generateCandidateQuizForJobCandidate = async ({
       skills: Array.isArray(job.skills) ? job.skills : [],
       location: job.location || "",
     },
-    candidateProfiles: [candidateProfile],
     totalQuestions: Math.max(1, Math.min(20, Number(totalQuestions) || 10)),
-    forceMistral,
+    forceMistral: true,
   };
 
   const normalizedTotal = Math.max(1, Math.min(20, Number(totalQuestions) || 20));
   let aiData = {};
+  let fallbackReason = null;
 
   try {
     const aiResponse = await axios.post("http://localhost:5003/generate-quiz", aiPayload, {
-      timeout: 15000,
+      timeout: 60000,
     });
     aiData = aiResponse.data || {};
   } catch (error) {
-    const fallbackReason = error?.response?.data?.message || error?.message || "AI service unavailable";
+    fallbackReason = error?.response?.data?.message || error?.message || "AI quiz generation failed";
     aiData = {
       questions: buildServerFallbackQuestions({
         job,
-        candidateProfile,
         totalQuestions: normalizedTotal,
       }),
       meta: {
-        source: "node-local-fallback",
-        fallbackReason,
-        model: "node-template-generator",
+        source: "server-job-fallback",
+        model: "fallback-local",
         jobTitle: job?.title || "",
-        skillsUsed: normalizeSkillList([...(job?.skills || []), ...(candidateProfile?.skills || [])]).slice(0, 10),
-        difficultyMix: {
-          facile: Math.floor(normalizedTotal * 0.4),
-          moyen: Math.floor(normalizedTotal * 0.4),
-          difficile: normalizedTotal - Math.floor(normalizedTotal * 0.4) - Math.floor(normalizedTotal * 0.4),
-        },
+        skillsUsed: normalizeSkillList(job?.skills || []).slice(0, 10),
+        fallbackReason,
       },
     };
   }
@@ -386,30 +410,21 @@ const generateCandidateQuizForJobCandidate = async ({
   const sanitizedAiQcmQuestions = sanitizeToQcmQuestions(aiQuestions);
 
   if (sanitizedAiQcmQuestions.length < normalizedTotal) {
-    const fallbackQuestions = buildServerFallbackQuestions({
+    const emergencyQuestions = buildServerFallbackQuestions({
       job,
-      candidateProfile,
-      totalQuestions: normalizedTotal + 10,
+      totalQuestions: normalizedTotal,
     });
-
-    const mergedQuestions = sanitizeToQcmQuestions([
-      ...sanitizedAiQcmQuestions,
-      ...fallbackQuestions,
-    ]).slice(0, normalizedTotal);
-
-    aiData.questions = mergedQuestions;
-    aiData.meta = {
-      ...(aiData.meta || {}),
-      source: (aiData?.meta?.source || "node-local-fallback") + "-normalized",
-      fallbackReason:
-        aiData?.meta?.fallbackReason ||
-        `Generated ${sanitizedAiQcmQuestions.length} valid QCM, completed to ${normalizedTotal} with backend fallback.`,
-      model: aiData?.meta?.model || "node-template-generator",
-      jobTitle: aiData?.meta?.jobTitle || job?.title || "",
-      skillsUsed:
-        Array.isArray(aiData?.meta?.skillsUsed) && aiData.meta.skillsUsed.length
-          ? aiData.meta.skillsUsed
-          : normalizeSkillList([...(job?.skills || []), ...(candidateProfile?.skills || [])]).slice(0, 10),
+    aiData = {
+      ...aiData,
+      questions: sanitizeToQcmQuestions(emergencyQuestions).slice(0, normalizedTotal),
+      meta: {
+        ...(aiData?.meta || {}),
+        source: "server-job-fallback",
+        model: "fallback-local",
+        fallbackReason:
+          fallbackReason
+          || `insufficient-valid-questions:${sanitizedAiQcmQuestions.length}/${normalizedTotal}`,
+      },
     };
   } else {
     aiData.questions = sanitizedAiQcmQuestions.slice(0, normalizedTotal);
@@ -421,7 +436,7 @@ const generateCandidateQuizForJobCandidate = async ({
     generatedBy,
     aiData,
     job,
-    candidateProfile,
+    candidateProfile: {},
   });
 
   return { aiData, savedQuiz };
@@ -624,7 +639,13 @@ const buildSkillNarrative = ({ answersDetailed = [], questions = [] }) => {
   return { bySkill, summary };
 };
 
-const buildAiCoachFeedback = ({ answersDetailed = [], questions = [] }) => {
+const buildRuleBasedCoachFeedback = ({
+  answersDetailed = [],
+  questions = [],
+  job = {},
+  score = 0,
+  totalQuestions = 0,
+}) => {
   const openTypes = new Set(["réponse courte", "mini-exercice"]);
   const openRubric = [];
 
@@ -646,15 +667,437 @@ const buildAiCoachFeedback = ({ answersDetailed = [], questions = [] }) => {
     ? clampScore(openRubric.reduce((sum, item) => sum + Number(item?.globalScore || 0), 0) / openRubric.length)
     : null;
 
+  const jobTitle = String(job?.title || "ce poste").trim() || "ce poste";
+  const targetSkills = normalizeSkillList(job?.skills || []).slice(0, 6);
+  const weakSkills = Array.isArray(skillNarrative?.summary?.improvements)
+    ? skillNarrative.summary.improvements.filter(Boolean).slice(0, 3)
+    : [];
+  const strongSkills = Array.isArray(skillNarrative?.summary?.strengths)
+    ? skillNarrative.summary.strengths.filter(Boolean).slice(0, 3)
+    : [];
+
+  const totalSafe = Math.max(1, Number(totalQuestions) || 1);
+  const scoreRate = Math.round((Math.max(0, Number(score) || 0) / totalSafe) * 100);
+  const hiringReadiness = scoreRate >= 75 ? "élevée" : scoreRate >= 55 ? "intermédiaire" : "en progression";
+
+  const actionPlan = [
+    weakSkills.length
+      ? `Renforcez cette semaine: ${weakSkills.join(", ")} avec 1 exercice pratique par compétence.`
+      : "Consolidez vos bases avec des exercices chronométrés orientés poste.",
+    targetSkills.length
+      ? `Alignez vos réponses sur les besoins du poste: ${targetSkills.join(", ")}.`
+      : "Reliez chaque réponse au besoin métier et à l'impact concret attendu.",
+    typeof overallRubricAverage === "number" && overallRubricAverage < 70
+      ? "Améliorez vos réponses ouvertes avec la structure: contexte → action → résultat mesurable."
+      : "Continuez à structurer vos réponses avec des exemples concrets (projet, impact, métrique).",
+  ];
+
+  const futureApplicationTips = [
+    `Pour votre prochaine candidature sur "${jobTitle}", préparez 2 exemples projet directement liés au poste.`,
+    "Préparez 3 réponses STAR (Situation, Tâche, Action, Résultat) sur vos compétences clés.",
+    "Avant de postuler à nouveau, refaites un quiz blanc de 20 questions en temps limité.",
+  ];
+
+  const coachNarrative = [
+    `🎯 Coaching ciblé pour le poste "${jobTitle}".`,
+    strongSkills.length ? `Points forts à valoriser en entretien: ${strongSkills.join(", ")}.` : "Vos bases sont présentes et peuvent être mieux mises en valeur.",
+    weakSkills.length ? `Axes prioritaires avant la prochaine candidature: ${weakSkills.join(", ")}.` : "Continuez sur cette dynamique avec des cas pratiques orientés poste.",
+  ].join(" ");
+
   return {
     generatedAt: new Date(),
     summary: {
       ...skillNarrative.summary,
+      coachEngine: "rule-based",
+      coachTitle: `AI Hiring Coach • ${jobTitle}`,
+      hiringPerspective: `Niveau de préparation estimé: ${hiringReadiness} (${scoreRate}%).`,
+      narrative: coachNarrative,
       openAnswerAverage: overallRubricAverage,
+      actionPlan,
+      futureApplicationTips,
     },
     bySkill: skillNarrative.bySkill,
     openAnswerRubric: openRubric,
   };
+};
+
+const readEnvValueFromFile = (key) => {
+  try {
+    const envPath = path.join(__dirname, ".env");
+    if (!fs.existsSync(envPath)) return "";
+    const content = fs.readFileSync(envPath, "utf8");
+    const line = content
+      .split(/\r?\n/)
+      .find((row) => row.trim().startsWith(`${key}=`));
+    if (!line) return "";
+    return String(line.split("=").slice(1).join("=") || "").trim();
+  } catch (_) {
+    return "";
+  }
+};
+
+const resolveCoachLlmEnabled = () => {
+  const raw = String(process.env.COACH_USE_LLM || readEnvValueFromFile("COACH_USE_LLM") || "true").trim().toLowerCase();
+  return raw === "true" || raw === "1" || raw === "yes";
+};
+
+const resolveCoachMistralConfig = () => {
+  const apiKey = String(process.env.MISTRAL_API_KEY || readEnvValueFromFile("MISTRAL_API_KEY") || "").trim();
+  const model = String(process.env.MISTRAL_MODEL || readEnvValueFromFile("MISTRAL_MODEL") || "ministral-8b-latest").trim();
+  const apiUrl = String(process.env.MISTRAL_API_URL || readEnvValueFromFile("MISTRAL_API_URL") || "https://api.mistral.ai/v1/chat/completions").trim();
+  const timeoutMs = Math.max(10000, Number(process.env.COACH_LLM_TIMEOUT_MS || readEnvValueFromFile("COACH_LLM_TIMEOUT_MS") || 60000));
+  return { apiKey, model, apiUrl, timeoutMs };
+};
+
+const parseCoachJsonResponse = (rawContent) => {
+  if (rawContent && typeof rawContent === "object" && !Array.isArray(rawContent)) {
+    if (rawContent.summary || rawContent.bySkill) {
+      return rawContent;
+    }
+    if (rawContent.outputSchema && typeof rawContent.outputSchema === "object") {
+      return rawContent.outputSchema;
+    }
+  }
+
+  let normalizedRaw = rawContent;
+  if (Array.isArray(rawContent)) {
+    normalizedRaw = rawContent
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") {
+          return item?.text || item?.content || item?.value || "";
+        }
+        return "";
+      })
+      .join(" ");
+  } else if (rawContent && typeof rawContent === "object") {
+    normalizedRaw = rawContent?.text || rawContent?.content || JSON.stringify(rawContent);
+  }
+
+  const content = String(normalizedRaw || "").trim();
+  if (!content) return null;
+
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed?.outputSchema && typeof parsed.outputSchema === "object") {
+      return parsed.outputSchema;
+    }
+    return parsed;
+  } catch (_) {
+    const start = content.indexOf("{");
+    const end = content.lastIndexOf("}");
+    if (start !== -1 && end !== -1 && end > start) {
+      try {
+        const parsed = JSON.parse(content.slice(start, end + 1));
+        if (parsed?.outputSchema && typeof parsed.outputSchema === "object") {
+          return parsed.outputSchema;
+        }
+        return parsed;
+      } catch (__){
+        return null;
+      }
+    }
+  }
+
+  return null;
+};
+
+const buildAiCoachFeedback = async ({
+  answersDetailed = [],
+  questions = [],
+  job = {},
+  score = 0,
+  totalQuestions = 0,
+}) => {
+  const baseCoach = buildRuleBasedCoachFeedback({
+    answersDetailed,
+    questions,
+    job,
+    score,
+    totalQuestions,
+  });
+
+  const coachLlmEnabled = resolveCoachLlmEnabled();
+  const mistralConfig = resolveCoachMistralConfig();
+  console.log("[AI-COACH] config", {
+    coachLlmEnabled,
+    hasApiKey: Boolean(mistralConfig.apiKey),
+    model: mistralConfig.model,
+    apiUrl: mistralConfig.apiUrl,
+    timeoutMs: mistralConfig.timeoutMs,
+  });
+
+  if (!coachLlmEnabled || !mistralConfig.apiKey) {
+    console.warn("[AI-COACH] using rule-based coach due to missing config");
+    return {
+      ...baseCoach,
+      summary: {
+        ...baseCoach.summary,
+        coachEngine: "rule-based",
+        coachFallbackReason: !coachLlmEnabled ? "coach-llm-disabled" : "missing-mistral-api-key",
+      },
+    };
+  }
+
+  const jobTitle = String(job?.title || "ce poste").trim() || "ce poste";
+  const targetSkills = normalizeSkillList(job?.skills || []).slice(0, 8);
+  const scoreRate = Math.round((Math.max(0, Number(score) || 0) / Math.max(1, Number(totalQuestions) || 1)) * 100);
+
+  const compactSkillStats = (baseCoach?.bySkill || []).slice(0, 8).map((item) => ({
+    skill: item?.skill,
+    successRate: item?.successRate,
+    level: item?.level,
+  }));
+
+  const openAverage = baseCoach?.summary?.openAnswerAverage;
+
+  const systemPrompt = [
+    "Tu es un coach de recrutement senior.",
+    "Ta mission: fournir un feedback motivant, concret et personnalisé pour aider le candidat à réussir ce poste à la prochaine tentative.",
+    "Sois précis, orienté action, sans jugement négatif.",
+    "Réponds UNIQUEMENT en JSON valide, court et direct.",
+  ].join(" ");
+
+  const userPrompt = JSON.stringify({
+    task: "Generate personalized hiring coach feedback for a failed/weak quiz attempt",
+    locale: "fr",
+    role: "candidate",
+    context: {
+      jobTitle,
+      targetSkills,
+      score,
+      totalQuestions,
+      scoreRate,
+      openAnswerAverage: openAverage,
+      bySkill: compactSkillStats,
+    },
+    outputSchema: {
+      summary: {
+        coachTitle: "string",
+        hiringPerspective: "string",
+        narrative: "string",
+        actionPlan: ["string", "string", "string"],
+        futureApplicationTips: ["string", "string", "string"],
+      },
+      bySkill: [
+        {
+          skill: "string",
+          strength: "string",
+          improvementPlan: "string",
+        },
+      ],
+    },
+    constraints: [
+      "narrative max 55 words",
+      "actionPlan exactly 3 items",
+      "futureApplicationTips exactly 3 items",
+      "must mention the job title",
+      "must be encouraging and practical",
+      "no markdown, no numbering, each item under 14 words",
+    ],
+  });
+
+  try {
+    const llmResponse = await axios.post(
+      mistralConfig.apiUrl,
+      {
+        model: mistralConfig.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.2,
+        max_tokens: 380,
+        response_format: { type: "json_object" },
+      },
+      {
+        timeout: mistralConfig.timeoutMs,
+        headers: {
+          Authorization: `Bearer ${mistralConfig.apiKey}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const rawContent = llmResponse?.data?.choices?.[0]?.message?.content || "";
+    console.log("[AI-COACH] raw content type", typeof rawContent, Array.isArray(rawContent) ? "array" : "");
+    console.log("[AI-COACH] raw content preview", String(
+      Array.isArray(rawContent)
+        ? rawContent.map((item) => (typeof item === "string" ? item : JSON.stringify(item))).join(" ")
+        : (typeof rawContent === "object" ? JSON.stringify(rawContent) : rawContent)
+    ).slice(0, 600));
+    let parsed = parseCoachJsonResponse(rawContent);
+    if (!parsed || typeof parsed !== "object") {
+      console.warn("[AI-COACH] first parse failed, retrying with strict-json prompt");
+      const retryResponse = await axios.post(
+        mistralConfig.apiUrl,
+        {
+          model: mistralConfig.model,
+          messages: [
+            {
+              role: "system",
+              content: "Réponds STRICTEMENT avec un JSON minifié valide. Aucun markdown, aucun lien, aucun texte hors JSON.",
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                summary: {
+                  coachTitle: `AI Hiring Coach • ${jobTitle}`,
+                  hiringPerspective: "string",
+                  narrative: "string",
+                  actionPlan: ["string", "string", "string"],
+                  futureApplicationTips: ["string", "string", "string"],
+                },
+                bySkill: compactSkillStats.map((s) => ({
+                  skill: s.skill,
+                  strength: "string",
+                  improvementPlan: "string",
+                })),
+              }),
+            },
+          ],
+          temperature: 0.1,
+          max_tokens: 320,
+          response_format: { type: "json_object" },
+        },
+        {
+          timeout: mistralConfig.timeoutMs,
+          headers: {
+            Authorization: `Bearer ${mistralConfig.apiKey}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const retryRawContent = retryResponse?.data?.choices?.[0]?.message?.content || "";
+      parsed = parseCoachJsonResponse(retryRawContent);
+      if (!parsed || typeof parsed !== "object") {
+        console.warn("[AI-COACH] retry parse failed, attempting line-based coach fallback");
+        const lineResponse = await axios.post(
+          mistralConfig.apiUrl,
+          {
+            model: mistralConfig.model,
+            messages: [
+              {
+                role: "system",
+                content: "Réponds en texte brut avec EXACTEMENT ces clés en début de ligne, sans markdown.",
+              },
+              {
+                role: "user",
+                content: [
+                  `JOB_TITLE: ${jobTitle}`,
+                  `SCORE_RATE: ${scoreRate}`,
+                  "Format strict:",
+                  "COACH_TITLE: ...",
+                  "HIRING_PERSPECTIVE: ...",
+                  "NARRATIVE: ...",
+                  "ACTION_1: ...",
+                  "ACTION_2: ...",
+                  "ACTION_3: ...",
+                  "TIP_1: ...",
+                  "TIP_2: ...",
+                  "TIP_3: ...",
+                ].join("\n"),
+              },
+            ],
+            temperature: 0.1,
+            max_tokens: 280,
+          },
+          {
+            timeout: mistralConfig.timeoutMs,
+            headers: {
+              Authorization: `Bearer ${mistralConfig.apiKey}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+
+        const lineText = String(lineResponse?.data?.choices?.[0]?.message?.content || "");
+        const pickLine = (key) => {
+          const regex = new RegExp(`^${key}\\s*:\\s*(.+)$`, "im");
+          const match = lineText.match(regex);
+          return match ? String(match[1] || "").trim() : "";
+        };
+
+        const coachTitle = pickLine("COACH_TITLE") || baseCoach?.summary?.coachTitle;
+        const hiringPerspective = pickLine("HIRING_PERSPECTIVE") || baseCoach?.summary?.hiringPerspective;
+        const narrative = pickLine("NARRATIVE") || baseCoach?.summary?.narrative;
+        const actionPlan = [pickLine("ACTION_1"), pickLine("ACTION_2"), pickLine("ACTION_3")].filter(Boolean);
+        const tips = [pickLine("TIP_1"), pickLine("TIP_2"), pickLine("TIP_3")].filter(Boolean);
+
+        if (coachTitle || hiringPerspective || narrative) {
+          return {
+            ...baseCoach,
+            summary: {
+              ...baseCoach.summary,
+              coachEngine: "mistral-llm",
+              coachTitle,
+              hiringPerspective,
+              narrative,
+              actionPlan: actionPlan.length ? actionPlan : baseCoach?.summary?.actionPlan || [],
+              futureApplicationTips: tips.length ? tips : baseCoach?.summary?.futureApplicationTips || [],
+            },
+          };
+        }
+
+        return {
+          ...baseCoach,
+          summary: {
+            ...baseCoach.summary,
+            coachEngine: "rule-based",
+            coachFallbackReason: "invalid-json-from-llm",
+          },
+        };
+      }
+    }
+
+    const llmSummary = parsed?.summary || {};
+    const llmBySkill = Array.isArray(parsed?.bySkill) ? parsed.bySkill : [];
+
+    const mergedBySkill = (baseCoach.bySkill || []).map((baseItem) => {
+      const match = llmBySkill.find(
+        (item) => String(item?.skill || "").toLowerCase() === String(baseItem?.skill || "").toLowerCase()
+      );
+      if (!match) return baseItem;
+
+      return {
+        ...baseItem,
+        strength: String(match?.strength || baseItem.strength || "").trim() || baseItem.strength,
+        improvementPlan: String(match?.improvementPlan || baseItem.improvementPlan || "").trim() || baseItem.improvementPlan,
+      };
+    });
+
+    console.log("[AI-COACH] using mistral-llm coach");
+    return {
+      ...baseCoach,
+      summary: {
+        ...baseCoach.summary,
+        coachEngine: "mistral-llm",
+        coachTitle: String(llmSummary?.coachTitle || baseCoach?.summary?.coachTitle || `AI Hiring Coach • ${jobTitle}`),
+        hiringPerspective: String(llmSummary?.hiringPerspective || baseCoach?.summary?.hiringPerspective || ""),
+        narrative: String(llmSummary?.narrative || baseCoach?.summary?.narrative || ""),
+        actionPlan:
+          Array.isArray(llmSummary?.actionPlan) && llmSummary.actionPlan.length
+            ? llmSummary.actionPlan.slice(0, 3).map((item) => String(item || "").trim()).filter(Boolean)
+            : baseCoach?.summary?.actionPlan || [],
+        futureApplicationTips:
+          Array.isArray(llmSummary?.futureApplicationTips) && llmSummary.futureApplicationTips.length
+            ? llmSummary.futureApplicationTips.slice(0, 3).map((item) => String(item || "").trim()).filter(Boolean)
+            : baseCoach?.summary?.futureApplicationTips || [],
+      },
+      bySkill: mergedBySkill,
+    };
+  } catch (coachError) {
+    console.warn("⚠️ AI coach LLM unavailable, using rule-based fallback:", coachError?.message || coachError);
+    return {
+      ...baseCoach,
+      summary: {
+        ...baseCoach.summary,
+        coachEngine: "rule-based",
+        coachFallbackReason: String(coachError?.message || "llm-call-failed"),
+      },
+    };
+  }
 };
 
 
@@ -799,6 +1242,8 @@ const userRoutes = require('./routes/userRoute');
 const jobRoutes = require('./routes/jobRoute');
 const interviewRoutes = require('./routes/interviewRoute');
 const quizRoutes = require('./routes/quizRoute');
+const linkedinRoute = require('./routes/linkedinRoute');
+const linkedinEnrichRoute = require('./routes/linkedinEnrichRoute');
 
 
 
@@ -806,6 +1251,9 @@ app.use('/api', userRoutes);
 app.use('/api', jobRoutes);
 app.use('/api/interviews', interviewRoutes);
 app.use('/quiz', quizRoutes);
+app.use('/api/linkedin', linkedinEnrichRoute);
+app.use('/api/linkedin', linkedinRoute);
+app.use('/auth/linkedin', linkedinRoute);
 
 const uploadDir = path.join(__dirname, 'uploads');
 const resumeUpload = multer({
@@ -1231,6 +1679,7 @@ app.get("/Frontend/getUser/:id", async (req, res) => {
       role: user.role,
       picture: user.picture,
       profile: user.profile || {},
+      linkedin: user.linkedin || {},
       enterprise: user.enterprise || {},
     });
   } catch (err) {
@@ -1824,8 +2273,11 @@ app.get("/Frontend/me", async (req, res) => {
 
     res.status(200).json(user);
   } catch (error) {
-    console.error("❌ Error in /Frontend/me:", error);
-    res.status(401).json({ message: "Invalid token." });
+    if (error?.name === "TokenExpiredError") {
+      return res.status(401).json({ message: "Token expired.", code: "TOKEN_EXPIRED" });
+    }
+    console.error("❌ Error in /Frontend/me:", error?.message || error);
+    res.status(401).json({ message: "Invalid token.", code: "TOKEN_INVALID" });
   }
 });
 
@@ -2190,23 +2642,6 @@ app.post("/Frontend/generate-quiz-from-profile", async (req, res) => {
       return res.status(200).json(aiData);
     }
 
-    const applicationFilter = candidateId ? { jobId, candidateId } : { jobId };
-    const applications = await ApplicationModel.find(applicationFilter)
-      .populate("candidateId", "name profile.skills profile.shortDescription profile.domain profile.experience")
-      .limit(30)
-      .lean();
-
-    const candidateProfiles = applications
-      .map((application) => application?.candidateId)
-      .filter(Boolean)
-      .map((candidate) => ({
-        name: candidate?.name || "",
-        domain: candidate?.profile?.domain || "",
-        shortDescription: candidate?.profile?.shortDescription || "",
-        skills: Array.isArray(candidate?.profile?.skills) ? candidate.profile.skills : [],
-        experience: Array.isArray(candidate?.profile?.experience) ? candidate.profile.experience : [],
-      }));
-
     const aiPayload = {
       job: {
         title: job.title || "",
@@ -2214,13 +2649,12 @@ app.post("/Frontend/generate-quiz-from-profile", async (req, res) => {
         skills: Array.isArray(job.skills) ? job.skills : [],
         location: job.location || "",
       },
-      candidateProfiles,
       totalQuestions,
-      forceMistral,
+      forceMistral: true,
     };
 
     const aiResponse = await axios.post("http://localhost:5003/generate-quiz", aiPayload, {
-      timeout: 15000,
+      timeout: 60000,
     });
 
     const aiData = aiResponse.data || {};
@@ -2251,6 +2685,33 @@ app.post("/Frontend/adaptive-quiz-page", async (req, res) => {
       return res.status(400).json({ message: "jobId and candidateId are required" });
     }
 
+    // Check if job exists
+    const job = await JobModel.findById(jobId).lean();
+    if (!job) {
+      console.error(`❌ Job not found: ${jobId}`);
+      return res.status(404).json({ message: `Job not found: ${jobId}` });
+    }
+
+    // Check if candidate exists
+    const candidate = await UserModel.findById(candidateId).lean();
+    if (!candidate) {
+      console.error(`❌ Candidate not found: ${candidateId}`);
+      return res.status(404).json({ message: `Candidate not found: ${candidateId}` });
+    }
+
+    const existingApplication = await ApplicationModel.findOne({ jobId, candidateId })
+      .select("quizCompleted quizSubmittedAt")
+      .lean();
+
+    if (existingApplication?.quizCompleted) {
+      return res.status(403).json({
+        success: false,
+        message: "Quiz already completed. You can no longer access this quiz.",
+        reason: "quiz-already-completed",
+        quizSubmittedAt: existingApplication?.quizSubmittedAt || null,
+      });
+    }
+
     let personalizedQuiz = await CandidateQuizModel.findOne({ jobId, candidateId }).lean();
     const existingQuestions = Array.isArray(personalizedQuiz?.questions) ? personalizedQuiz.questions : [];
     const containsLegacyLowQualityTemplate = existingQuestions.some((question) => {
@@ -2268,6 +2729,7 @@ app.post("/Frontend/adaptive-quiz-page", async (req, res) => {
       containsLegacyLowQualityTemplate;
 
     if (needsRegeneration) {
+      console.log(`📝 Generating new quiz for jobId=${jobId}, candidateId=${candidateId}`);
       const generated = await generateCandidateQuizForJobCandidate({
         jobId,
         candidateId,
@@ -2286,24 +2748,42 @@ app.post("/Frontend/adaptive-quiz-page", async (req, res) => {
       return res.status(404).json({ message: "No generated quiz available for this candidate" });
     }
 
-    const aiAdaptiveResponse = await axios.post(
-      "http://localhost:5003/adaptive-next-page",
-      {
-        questions,
-        page: Math.max(1, Number(page) || 1),
-        pageSize: Math.max(1, Math.min(10, Number(pageSize) || 5)),
-        responseHistory: Array.isArray(responseHistory) ? responseHistory : [],
-        askedQuestionKeys: Array.isArray(askedQuestionKeys) ? askedQuestionKeys : [],
-      },
-      { timeout: 15000 }
-    );
+    try {
+      const aiAdaptiveResponse = await axios.post(
+        "http://localhost:5003/adaptive-next-page",
+        {
+          questions,
+          page: Math.max(1, Number(page) || 1),
+          pageSize: Math.max(1, Math.min(10, Number(pageSize) || 5)),
+          responseHistory: Array.isArray(responseHistory) ? responseHistory : [],
+          askedQuestionKeys: Array.isArray(askedQuestionKeys) ? askedQuestionKeys : [],
+        },
+        { timeout: 30000 }
+      );
 
-    return res.status(200).json(aiAdaptiveResponse.data || {});
+      return res.status(200).json(aiAdaptiveResponse.data || {});
+    } catch (adaptiveError) {
+      console.warn("⚠️ Adaptive AI unavailable, using local page fallback:", adaptiveError?.message);
+      const fallbackPage = selectAdaptivePageFallback({
+        questions,
+        page,
+        pageSize,
+        askedQuestionKeys,
+      });
+      return res.status(200).json(fallbackPage);
+    }
   } catch (error) {
-    console.error("❌ Error generating adaptive quiz page:", error.response?.data || error.message);
+    console.error("❌ Error in adaptive quiz page:", {
+      message: error.message,
+      jobId: req.body?.jobId,
+      candidateId: req.body?.candidateId,
+      axiosError: error.response?.status,
+      axiosMessage: error.response?.data?.message || error.response?.data?.error,
+    });
     return res.status(503).json({
-      message: "Adaptive quiz AI service unavailable. Start Backend/server/AI/quiz_generation_service.py first.",
-      details: error.response?.data || error.message,
+      message: "Quiz generation failed. Ensure job and candidate exist, and quiz service is running.",
+      details: error.message,
+      axiosDetails: error.response?.data,
     });
   }
 });
@@ -2350,9 +2830,34 @@ app.get("/Frontend/quiz/:jobId", async (req, res) => {
 });
 
 
-app.post("/Frontend/submit-quiz", async (req, res) => {
+app.post("/Frontend/submit-quiz", quizRateLimiter, validateQuizSubmission, async (req, res) => {
     try {
-  const { jobId, candidateId, answers, answersByQuestionKey, timeSpentSeconds = 0, requireComplete = true } = req.body;
+  const {
+    jobId,
+    candidateId,
+    answers,
+    answersByQuestionKey,
+    timeSpentSeconds = 0,
+    requireComplete = true,
+    completionType = "normal",
+  } = req.body;
+
+      const existingApplication = await ApplicationModel.findOne({ jobId, candidateId })
+        .select("quizCompleted quizSubmittedAt")
+        .lean();
+
+      if (existingApplication?.quizCompleted) {
+        return res.status(409).json({
+          success: false,
+          message: "Quiz already submitted. Retake is not allowed.",
+          reason: "quiz-already-completed",
+          quizSubmittedAt: existingApplication?.quizSubmittedAt || null,
+        });
+      }
+
+      const jobContext = await JobModel.findById(jobId)
+        .select("title skills description")
+        .lean();
   
       // Get candidate-specific quiz first, fallback to generic job quiz
       const personalizedQuiz = await CandidateQuizModel.findOne({ jobId, candidateId });
@@ -2490,9 +2995,12 @@ app.post("/Frontend/submit-quiz", async (req, res) => {
 
       const normalizedTimeSpent = Math.max(0, Number(timeSpentSeconds) || 0);
       const submittedAt = new Date();
-      const aiCoach = buildAiCoachFeedback({
+      const aiCoach = await buildAiCoachFeedback({
         answersDetailed,
         questions: Array.isArray(quiz?.questions) ? quiz.questions : [],
+        job: jobContext || {},
+        score,
+        totalQuestions: quiz.questions.length,
       });
   
       // Update application with quiz score
@@ -2509,6 +3017,72 @@ app.post("/Frontend/submit-quiz", async (req, res) => {
         },
         { new: true }
       );
+
+      const normalizeSecurityEvent = (eventType) => {
+        const normalized = String(eventType || "").toLowerCase();
+        if (["copy-attempt", "copy-hotkey", "cut-attempt", "cut-hotkey"].includes(normalized)) return "copy-attempt";
+        if (["paste-attempt", "paste-hotkey"].includes(normalized)) return "paste-attempt";
+        if (["devtools-access", "devtools-hotkey"].includes(normalized)) return "devtools-access";
+        return null;
+      };
+
+      const allowedCompletionType = ["normal", "timeout", "interrupted"].includes(String(completionType || "").toLowerCase())
+        ? String(completionType).toLowerCase()
+        : "normal";
+
+      const mappedFocusEvents = (Array.isArray(req.body?.focusLossEvents) ? req.body.focusLossEvents : [])
+        .map((entry) => ({
+          timestamp: entry?.timestamp ? new Date(entry.timestamp) : new Date(),
+          type: "lost",
+          durationSeconds: Math.max(0, Number(entry?.durationSeconds) || 0),
+        }))
+        .filter((entry) => !Number.isNaN(entry.timestamp?.getTime?.()));
+
+      const mappedSecurityEvents = (Array.isArray(req.body?.securityEvents) ? req.body.securityEvents : [])
+        .map((entry) => {
+          const event = normalizeSecurityEvent(entry?.event || entry?.type);
+          if (!event) return null;
+          return {
+            timestamp: entry?.timestamp ? new Date(entry.timestamp) : new Date(),
+            event,
+          };
+        })
+        .filter((entry) => entry && !Number.isNaN(entry.timestamp?.getTime?.()));
+
+      const allowedSubmissionFlags = new Set([
+        "fast-completion",
+        "minimum-time-warning",
+        "multiple-focus-losses",
+        "copy-paste-attempts",
+        "devtools-access",
+        "suspicious-pattern",
+      ]);
+
+      const middlewareFlags = Array.isArray(req.submissionFlags)
+        ? req.submissionFlags.map((flag) => ({
+          flag: allowedSubmissionFlags.has(String(flag?.flag || ""))
+            ? String(flag.flag)
+            : "suspicious-pattern",
+          severity: flag.severity || "medium",
+          timestamp: new Date(),
+        }))
+        : [];
+
+      const submissionMetadata = req.submissionMetadata || {};
+      const submissionValidation = req.submissionValidation || {
+        totalTimeValid: true,
+        averageTimePerQuestion: 0,
+        duplicateAnswerCount: 0,
+        flagged: false,
+        flagReason: null,
+      };
+
+      const safeSubmissionValidation = {
+        ...submissionValidation,
+        flagReason: allowedSubmissionFlags.has(String(submissionValidation?.flagReason || ""))
+          ? submissionValidation.flagReason
+          : null,
+      };
 
       await QuizResultModel.create({
         jobId,
@@ -2528,6 +3102,15 @@ app.post("/Frontend/submit-quiz", async (req, res) => {
         })),
         aiCoach,
         submittedAt,
+        auditTrail: {
+          ipAddress: submissionMetadata.ipAddress || req.ip || req.connection?.remoteAddress || null,
+          userAgent: submissionMetadata.userAgent || req.get("user-agent") || null,
+          focusEvents: mappedFocusEvents,
+          securityEvents: mappedSecurityEvents,
+          completionType: allowedCompletionType,
+        },
+        submissionFlags: middlewareFlags,
+        submissionValidation: safeSubmissionValidation,
       });
   
       res.status(200).json({
@@ -2541,9 +3124,117 @@ app.post("/Frontend/submit-quiz", async (req, res) => {
       });
     } catch (error) {
       console.error("❌ Error submitting quiz:", error);
-      res.status(500).json({ message: "Server error while processing quiz" });
+      res.status(500).json({
+        message: "Server error while processing quiz",
+        detail: error?.message || "unknown-error",
+      });
     }
   });
+
+const requireAdminAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "Unauthorized: missing token" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+    const user = await UserModel.findById(decoded.id).select("role").lean();
+
+    if (!user || user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Forbidden: admin access required" });
+    }
+
+    req.authUser = { id: String(decoded.id), role: user.role };
+    return next();
+  } catch (error) {
+    return res.status(401).json({ message: "Unauthorized: invalid token" });
+  }
+};
+
+const getQuizAuditSubmissions = async (req, res) => {
+  try {
+    const {
+      candidateName,
+      candidateId,
+      jobId,
+      flagType,
+      flagged,
+      startDate,
+      endDate,
+      sortBy = "submittedAt",
+    } = req.query;
+
+    const filter = {};
+
+    if (candidateId) {
+      filter.candidateId = candidateId;
+    }
+
+    if (jobId) {
+      filter.jobId = jobId;
+    }
+
+    if (flagType) {
+      filter.submissionFlags = { $elemMatch: { flag: String(flagType).trim() } };
+    }
+
+    if (String(flagged).toLowerCase() === "true") {
+      filter["submissionValidation.flagged"] = true;
+    }
+
+    if (startDate || endDate) {
+      filter.submittedAt = {};
+      if (startDate) {
+        const parsedStart = new Date(startDate);
+        if (!Number.isNaN(parsedStart.getTime())) {
+          filter.submittedAt.$gte = parsedStart;
+        }
+      }
+      if (endDate) {
+        const parsedEnd = new Date(endDate);
+        if (!Number.isNaN(parsedEnd.getTime())) {
+          parsedEnd.setHours(23, 59, 59, 999);
+          filter.submittedAt.$lte = parsedEnd;
+        }
+      }
+      if (!filter.submittedAt.$gte && !filter.submittedAt.$lte) {
+        delete filter.submittedAt;
+      }
+    }
+
+    const sortMap = {
+      submittedAt: { submittedAt: -1 },
+      score: { score: -1 },
+      flagged: { "submissionValidation.flagged": -1, submittedAt: -1 },
+    };
+
+    const submissions = await QuizResultModel.find(filter)
+      .populate("candidateId", "name email")
+      .populate("jobId", "title")
+      .sort(sortMap[sortBy] || sortMap.submittedAt)
+      .lean();
+
+    const normalizedCandidateName = String(candidateName || "").trim().toLowerCase();
+    const filteredByCandidateName = normalizedCandidateName
+      ? submissions.filter((submission) => {
+        const candidate = submission?.candidateId || {};
+        const name = String(candidate?.name || "").toLowerCase();
+        const email = String(candidate?.email || "").toLowerCase();
+        return name.includes(normalizedCandidateName) || email.includes(normalizedCandidateName);
+      })
+      : submissions;
+
+    return res.status(200).json(filteredByCandidateName);
+  } catch (error) {
+    console.error("❌ Error fetching quiz audit submissions:", error);
+    return res.status(500).json({ message: "Server error while fetching quiz audit submissions" });
+  }
+};
+
+app.get("/Frontend/quiz-audit-submissions", requireAdminAuth, getQuizAuditSubmissions);
+app.get("/api/quiz-audit-log", requireAdminAuth, getQuizAuditSubmissions);
 
   app.get('/Frontend/quiz-lengths', async (req, res) => {
     try {
@@ -3006,7 +3697,9 @@ app.post('/predict-from-skills', async (req, res) => {
         : req.body.required_exp || 1
     };
 
-    const response = await axios.post('http://localhost:5000/predict-from-skills', requestData);
+    const response = await axios.post('http://localhost:5000/predict-from-skills', requestData, {
+      timeout: 15000,
+    });
     res.json(response.data);
   } catch (error) {
     const remoteError = error.response?.data;
@@ -3014,8 +3707,9 @@ app.post('/predict-from-skills', async (req, res) => {
       (typeof remoteError?.error === 'string' && remoteError.error.trim())
       || (typeof error.message === 'string' && error.message.trim())
       || 'Unknown prediction service error';
+    const isServiceUnavailable = !error.response;
     console.error('Error calling Flask service:', remoteError || error.message);
-    res.status(500).json({ 
+    res.status(isServiceUnavailable ? 503 : 500).json({ 
       error: 'Failed to get prediction',
       details,
       status: 'failed' 
