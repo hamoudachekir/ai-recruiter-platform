@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  # Interview Scheduling Service (Python/FastAPI)
+  scheduling-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: interview-scheduling-service
+    ports:
+      - "5004:5004"
+    environment:
+      - SERVICE_PORT=5004
+      - SERVICE_HOST=0.0.0.0
+      - MONGODB_URL=mongodb://mongo:27017
+      - MONGODB_DATABASE=ai_recruiter_db
+      - NODE_BACKEND_URL=http://node-backend:3001
+      - WORKING_HOURS_START=9
+      - WORKING_HOURS_END=17
+      - LUNCH_START=12
+      - LUNCH_END=13
+      - SCHEDULING_DAYS_AHEAD=7
+      - DEBUG=False
+      - LOG_LEVEL=INFO
+    depends_on:
+      - mongo
+    networks:
+      - ai-recruiter-network
+    restart: unless-stopped
+    volumes:
+      - ./:/app
+
+  # MongoDB (Shared with Node backend)
+  mongo:
+    image: mongo:6.0
+    container_name: ai-recruiter-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: ai_recruiter_db
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - ai-recruiter-network
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+
+networks:
+  ai-recruiter-network:
+    driver: bridge

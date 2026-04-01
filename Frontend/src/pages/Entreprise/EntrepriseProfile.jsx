@@ -66,6 +66,16 @@ const EntrepriseProfile = () => {
   const [jobCandidatesForQuiz, setJobCandidatesForQuiz] = useState([]);
   const [selectedQuizCandidateId, setSelectedQuizCandidateId] = useState("");
   const [jobQuizLengths, setJobQuizLengths] = useState({});
+  const [calendarStatus, setCalendarStatus] = useState({
+    connected: false,
+    connectedAt: null,
+    tokenExpiry: null,
+    tokenExpired: null,
+    loading: false,
+  });
+  const [calendarActionLoading, setCalendarActionLoading] = useState(false);
+  const [testEmailLoading, setTestEmailLoading] = useState(false);
+  const [decisionLoadingById, setDecisionLoadingById] = useState({});
 
   const [newJob, setNewJob] = useState({
     title: "",
@@ -459,6 +469,264 @@ const EntrepriseProfile = () => {
     }
   };
 
+  const fetchCalendarConnectionStatus = async () => {
+    if (!id) return;
+
+    setCalendarStatus((prev) => ({ ...prev, loading: true }));
+    try {
+      const response = await axios.get(`http://localhost:3001/api/recruiter/calendar/status/${id}`);
+      setCalendarStatus({
+        connected: Boolean(response?.data?.connected),
+        connectedAt: response?.data?.connectedAt || null,
+        tokenExpiry: response?.data?.tokenExpiry || null,
+        tokenExpired: response?.data?.tokenExpired ?? null,
+        loading: false,
+      });
+    } catch (error) {
+      console.error("Failed to fetch calendar status:", error);
+      setCalendarStatus((prev) => ({
+        ...prev,
+        connected: false,
+        loading: false,
+      }));
+      toast.error(error?.response?.data?.message || "Failed to fetch calendar status.");
+    }
+  };
+
+  const handleConnectCalendar = async () => {
+    if (!id) return;
+
+    setCalendarActionLoading(true);
+    try {
+      const response = await axios.get(`http://localhost:3001/api/recruiter/calendar/connect-url/${id}`);
+      const authUrl = response?.data?.authUrl;
+
+      if (!authUrl) {
+        throw new Error("No Google connect URL returned by server");
+      }
+
+      const popup = window.open(
+        authUrl,
+        "google-calendar-connect",
+        "width=580,height=760,menubar=no,toolbar=no,status=no"
+      );
+
+      if (!popup) {
+        throw new Error("Popup blocked. Please allow popups and try again.");
+      }
+
+      toast.info("Complete Google consent in the popup window.");
+
+      let callbackReceived = false;
+      const accessDeniedHint =
+        "Google denied access. If your OAuth app is in testing mode, add your account in Google Cloud Console > OAuth consent screen > Test users.";
+      let accessHintShown = false;
+
+      const onMessage = (event) => {
+        if (event?.data?.type !== "GOOGLE_CALENDAR_CONNECTED") return;
+
+        callbackReceived = true;
+        window.removeEventListener("message", onMessage);
+        const success = Boolean(event?.data?.success);
+        if (success) {
+          toast.success("Google Calendar connected successfully.");
+        } else {
+          const backendMessage = String(event?.data?.message || "");
+          const looksLikeAccessDenied =
+            backendMessage.includes("access denied") ||
+            backendMessage.includes("testing mode") ||
+            backendMessage.includes("Test users");
+
+          toast.error(looksLikeAccessDenied ? accessDeniedHint : (backendMessage || "Calendar connection failed."));
+        }
+        fetchCalendarConnectionStatus();
+      };
+
+      window.addEventListener("message", onMessage);
+
+      const hintTimeout = window.setTimeout(() => {
+        if (callbackReceived || popup.closed || accessHintShown) return;
+        accessHintShown = true;
+        toast.info(accessDeniedHint);
+      }, 8000);
+
+      const popupPoll = window.setInterval(() => {
+        if (!popup.closed) return;
+        window.clearInterval(popupPoll);
+        window.clearTimeout(hintTimeout);
+        window.removeEventListener("message", onMessage);
+        if (!callbackReceived) {
+          toast.warning(accessDeniedHint);
+        }
+        fetchCalendarConnectionStatus();
+      }, 900);
+
+      window.setTimeout(() => {
+        window.clearInterval(popupPoll);
+        window.clearTimeout(hintTimeout);
+      }, 180000);
+    } catch (error) {
+      console.error("Failed to connect Google Calendar:", error);
+      toast.error(error?.response?.data?.message || error?.message || "Failed to start Google Calendar connection.");
+    } finally {
+      setCalendarActionLoading(false);
+    }
+  };
+
+  const handleSendCalendarTestEmail = async () => {
+    if (!id) return;
+
+    setTestEmailLoading(true);
+    try {
+      const response = await axios.post("http://localhost:3001/api/recruiter/calendar/test-email", {
+        recruiterId: id,
+      });
+      toast.success(response?.data?.message || "Test email sent.");
+    } catch (error) {
+      console.error("Failed to send test email:", error);
+      toast.error(error?.response?.data?.message || "Failed to send test email.");
+    } finally {
+      setTestEmailLoading(false);
+    }
+  };
+
+  const handleRecruiterDecision = async (application, decision) => {
+    const applicationId = normalizeMongoId(application?._id);
+    if (!applicationId) return;
+
+    setDecisionLoadingById((prev) => ({ ...prev, [applicationId]: true }));
+    try {
+      const response = await axios.put(
+        `http://localhost:3001/Frontend/applications/${applicationId}/recruiter-decision`,
+        {
+          enterpriseId: id,
+          decision,
+        }
+      );
+
+      const updatedApplication = response?.data?.application;
+      if (updatedApplication?._id) {
+        const updatedId = normalizeMongoId(updatedApplication._id);
+        setSelectedApplications((prev) =>
+          prev.map((item) => {
+            const currentId = normalizeMongoId(item?._id);
+            if (currentId !== updatedId) return item;
+
+            return {
+              ...item,
+              ...updatedApplication,
+              mlPrediction: item.mlPrediction,
+              quizPercent: item.quizPercent,
+              isQualified: item.isQualified,
+            };
+          })
+        );
+      }
+
+      const automation = response?.data?.automation || {};
+      if (decision === "INTERVIEW") {
+        if (automation?.schedulingTriggered) {
+          toast.success("Candidate accepted and scheduling workflow started.");
+        } else if (automation?.scheduleError) {
+          toast.warning(`Candidate accepted but scheduling trigger failed: ${automation.scheduleError}`);
+        } else {
+          toast.success(response?.data?.message || "Candidate accepted.");
+        }
+      } else {
+        toast.success(response?.data?.message || "Candidate decision saved.");
+      }
+    } catch (error) {
+      console.error("Failed to save recruiter decision:", error);
+      toast.error(error?.response?.data?.message || "Failed to save recruiter decision.");
+    } finally {
+      setDecisionLoadingById((prev) => ({ ...prev, [applicationId]: false }));
+    }
+  };
+
+  const formatWorkflowDate = (value) => {
+    if (!value) return "";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "";
+    return parsed.toLocaleString();
+  };
+
+  const buildAgentWorkflowSteps = (application) => {
+    const schedule = application?.interviewSchedule || {};
+    const decision = String(application?.recruiterDecision || "PENDING").toUpperCase();
+    const quizDone = Boolean(application?.quizCompleted);
+    const decisionRejected = decision === "REJECTED";
+    const scheduleStatus = String(schedule?.status || "not_scheduled");
+    const scheduleFailed = scheduleStatus === "failed";
+    const schedulingTriggered = scheduleStatus !== "not_scheduled";
+    const hasSuggestedSlots = Array.isArray(schedule?.suggestedSlots) && schedule.suggestedSlots.length > 0;
+    const scheduleConfirmed = ["confirmed", "rescheduled"].includes(scheduleStatus);
+    const emailSent = String(schedule?.emailStatus || "").toLowerCase() === "sent";
+    const confirmedStart = schedule?.confirmedSlot?.start_time || null;
+    const confirmedEnd = schedule?.confirmedSlot?.end_time || null;
+
+    return [
+      {
+        key: "quiz",
+        label: "Quiz completed",
+        state: quizDone ? "done" : "pending",
+        detail: quizDone
+          ? `Score ${Number(application?.quizScore || 0)}/${Number(application?.quizLength || 0) || "-"}`
+          : "Waiting for candidate quiz submission",
+      },
+      {
+        key: "decision",
+        label: "Recruiter decision",
+        state: decision === "INTERVIEW" ? "done" : decisionRejected ? "error" : "pending",
+        detail:
+          decision === "INTERVIEW"
+            ? `Accepted${application?.recruiterDecisionAt ? ` on ${formatWorkflowDate(application.recruiterDecisionAt)}` : ""}`
+            : decisionRejected
+              ? "Candidate rejected"
+              : "Pending recruiter action",
+      },
+      {
+        key: "trigger",
+        label: "Scheduling workflow triggered",
+        state: decisionRejected ? "pending" : schedulingTriggered ? "done" : scheduleFailed ? "error" : "pending",
+        detail: decisionRejected
+          ? "Skipped because candidate is rejected"
+          : schedulingTriggered
+            ? `Status: ${scheduleStatus}`
+            : "Waiting for acceptance",
+      },
+      {
+        key: "slots",
+        label: "Suggested slots generated",
+        state: decisionRejected ? "pending" : hasSuggestedSlots ? "done" : scheduleFailed ? "error" : "pending",
+        detail: decisionRejected
+          ? "No scheduling for rejected candidates"
+          : hasSuggestedSlots
+            ? `${schedule.suggestedSlots.length} slots generated`
+            : "No slot generated yet",
+      },
+      {
+        key: "confirm",
+        label: "Interview confirmed",
+        state: decisionRejected ? "pending" : scheduleConfirmed ? "done" : scheduleFailed ? "error" : "pending",
+        detail: decisionRejected
+          ? "Not applicable"
+          : scheduleConfirmed
+            ? `From ${confirmedStart || "-"} to ${confirmedEnd || "-"}`
+            : "Waiting for confirmation",
+      },
+      {
+        key: "email",
+        label: "Invitation email sent",
+        state: decisionRejected ? "pending" : emailSent ? "done" : scheduleFailed ? "error" : "pending",
+        detail: decisionRejected
+          ? "Not applicable"
+          : emailSent
+            ? "Email delivered to candidate"
+            : "Email pending",
+      },
+    ];
+  };
+
 const openApplicationModal = async (jobId) => {
   try {
     const res = await axios.get(`http://localhost:3001/Frontend/job-applications/${jobId}`);
@@ -493,38 +761,68 @@ const openApplicationModal = async (jobId) => {
     const jobRes = await axios.get(`http://localhost:3001/Frontend/job/${jobId}`);
     const job = jobRes.data;
 
-    // Enhance candidates with ML predictions
-    const qualifiedCandidates = await Promise.all(
-      enrichedCandidates
-        .map(async (app) => {
-          try {
-            // Get ML prediction for each candidate
-            const predictionRes = await axios.post('http://localhost:3001/predict-from-skills', {
-              candidate_skills: app.candidateId.profile?.skills || [],
-              job_skills: job.skills || [],
-              candidate_exp: app.candidateId.profile?.experience || 0,
-              required_exp: job.requiredExperience || 1,
-              candidate_education: app.candidateId.profile?.education || '',
-              required_education: job.education || ''
-            });
+    // Enhance candidates with ML predictions.
+    // If the ML service is down (503), stop additional calls and gracefully continue.
+    const qualifiedCandidates = [];
+    let predictionServiceUnavailable = false;
 
-            return {
-              ...app,
-              mlPrediction: {
-                hired: predictionRes.data.hired === 1,
-                confidence: Math.round(predictionRes.data.confidence * 100),
-                matches: predictionRes.data.matches
-              }
-            };
-          } catch (error) {
-            console.error(`Error getting prediction for candidate ${app.candidateId._id}:`, error);
-            return {
-              ...app,
-              mlPrediction: null
-            };
-          }
-        })
-    );
+    for (const app of enrichedCandidates) {
+      if (predictionServiceUnavailable) {
+        qualifiedCandidates.push({
+          ...app,
+          mlPrediction: null,
+        });
+        continue;
+      }
+
+      try {
+        const predictionRes = await axios.post('http://localhost:3001/predict-from-skills', {
+          candidate_skills: app.candidateId.profile?.skills || [],
+          job_skills: job.skills || [],
+          candidate_exp: app.candidateId.profile?.experience || 0,
+          required_exp: job.requiredExperience || 1,
+          candidate_education: app.candidateId.profile?.education || '',
+          required_education: job.education || ''
+        });
+
+        const predictionStatus = String(predictionRes?.data?.status || '').toLowerCase();
+        if (predictionStatus && predictionStatus !== 'success') {
+          predictionServiceUnavailable = true;
+          qualifiedCandidates.push({
+            ...app,
+            mlPrediction: null,
+          });
+          continue;
+        }
+
+        qualifiedCandidates.push({
+          ...app,
+          mlPrediction: {
+            hired: predictionRes.data.hired === 1,
+            confidence: Math.round(predictionRes.data.confidence * 100),
+            matches: predictionRes.data.matches,
+          },
+        });
+      } catch (error) {
+        const statusCode = error?.response?.status;
+        const candidateId = app?.candidateId?._id || 'unknown';
+
+        if (statusCode === 503) {
+          predictionServiceUnavailable = true;
+        } else {
+          console.error(`Error getting prediction for candidate ${candidateId}:`, error);
+        }
+
+        qualifiedCandidates.push({
+          ...app,
+          mlPrediction: null,
+        });
+      }
+    }
+
+    if (predictionServiceUnavailable) {
+      toast.info("ML prediction service is temporarily unavailable. Candidate list is shown without ML ranking.");
+    }
 
     // Sort candidates by ML prediction confidence (highest first)
     qualifiedCandidates.sort((a, b) => {
@@ -540,10 +838,12 @@ const openApplicationModal = async (jobId) => {
     setSelectedApplications(qualifiedCandidates);
     setSelectedJobId(jobId);
     setShowModal(true);
+    fetchCalendarConnectionStatus();
   } catch (err) {
     console.error("❌ Failed to fetch applications for job:", jobId, err);
     setSelectedApplications([]);
     setShowModal(true);
+    fetchCalendarConnectionStatus();
   }
 };
   const handleScheduleInterview = (candidate) => {
@@ -770,8 +1070,8 @@ const openApplicationModal = async (jobId) => {
 
       if (selectedFile) {
         const formData = new FormData();
-        formData.append("picture", selectedFile);
         formData.append("userId", id);
+        formData.append("picture", selectedFile);
 
         const uploadRes = await axios.post(
           "http://localhost:3001/Frontend/upload-profile",
@@ -995,7 +1295,8 @@ const openApplicationModal = async (jobId) => {
                     ) : !userPicture && !imagePreview ? (
                       <div
                         className={`image-placeholder ${isEditing ? "editable" : ""}`}
-                        onClick={isEditing ? handleChooseImage : null}
+                        onClick={handleChooseImage}
+                        style={{ cursor: "pointer" }}
                       >
                         <FontAwesomeIcon icon={faCamera} className="camera-icon" />
                         <span>Add image</span>
@@ -1616,11 +1917,61 @@ const openApplicationModal = async (jobId) => {
         </button>
       </div>
       <div className="modal-body">
+        <div className="calendar-connection-panel">
+          <div>
+            <h6>Recruiter Google Calendar</h6>
+            <p>
+              Status: <strong>{calendarStatus.connected ? "Connected" : "Not connected"}</strong>
+              {calendarStatus.connectedAt && (
+                <>
+                  {" "}
+                  • Connected at {new Date(calendarStatus.connectedAt).toLocaleString()}
+                </>
+              )}
+              {calendarStatus.tokenExpired === true && " • Token expired"}
+            </p>
+          </div>
+          <div className="calendar-connection-actions">
+            <button
+              className="btn btn-outline-primary btn-sm"
+              onClick={fetchCalendarConnectionStatus}
+              disabled={calendarStatus.loading}
+              type="button"
+            >
+              {calendarStatus.loading ? "Checking..." : "Refresh Status"}
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleConnectCalendar}
+              disabled={calendarActionLoading}
+              type="button"
+            >
+              {calendarActionLoading
+                ? "Opening Google..."
+                : calendarStatus.connected
+                  ? "Reconnect Calendar"
+                  : "Connect Calendar"}
+            </button>
+            <button
+              className="btn btn-outline-success btn-sm"
+              onClick={handleSendCalendarTestEmail}
+              disabled={testEmailLoading}
+              type="button"
+            >
+              {testEmailLoading ? "Sending..." : "Send Test Mail"}
+            </button>
+          </div>
+        </div>
+
         {selectedApplications.length > 0 ? (
           selectedApplications.map((app) => {
             const quizPercent = app.quizPercent || 0;
             const candidateName = app.candidateId?.name || "Candidate";
             const candidateInitial = candidateName.charAt(0).toUpperCase();
+            const applicationId = normalizeMongoId(app?._id);
+            const isDecisionLoading = Boolean(decisionLoadingById[applicationId]);
+            const isInterviewApproved = app.recruiterDecision === "INTERVIEW";
+            const workflowSteps = buildAgentWorkflowSteps(app);
 
             return (
               <div key={app._id || app.candidateId?._id || app.candidateId?.email} className="application-card">
@@ -1641,6 +1992,22 @@ const openApplicationModal = async (jobId) => {
                     {app.mlPrediction && (
                       <span className={`status-pill ${app.mlPrediction.hired ? "status-pill-recommended" : "status-pill-not-recommended"}`}>
                         {app.mlPrediction.hired ? "Recommended" : "Not Recommended"} ({app.mlPrediction.confidence}%)
+                      </span>
+                    )}
+                    <span
+                      className={`status-pill ${
+                        app.recruiterDecision === "INTERVIEW"
+                          ? "status-pill-recommended"
+                          : app.recruiterDecision === "REJECTED"
+                            ? "status-pill-not-recommended"
+                            : "status-pill-neutral"
+                      }`}
+                    >
+                      Decision: {app.recruiterDecision || "PENDING"}
+                    </span>
+                    {app.interviewSchedule?.status && app.interviewSchedule.status !== "not_scheduled" && (
+                      <span className={`status-pill ${app.interviewSchedule.status === "failed" ? "status-pill-not-recommended" : "status-pill-quiz"}`}>
+                        Scheduling: {app.interviewSchedule.status}
                       </span>
                     )}
                   </div>
@@ -1799,13 +2166,64 @@ const openApplicationModal = async (jobId) => {
                   </div>
                 )}
 
+                <div className="agent-workflow-panel">
+                  <div className="agent-workflow-header">
+                    <h6>Agent Workflow</h6>
+                    <span>{String(app?.interviewSchedule?.status || "not_scheduled")}</span>
+                  </div>
+                  <div className="agent-workflow-timeline">
+                    {workflowSteps.map((step) => (
+                      <div key={`${applicationId || "app"}-${step.key}`} className={`agent-step agent-step-${step.state}`}>
+                        <div className="agent-step-dot" />
+                        <div className="agent-step-content">
+                          <strong>{step.label}</strong>
+                          <p>{step.detail}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {app?.interviewSchedule?.meetingLink && (
+                    <a
+                      href={app.interviewSchedule.meetingLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="agent-workflow-link"
+                    >
+                      Open generated meeting link
+                    </a>
+                  )}
+                  {app?.interviewSchedule?.lastError && (
+                    <div className="agent-workflow-error">
+                      Last error: {app.interviewSchedule.lastError}
+                    </div>
+                  )}
+                </div>
+
                 <div className="action-buttons">
+                  <button
+                    className="btn btn-success"
+                    onClick={() => handleRecruiterDecision(app, "INTERVIEW")}
+                    disabled={isDecisionLoading || app.recruiterDecision === "INTERVIEW"}
+                    type="button"
+                  >
+                    {isDecisionLoading && app.recruiterDecision !== "INTERVIEW" ? "Saving..." : "Accept"}
+                  </button>
+                  <button
+                    className="btn btn-outline-danger"
+                    onClick={() => handleRecruiterDecision(app, "REJECTED")}
+                    disabled={isDecisionLoading || app.recruiterDecision === "REJECTED"}
+                    type="button"
+                  >
+                    {isDecisionLoading && app.recruiterDecision !== "REJECTED" ? "Saving..." : "Reject"}
+                  </button>
                   <button
                     className="btn btn-primary"
                     onClick={() => handleScheduleInterview(app)}
+                    disabled={!isInterviewApproved}
+                    title={!isInterviewApproved ? "Accept candidate first to trigger scheduling workflow." : ""}
                   >
                     <FontAwesomeIcon icon={faCalendarAlt} className="me-2" />
-                    Schedule Interview
+                    {isInterviewApproved ? "Schedule Interview" : "Accept to Schedule"}
                   </button>
                   <a
                     href={`mailto:${app.candidateId?.email}`}

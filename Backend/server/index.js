@@ -1173,6 +1173,16 @@ passport.use(
           });
         }
 
+        user.googleId = profile.id;
+        user.googleCalendar = user.googleCalendar || {};
+        user.googleCalendar.accessToken = accessToken;
+        if (refreshToken) {
+          user.googleCalendar.refreshToken = refreshToken;
+        }
+        user.googleCalendar.connectedAt = new Date();
+        user.googleCalendar.calendarId = user.googleCalendar.calendarId || 'primary';
+        await user.save();
+
         return done(null, user);
       } catch (err) {
         return done(err, null);
@@ -1244,6 +1254,11 @@ const interviewRoutes = require('./routes/interviewRoute');
 const quizRoutes = require('./routes/quizRoute');
 const linkedinRoute = require('./routes/linkedinRoute');
 const linkedinEnrichRoute = require('./routes/linkedinEnrichRoute');
+const schedulingInternalRoute = require('./routes/schedulingInternalRoute');
+const recruiterCalendarRoute = require('./routes/recruiterCalendarRoute');
+
+const SCHEDULING_SERVICE_URL = process.env.SCHEDULING_SERVICE_URL || 'http://localhost:5004';
+const SCHEDULING_SERVICE_TIMEOUT = Number(process.env.SCHEDULING_SERVICE_TIMEOUT || 12000);
 
 
 
@@ -1251,6 +1266,11 @@ app.use('/api', userRoutes);
 app.use('/api', jobRoutes);
 app.use('/api/interviews', interviewRoutes);
 app.use('/quiz', quizRoutes);
+app.use('/api/internal/scheduling', schedulingInternalRoute);
+app.use('/api/recruiter/calendar', recruiterCalendarRoute);
+// Mount a Google callback alias so OAuth clients already configured with
+// /auth/google/callback can complete recruiter calendar authorization.
+app.use('/auth/google', recruiterCalendarRoute);
 app.use('/api/linkedin', linkedinEnrichRoute);
 app.use('/api/linkedin', linkedinRoute);
 app.use('/auth/linkedin', linkedinRoute);
@@ -2367,6 +2387,192 @@ app.get("/Frontend/applications/:enterpriseId", async (req, res) => {
   } catch (error) {
     console.error("❌ Error fetching applications:", error);
     res.status(500).json({ message: "Erreur serveur lors de la récupération des candidatures." });
+  }
+});
+
+app.put("/Frontend/applications/:applicationId/recruiter-decision", async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    const { enterpriseId, decision, note = "" } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(applicationId)) {
+      return res.status(400).json({ message: "Invalid applicationId" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(enterpriseId || ""))) {
+      return res.status(400).json({ message: "enterpriseId is required and must be valid" });
+    }
+
+    const normalizedDecision = String(decision || "").toUpperCase();
+    const allowedDecisions = new Set(["INTERVIEW", "REJECTED"]);
+    if (!allowedDecisions.has(normalizedDecision)) {
+      return res.status(400).json({ message: "decision must be INTERVIEW or REJECTED" });
+    }
+
+    const application = await ApplicationModel.findById(applicationId);
+    if (!application) {
+      return res.status(404).json({ message: "Application not found" });
+    }
+
+    if (String(application.enterpriseId) !== String(enterpriseId)) {
+      return res.status(403).json({ message: "Forbidden: application does not belong to this enterprise" });
+    }
+
+    if (!application.quizCompleted) {
+      return res.status(400).json({
+        message: "Candidate has not completed quiz yet. Recruiter decision is allowed only after quiz completion.",
+      });
+    }
+
+    application.recruiterDecision = normalizedDecision;
+    application.recruiterDecisionAt = new Date();
+    application.recruiterDecisionBy = enterpriseId;
+    application.recruiterDecisionNote = String(note || "").trim();
+
+    await application.save();
+
+    let automation = {
+      schedulingTriggered: false,
+      interviewScheduleId: application?.interviewSchedule?.scheduleId || null,
+      scheduleStatus: application?.interviewSchedule?.status || "not_scheduled",
+      scheduleError: null,
+    };
+
+    if (normalizedDecision === "INTERVIEW") {
+      const currentScheduleStatus = application?.interviewSchedule?.status || "not_scheduled";
+      const hasReusableSchedule = Boolean(
+        application?.interviewSchedule?.scheduleId &&
+          ["suggested_slots_ready", "confirmed", "rescheduled"].includes(currentScheduleStatus)
+      );
+
+      if (!hasReusableSchedule) {
+        application.interviewSchedule.status = "scheduling";
+        application.interviewSchedule.lastTriggeredAt = new Date();
+        application.interviewSchedule.lastError = "";
+        await application.save();
+
+        try {
+          const schedulingPayload = {
+            candidate_id: String(application.candidateId),
+            recruiter_id: String(application.enterpriseId),
+            job_id: String(application.jobId),
+            application_id: String(application._id),
+            interview_type: "video",
+            interview_mode: "synchronous",
+            duration_minutes: 60,
+          };
+
+          const schedulingResponse = await axios.post(
+            `${SCHEDULING_SERVICE_URL}/api/scheduling/start`,
+            schedulingPayload,
+            {
+              timeout: SCHEDULING_SERVICE_TIMEOUT,
+            }
+          );
+
+          const schedulingData = schedulingResponse?.data || {};
+          const suggestedSlots = Array.isArray(schedulingData.suggested_slots)
+            ? schedulingData.suggested_slots
+            : [];
+
+          let autoConfirmStatus = null;
+          let autoConfirmError = null;
+          let confirmData = null;
+
+          if (schedulingData.interview_schedule_id && suggestedSlots.length > 0) {
+            const firstSlot = suggestedSlots[0];
+
+            try {
+              const confirmResponse = await axios.post(
+                `${SCHEDULING_SERVICE_URL}/api/scheduling/confirm`,
+                {
+                  interview_schedule_id: schedulingData.interview_schedule_id,
+                  selected_slot: {
+                    start_time: firstSlot.start_time,
+                    end_time: firstSlot.end_time,
+                  },
+                  location: "Google Meet",
+                  notes: "Auto-confirmed after recruiter acceptance",
+                },
+                {
+                  timeout: SCHEDULING_SERVICE_TIMEOUT,
+                }
+              );
+
+              confirmData = confirmResponse?.data || null;
+              autoConfirmStatus = confirmData?.status || null;
+            } catch (confirmError) {
+              autoConfirmError =
+                confirmError?.response?.data?.detail ||
+                confirmError?.response?.data?.message ||
+                confirmError?.message ||
+                "Scheduling confirm call failed";
+            }
+          }
+
+          const resolvedStatus =
+            autoConfirmStatus === "confirmed" || autoConfirmStatus === "rescheduled"
+              ? autoConfirmStatus
+              : (schedulingData.status || "scheduling");
+
+          application.interviewSchedule.scheduleId = schedulingData.interview_schedule_id || application?.interviewSchedule?.scheduleId || null;
+          application.interviewSchedule.status = resolvedStatus;
+          application.interviewSchedule.suggestedSlots = suggestedSlots;
+          
+          if (resolvedStatus === "confirmed" || resolvedStatus === "rescheduled") {
+            if (!application.interviewSchedule.confirmedSlot) application.interviewSchedule.confirmedSlot = {};
+            application.interviewSchedule.confirmedSlot.start_time = suggestedSlots[0]?.start_time || null;
+            application.interviewSchedule.confirmedSlot.end_time = suggestedSlots[0]?.end_time || null;
+          }
+
+          application.interviewSchedule.calendarEventId = confirmData?.calendar_event_id || null;
+          application.interviewSchedule.meetingLink = confirmData?.meeting_link || null;
+          application.interviewSchedule.emailStatus = (resolvedStatus === "confirmed" || resolvedStatus === "rescheduled") ? "sent" : "pending";
+          application.interviewSchedule.lastTriggeredAt = new Date();
+          application.interviewSchedule.lastError = autoConfirmError ? String(autoConfirmError) : "";
+
+          await application.save();
+
+          automation = {
+            schedulingTriggered: Boolean(schedulingData.interview_schedule_id),
+            interviewScheduleId: schedulingData.interview_schedule_id || null,
+            scheduleStatus: resolvedStatus,
+            scheduleError: autoConfirmError ? String(autoConfirmError) : null,
+            autoConfirmed:
+              resolvedStatus === "confirmed" || resolvedStatus === "rescheduled",
+          };
+        } catch (schedulingError) {
+          const schedulingErrorMessage =
+            schedulingError?.response?.data?.detail ||
+            schedulingError?.response?.data?.message ||
+            schedulingError?.message ||
+            "Scheduling service call failed";
+
+          application.interviewSchedule.status = "failed";
+          application.interviewSchedule.lastTriggeredAt = new Date();
+          application.interviewSchedule.lastError = String(schedulingErrorMessage);
+          await application.save();
+
+          automation = {
+            schedulingTriggered: false,
+            interviewScheduleId: application?.interviewSchedule?.scheduleId || null,
+            scheduleStatus: "failed",
+            scheduleError: String(schedulingErrorMessage),
+          };
+        }
+      }
+    }
+
+    return res.status(200).json({
+      message: normalizedDecision === "INTERVIEW"
+        ? "Candidate moved to interview stage successfully"
+        : "Candidate decision saved successfully",
+      application,
+      automation,
+    });
+  } catch (error) {
+    console.error("❌ Error saving recruiter decision:", error);
+    return res.status(500).json({ message: "Server error while saving recruiter decision" });
   }
 });
 
@@ -3684,8 +3890,33 @@ function calculateSkillMatch(candidateSkills, jobSkills) {
   
   return matchedSkills / jobSkills.length;
 }
+
+let predictFromSkillsServiceUnavailableUntil = 0;
+
+const buildPredictionFallback = (details, source = 'backend-fallback') => ({
+  hired: 0,
+  confidence: 0,
+  matches: {
+    skill_match: 0,
+    exp_match: 0,
+    education_match: 0,
+  },
+  status: 'fallback',
+  source,
+  details,
+});
+
 app.post('/predict-from-skills', async (req, res) => {
   try {
+    if (Date.now() < predictFromSkillsServiceUnavailableUntil) {
+      return res.status(200).json(
+        buildPredictionFallback(
+          'ML service is temporarily unavailable. Retry in a few seconds.',
+          'circuit-breaker'
+        )
+      );
+    }
+
     // Ensure experience values are numbers, not arrays
     const requestData = {
       ...req.body,
@@ -3700,6 +3931,7 @@ app.post('/predict-from-skills', async (req, res) => {
     const response = await axios.post('http://localhost:5000/predict-from-skills', requestData, {
       timeout: 15000,
     });
+    predictFromSkillsServiceUnavailableUntil = 0;
     res.json(response.data);
   } catch (error) {
     const remoteError = error.response?.data;
@@ -3709,7 +3941,14 @@ app.post('/predict-from-skills', async (req, res) => {
       || 'Unknown prediction service error';
     const isServiceUnavailable = !error.response;
     console.error('Error calling Flask service:', remoteError || error.message);
-    res.status(isServiceUnavailable ? 503 : 500).json({ 
+
+    if (isServiceUnavailable) {
+      // Cache unavailability briefly to avoid hammering the offline ML service.
+      predictFromSkillsServiceUnavailableUntil = Date.now() + 60000;
+      return res.status(200).json(buildPredictionFallback(details));
+    }
+
+    res.status(500).json({ 
       error: 'Failed to get prediction',
       details,
       status: 'failed' 

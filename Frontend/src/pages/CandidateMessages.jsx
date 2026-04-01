@@ -4,11 +4,6 @@ import Navbar from '../components/Navbar/Navbar';
 import Footer from '../components/Footer/Footer';
 import { io } from 'socket.io-client';
 
-const socket = io("http://localhost:3001", {
-  path: "/socket.io/",
-  transports: ["websocket"],
-});
-
 const CandidateMessages = () => {
   const [messages, setMessages] = useState([]);
 
@@ -30,6 +25,16 @@ const CandidateMessages = () => {
 
     fetchMessages();
 
+    if (!candidateId) return;
+
+    const socket = io("http://localhost:3001", {
+      path: "/socket.io/",
+      transports: ["websocket"],
+      reconnection: true,
+      reconnectionAttempts: 3,
+      reconnectionDelay: 1000,
+    });
+
     socket.on(`notification-${candidateId}`, (data) => {
       alert(data.message);
       fetchMessages(); // Refresh messages
@@ -37,6 +42,7 @@ const CandidateMessages = () => {
 
     return () => {
       socket.off(`notification-${candidateId}`);
+      socket.disconnect();
     };
   }, [candidateId]);
 
