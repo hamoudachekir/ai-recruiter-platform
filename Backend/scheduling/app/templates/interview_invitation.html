@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            background-color: #2c3e50;
+            color: #ffffff;
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .content {
+            padding: 30px 20px;
+            line-height: 1.6;
+            color: #333333;
+        }
+        .greeting {
+            margin-bottom: 20px;
+        }
+        .interview-details {
+            background-color: #f0f7ff;
+            border-left: 4px solid #3498db;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .detail-row {
+            margin: 10px 0;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #2c3e50;
+            display: inline-block;
+            width: 120px;
+        }
+        .detail-value {
+            color: #555555;
+        }
+        .cta-button {
+            display: inline-block;
+            background-color: #3498db;
+            color: #ffffff;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        .cta-button:hover {
+            background-color: #2980b9;
+        }
+        .instructions {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .footer {
+            background-color: #f5f5f5;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #666666;
+            border-top: 1px solid #eeeeee;
+        }
+        .meeting-link {
+            background-color: #ecf0f1;
+            padding: 15px;
+            border-radius: 4px;
+            word-break: break-all;
+            font-family: monospace;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Interview Invitation</h1>
+        </div>
+        
+        <div class="content">
+            <div class="greeting">
+                <p>Dear <strong>{{ candidate_name }}</strong>,</p>
+            </div>
+            
+            <p>Congratulations! You have successfully completed the preselection quiz for the <strong>{{ job_title }}</strong> position.</p>
+            
+            <p>We are pleased to invite you to an interview with our team. Below are the details of your scheduled interview:</p>
+            
+            <div class="interview-details">
+                <div class="detail-row">
+                    <span class="detail-label">Job Title:</span>
+                    <span class="detail-value">{{ job_title }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Interview Type:</span>
+                    <span class="detail-value">{{ interview_type }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Date & Time:</span>
+                    <span class="detail-value">{{ interview_date }} at {{ interview_time }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Duration:</span>
+                    <span class="detail-value">{{ interview_duration }} minutes</span>
+                </div>
+                {% if interview_mode == 'synchronous' %}
+                <div class="detail-row">
+                    <span class="detail-label">Interviewer:</span>
+                    <span class="detail-value">{{ recruiter_name }}</span>
+                </div>
+                {% endif %}
+                {% if location %}
+                <div class="detail-row">
+                    <span class="detail-label">Location:</span>
+                    <span class="detail-value">{{ location }}</span>
+                </div>
+                {% endif %}
+            </div>
+            
+            {% if meeting_link %}
+            <div class="instructions">
+                <p><strong>📹 Online Interview Link:</strong></p>
+                <div class="meeting-link">{{ meeting_link }}</div>
+                <p>Please click the link above to join the video call at the scheduled time.</p>
+            </div>
+            {% endif %}
+            
+            {% if interview_type == 'assessment' %}
+            <div class="instructions">
+                <p><strong>📋 Assessment Instructions:</strong></p>
+                <p>{{ instructions }}</p>
+            </div>
+            {% endif %}
+            
+            {% if interview_type == 'phone' %}
+            <div class="instructions">
+                <p><strong>📞 Phone Interview:</strong></p>
+                <p>You will receive a call from our recruiter at the scheduled time. Please ensure you are in a quiet location.</p>
+            </div>
+            {% endif %}
+            
+            <p style="margin-top: 30px;">
+                <strong>Please confirm your attendance by replying to this email or by clicking the button below:</strong>
+            </p>
+            
+            <div style="text-align: center;">
+                <a href="{{ confirmation_link }}" class="cta-button">Confirm Attendance</a>
+            </div>
+            
+            <p style="margin-top: 30px; color: #666666; font-size: 14px;">
+                <strong>If you cannot make this time:</strong> Please reply to this email with alternative times that work for you, and we will try to accommodate your schedule.
+            </p>
+            
+            {% if tips %}
+            <div class="instructions">
+                <p><strong>💡 Tips for your interview:</strong></p>
+                <ul>
+                    {% for tip in tips %}
+                    <li>{{ tip }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            
+            <p style="margin-top: 30px;">
+                Best regards,<br>
+                <strong>{{ company_name }}</strong><br>
+                Recruitment Team
+            </p>
+        </div>
+        
+        <div class="footer">
+            <p>
+                This is an automated email. Please do not reply to this address.<br>
+                If you have any questions, please contact our recruitment team.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

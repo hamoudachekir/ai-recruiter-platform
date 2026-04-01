@@ -142,6 +142,13 @@ const UserSchema = new Schema({
         }
     },
     googleId: { type: String },
+    googleCalendar: {
+        accessToken: { type: String, select: false },
+        refreshToken: { type: String, select: false },
+        tokenExpiry: { type: Date, select: false },
+        calendarId: { type: String, default: 'primary', select: false },
+        connectedAt: { type: Date, select: false },
+    },
     isActive: { type: Boolean, default: true },
     domain: { type: String, default: "" },
     createdDate: { type: Date, default: Date.now },

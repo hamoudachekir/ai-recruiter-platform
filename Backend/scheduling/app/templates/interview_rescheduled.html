@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            background-color: #f39c12;
+            color: #ffffff;
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            color: #ffe6cc;
+        }
+        .content {
+            padding: 30px 20px;
+            line-height: 1.6;
+            color: #333333;
+        }
+        .greeting {
+            margin-bottom: 20px;
+        }
+        .interview-details {
+            background-color: #fff8e1;
+            border-left: 4px solid #f39c12;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .old-details {
+            background-color: #ffebee;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .new-details {
+            background-color: #e8f5e9;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .detail-row {
+            margin: 10px 0;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #2c3e50;
+            display: inline-block;
+            width: 120px;
+        }
+        .detail-value {
+            color: #555555;
+        }
+        .old-value {
+            text-decoration: line-through;
+            color: #999999;
+        }
+        .cta-button {
+            display: inline-block;
+            background-color: #f39c12;
+            color: #ffffff;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 4px;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        .cta-button:hover {
+            background-color: #e67e22;
+        }
+        .footer {
+            background-color: #f5f5f5;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #666666;
+            border-top: 1px solid #eeeeee;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Interview Rescheduled</h1>
+            <p>Your interview time has been changed</p>
+        </div>
+        
+        <div class="content">
+            <div class="greeting">
+                <p>Dear <strong>{{ candidate_name }}</strong>,</p>
+            </div>
+            
+            <p>Your interview for the <strong>{{ job_title }}</strong> position has been rescheduled.</p>
+            
+            <p><strong>Previous Time:</strong></p>
+            <div class="old-details">
+                <div class="detail-row">
+                    <span class="detail-label">Date & Time:</span>
+                    <span class="detail-value old-value">{{ old_interview_date }} at {{ old_interview_time }}</span>
+                </div>
+            </div>
+            
+            <p><strong>New Interview Time:</strong></p>
+            <div class="new-details">
+                <div class="detail-row">
+                    <span class="detail-label">Date & Time:</span>
+                    <span class="detail-value" style="color: green; font-weight: bold;">{{ new_interview_date }} at {{ new_interview_time }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Duration:</span>
+                    <span class="detail-value">{{ interview_duration }} minutes</span>
+                </div>
+                {% if location %}
+                <div class="detail-row">
+                    <span class="detail-label">Location:</span>
+                    <span class="detail-value">{{ location }}</span>
+                </div>
+                {% endif %}
+            </div>
+            
+            {% if reschedule_reason %}
+            <p style="background-color: #f5f5f5; padding: 10px; border-radius: 4px;">
+                <strong>Reason for reschedule:</strong><br>
+                {{ reschedule_reason }}
+            </p>
+            {% endif %}
+            
+            <p style="margin-top: 30px;">
+                Please confirm that this new time works for you.
+            </p>
+            
+            <div style="text-align: center;">
+                <a href="{{ confirmation_link }}" class="cta-button">Confirm New Time</a>
+            </div>
+            
+            <p style="margin-top: 30px; color: #666666; font-size: 14px;">
+                <strong>If this time still doesn't work for you:</strong> Please reply to this email with alternative times, and we will do our best to find a suitable slot.
+            </p>
+            
+            <p style="margin-top: 30px;">
+                Best regards,<br>
+                <strong>{{ company_name }}</strong><br>
+                Recruitment Team
+            </p>
+        </div>
+        
+        <div class="footer">
+            <p>
+                This is an automated email. Please do not reply to this address.<br>
+                If you have any questions, please contact our recruitment team.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

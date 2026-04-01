@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header {
+            background-color: #e74c3c;
+            color: #ffffff;
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            color: #ffcccc;
+        }
+        .content {
+            padding: 30px 20px;
+            line-height: 1.6;
+            color: #333333;
+        }
+        .greeting {
+            margin-bottom: 20px;
+        }
+        .interview-details {
+            background-color: #ffebee;
+            border-left: 4px solid #e74c3c;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .detail-row {
+            margin: 10px 0;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #2c3e50;
+            display: inline-block;
+            width: 120px;
+        }
+        .detail-value {
+            color: #555555;
+        }
+        .cancellation-reason {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .next-steps {
+            background-color: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .footer {
+            background-color: #f5f5f5;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #666666;
+            border-top: 1px solid #eeeeee;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Interview Cancelled</h1>
+            <p>Your scheduled interview has been cancelled</p>
+        </div>
+        
+        <div class="content">
+            <div class="greeting">
+                <p>Dear <strong>{{ candidate_name }}</strong>,</p>
+            </div>
+            
+            <p>We regret to inform you that your interview for the <strong>{{ job_title }}</strong> position scheduled on <strong>{{ interview_date }}</strong> has been cancelled.</p>
+            
+            <div class="interview-details">
+                <p style="margin-top: 0;"><strong>Cancelled Interview Details:</strong></p>
+                <div class="detail-row">
+                    <span class="detail-label">Job Title:</span>
+                    <span class="detail-value">{{ job_title }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Date & Time:</span>
+                    <span class="detail-value">{{ interview_date }} at {{ interview_time }}</span>
+                </div>
+            </div>
+            
+            {% if cancellation_reason %}
+            <div class="cancellation-reason">
+                <p style="margin-top: 0;"><strong>Reason for Cancellation:</strong></p>
+                <p>{{ cancellation_reason }}</p>
+            </div>
+            {% endif %}
+            
+            <div class="next-steps">
+                <p style="margin-top: 0;"><strong>What Happens Next:</strong></p>
+                <ul style="margin: 10px 0;">
+                    {% if allow_rescheduling %}
+                    <li>If you are still interested in this position, we may contact you to reschedule for another time.</li>
+                    {% else %}
+                    <li>Unfortunately, we will not be proceeding with interviews for this round.</li>
+                    {% endif %}
+                    <li>We appreciate your interest in joining our organization.</li>
+                    <li>Please feel free to apply for other positions that match your profile.</li>
+                </ul>
+            </div>
+            
+            {% if contact_email %}
+            <p style="margin-top: 30px; color: #666666; font-size: 14px;">
+                <strong>Have questions?</strong><br>
+                Please contact us at <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>
+            </p>
+            {% endif %}
+            
+            <p style="margin-top: 30px;">
+                Thank you for your understanding.<br>
+                <strong>{{ company_name }}</strong><br>
+                Recruitment Team
+            </p>
+        </div>
+        
+        <div class="footer">
+            <p>
+                This is an automated email. Please do not reply to this address.<br>
+                If you have any questions, please contact our recruitment team.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

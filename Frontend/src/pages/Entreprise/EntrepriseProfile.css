@@ -1301,6 +1301,37 @@
     overflow-y: auto;
 }
 
+.calendar-connection-panel {
+    border: 1px solid #d9e7ff;
+    background: #f4f8ff;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.calendar-connection-panel h6 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: #1f2a37;
+}
+
+.calendar-connection-panel p {
+    margin: 4px 0 0;
+    font-size: 0.82rem;
+    color: #334155;
+}
+
+.calendar-connection-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .close-button {
     background: transparent;
     border: none;
@@ -1400,6 +1431,11 @@
     color: #b42331;
 }
 
+.status-pill-neutral {
+    background: #eef2f7;
+    color: #374151;
+}
+
 .candidate-details-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1468,6 +1504,111 @@
     color: #1e40af;
 }
 
+.agent-workflow-panel {
+    margin-bottom: 12px;
+    border: 1px solid #d9e4f4;
+    background: linear-gradient(180deg, #f8fbff 0%, #f4f8ff 100%);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.agent-workflow-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.agent-workflow-header h6 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #1f2937;
+    font-weight: 700;
+}
+
+.agent-workflow-header span {
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    background: #e7efff;
+    color: #1e3a8a;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-weight: 700;
+}
+
+.agent-workflow-timeline {
+    display: grid;
+    gap: 8px;
+}
+
+.agent-step {
+    display: grid;
+    grid-template-columns: 14px 1fr;
+    gap: 10px;
+    align-items: start;
+}
+
+.agent-step-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-top: 4px;
+    box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
+    background: #94a3b8;
+}
+
+.agent-step-content strong {
+    display: block;
+    font-size: 0.82rem;
+    color: #1f2937;
+    line-height: 1.2;
+}
+
+.agent-step-content p {
+    margin: 2px 0 0;
+    font-size: 0.78rem;
+    color: #475569;
+}
+
+.agent-step-done .agent-step-dot {
+    background: #16a34a;
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.16);
+}
+
+.agent-step-error .agent-step-dot {
+    background: #dc2626;
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.16);
+}
+
+.agent-step-pending .agent-step-dot {
+    background: #94a3b8;
+}
+
+.agent-workflow-link {
+    display: inline-flex;
+    margin-top: 10px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #1d4ed8;
+    text-decoration: none;
+}
+
+.agent-workflow-link:hover {
+    text-decoration: underline;
+}
+
+.agent-workflow-error {
+    margin-top: 8px;
+    font-size: 0.78rem;
+    color: #b91c1c;
+    background: #fff1f2;
+    border: 1px solid #fecdd3;
+    border-radius: 8px;
+    padding: 7px 9px;
+}
+
 .action-buttons {
     display: flex;
     flex-wrap: wrap;
@@ -1495,6 +1636,11 @@
     .candidate-details-grid,
     .match-details {
         grid-template-columns: 1fr;
+    }
+
+    .agent-workflow-header {
+        flex-direction: column;
+        align-items: flex-start;
     }
 }
 
