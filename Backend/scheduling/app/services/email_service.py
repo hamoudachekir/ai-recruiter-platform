@@ -1,11 +1,12 @@
 import asyncio
 import logging
 import smtplib
-from datetime import datetime
+from datetime import datetime, timezone, tzinfo
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
@@ -47,11 +48,54 @@ class EmailService:
 
         raise EmailServiceError("No email provider configured")
 
-    @staticmethod
-    def _format_datetime(value: datetime) -> Dict[str, str]:
+    def _resolve_target_timezone(self, timezone_name: Optional[str] = None) -> tuple[tzinfo, str]:
+        """Resolve the display timezone used in emails.
+
+        Priority:
+        1) explicit timezone argument (when valid and not UTC)
+        2) configured default timezone (when valid and not UTC)
+        3) host local timezone
+        4) UTC fallback
+        """
+        explicit_name = str(timezone_name or "").strip()
+        configured_name = str(self.settings.timezone_default or "").strip()
+
+        preferred_names: List[str] = []
+        if explicit_name:
+            preferred_names.append(explicit_name)
+        if configured_name and configured_name not in preferred_names:
+            preferred_names.append(configured_name)
+
+        for candidate in preferred_names:
+            if candidate.upper() == "UTC":
+                continue
+            try:
+                return ZoneInfo(candidate), candidate
+            except ZoneInfoNotFoundError:
+                logger.warning("Unknown timezone '%s' in scheduling email formatter", candidate)
+
+        local_tz = datetime.now().astimezone().tzinfo
+        if local_tz and local_tz != timezone.utc:
+            return local_tz, local_tz.tzname(None) or "Local Time"
+
+        return timezone.utc, "UTC"
+
+    def _format_datetime(self, value: datetime, timezone_name: Optional[str] = None) -> Dict[str, str]:
+        target_tz, fallback_label = self._resolve_target_timezone(timezone_name)
+
+        # Scheduling service stores naive datetimes as UTC by convention.
+        if value.tzinfo:
+            utc_value = value.astimezone(timezone.utc)
+        else:
+            utc_value = value.replace(tzinfo=timezone.utc)
+
+        localized = utc_value.astimezone(target_tz)
+        timezone_label = localized.tzname() or fallback_label
+
         return {
-            "date": value.strftime("%A, %B %d, %Y"),
-            "time": value.strftime("%H:%M"),
+            "date": localized.strftime("%A, %B %d, %Y"),
+            "time": localized.strftime("%H:%M"),
+            "timezone": timezone_label,
         }
 
     async def _send_with_smtp(self, recipient: str, subject: str, html_content: str, text_content: str) -> None:
@@ -162,8 +206,12 @@ class EmailService:
         location: Optional[str],
         meeting_link: Optional[str],
         notes: str = "",
+        candidate_action_link: Optional[str] = None,
+        candidate_timezone: Optional[str] = None,
+        recruiter_timezone: Optional[str] = None,
     ) -> Dict[str, Any]:
-        candidate_dt = self._format_datetime(start_time)
+        candidate_dt = self._format_datetime(start_time, candidate_timezone)
+        recruiter_dt = self._format_datetime(start_time, recruiter_timezone)
 
         candidate_context = {
             "candidate_name": candidate.get("name", "Candidate"),
@@ -172,6 +220,7 @@ class EmailService:
             "interview_mode": interview_mode,
             "interview_date": candidate_dt["date"],
             "interview_time": candidate_dt["time"],
+            "interview_timezone": candidate_dt["timezone"],
             "interview_duration": duration_minutes,
             "recruiter_name": recruiter.get("name", "Recruiter"),
             "location": location or "",
@@ -182,7 +231,7 @@ class EmailService:
                 "Ensure your internet and camera are working.",
                 "Review your CV and the job description.",
             ],
-            "confirmation_link": self.settings.frontend_confirmation_url,
+            "confirmation_link": candidate_action_link or self.settings.frontend_confirmation_url,
             "company_name": self.settings.email_from_name,
         }
 
@@ -190,7 +239,7 @@ class EmailService:
 
         candidate_subject = f"Interview Invitation - {job_info.get('title', 'Position')}"
         candidate_text = (
-            f"Your interview is scheduled on {candidate_dt['date']} at {candidate_dt['time']}."
+            f"Your interview is scheduled on {candidate_dt['date']} at {candidate_dt['time']} ({candidate_dt['timezone']})."
         )
 
         candidate_result = await self.send_email_batch(
@@ -207,6 +256,7 @@ class EmailService:
             "<li>Job: {job_title}</li>"
             "<li>Date: {date}</li>"
             "<li>Time: {time}</li>"
+            "<li>Timezone: {timezone}</li>"
             "<li>Duration: {duration} minutes</li>"
             "<li>Meeting Link: {meeting_link}</li>"
             "</ul>"
@@ -215,8 +265,9 @@ class EmailService:
             name=recruiter.get("name", "Recruiter"),
             candidate_name=candidate.get("name", "Candidate"),
             job_title=job_info.get("title", "Position"),
-            date=candidate_dt["date"],
-            time=candidate_dt["time"],
+            date=recruiter_dt["date"],
+            time=recruiter_dt["time"],
+            timezone=recruiter_dt["timezone"],
             duration=duration_minutes,
             meeting_link=meeting_link or "N/A",
         )
@@ -234,6 +285,94 @@ class EmailService:
             "recruiter": recruiter_result,
         }
 
+    async def send_interview_reminder_notifications(
+        self,
+        candidate: Dict[str, Any],
+        recruiter: Dict[str, Any],
+        job_info: Dict[str, Any],
+        start_time: datetime,
+        interview_mode: str,
+        location: Optional[str],
+        meeting_link: Optional[str],
+        reminder_type: str,
+        candidate_timezone: Optional[str] = None,
+        recruiter_timezone: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send reminder emails to candidate and recruiter (24h / 1h)."""
+        reminder_label = "24 hours" if reminder_type == "24h" else "1 hour"
+        candidate_dt = self._format_datetime(start_time, candidate_timezone)
+        recruiter_dt = self._format_datetime(start_time, recruiter_timezone)
+
+        candidate_html = (
+            "<p>Hello {name},</p>"
+            "<p>This is a reminder: your interview for <strong>{job}</strong> starts in <strong>{label}</strong>.</p>"
+            "<ul>"
+            "<li>Date: {date}</li>"
+            "<li>Time: {time}</li>"
+            "<li>Timezone: {timezone}</li>"
+            "<li>Mode: {mode}</li>"
+            "<li>Location: {location}</li>"
+            "<li>Meeting link: {meeting}</li>"
+            "</ul>"
+            "<p>Please be ready a few minutes before the start time.</p>"
+        ).format(
+            name=candidate.get("name", "Candidate"),
+            job=job_info.get("title", "Position"),
+            label=reminder_label,
+            date=candidate_dt["date"],
+            time=candidate_dt["time"],
+            timezone=candidate_dt["timezone"],
+            mode=interview_mode,
+            location=location or "N/A",
+            meeting=meeting_link or "N/A",
+        )
+
+        candidate_result = await self.send_email_batch(
+            recipients=[candidate.get("email", "")],
+            subject=f"Reminder: Interview in {reminder_label} - {job_info.get('title', 'Position')}",
+            html_content=candidate_html,
+            text_content=(
+                f"Reminder: your interview starts in {reminder_label} on {candidate_dt['date']} at {candidate_dt['time']} ({candidate_dt['timezone']})."
+            ),
+        )
+
+        recruiter_html = (
+            "<p>Hello {name},</p>"
+            "<p>Reminder: interview with <strong>{candidate}</strong> starts in <strong>{label}</strong>.</p>"
+            "<ul>"
+            "<li>Role: {job}</li>"
+            "<li>Date: {date}</li>"
+            "<li>Time: {time}</li>"
+            "<li>Timezone: {timezone}</li>"
+            "<li>Mode: {mode}</li>"
+            "<li>Meeting link: {meeting}</li>"
+            "</ul>"
+        ).format(
+            name=recruiter.get("name", "Recruiter"),
+            candidate=candidate.get("name", "Candidate"),
+            label=reminder_label,
+            job=job_info.get("title", "Position"),
+            date=recruiter_dt["date"],
+            time=recruiter_dt["time"],
+            timezone=recruiter_dt["timezone"],
+            mode=interview_mode,
+            meeting=meeting_link or "N/A",
+        )
+
+        recruiter_result = await self.send_email_batch(
+            recipients=[recruiter.get("email", "")],
+            subject=f"Recruiter reminder: Interview in {reminder_label} - {candidate.get('name', 'Candidate')}",
+            html_content=recruiter_html,
+            text_content="Reminder sent for upcoming interview.",
+        )
+
+        return {
+            "success": candidate_result["success"] and recruiter_result["success"],
+            "candidate": candidate_result,
+            "recruiter": recruiter_result,
+            "reminder_type": reminder_type,
+        }
+
     async def send_reschedule_notifications(
         self,
         candidate: Dict[str, Any],
@@ -244,9 +383,13 @@ class EmailService:
         duration_minutes: int,
         location: Optional[str],
         notes: str,
+        candidate_timezone: Optional[str] = None,
+        recruiter_timezone: Optional[str] = None,
     ) -> Dict[str, Any]:
-        old_dt = self._format_datetime(old_start_time)
-        new_dt = self._format_datetime(new_start_time)
+        old_dt = self._format_datetime(old_start_time, candidate_timezone)
+        new_dt = self._format_datetime(new_start_time, candidate_timezone)
+        recruiter_old_dt = self._format_datetime(old_start_time, recruiter_timezone)
+        recruiter_new_dt = self._format_datetime(new_start_time, recruiter_timezone)
 
         candidate_context = {
             "candidate_name": candidate.get("name", "Candidate"),
@@ -255,6 +398,7 @@ class EmailService:
             "old_interview_time": old_dt["time"],
             "new_interview_date": new_dt["date"],
             "new_interview_time": new_dt["time"],
+            "interview_timezone": new_dt["timezone"],
             "interview_duration": duration_minutes,
             "location": location or "",
             "reschedule_reason": notes,
@@ -279,15 +423,17 @@ class EmailService:
             "<ul>"
             "<li>Old time: {old_date} {old_time}</li>"
             "<li>New time: {new_date} {new_time}</li>"
+            "<li>Timezone: {timezone}</li>"
             "<li>Reason: {reason}</li>"
             "</ul>"
         ).format(
             name=recruiter.get("name", "Recruiter"),
             candidate_name=candidate.get("name", "Candidate"),
-            old_date=old_dt["date"],
-            old_time=old_dt["time"],
-            new_date=new_dt["date"],
-            new_time=new_dt["time"],
+            old_date=recruiter_old_dt["date"],
+            old_time=recruiter_old_dt["time"],
+            new_date=recruiter_new_dt["date"],
+            new_time=recruiter_new_dt["time"],
+            timezone=recruiter_new_dt["timezone"],
             reason=notes or "Not provided",
         )
 
@@ -311,14 +457,18 @@ class EmailService:
         job_info: Dict[str, Any],
         start_time: datetime,
         reason: str,
+        candidate_timezone: Optional[str] = None,
+        recruiter_timezone: Optional[str] = None,
     ) -> Dict[str, Any]:
-        slot_dt = self._format_datetime(start_time)
+        slot_dt = self._format_datetime(start_time, candidate_timezone)
+        recruiter_dt = self._format_datetime(start_time, recruiter_timezone)
 
         candidate_context = {
             "candidate_name": candidate.get("name", "Candidate"),
             "job_title": job_info.get("title", "Position"),
             "interview_date": slot_dt["date"],
             "interview_time": slot_dt["time"],
+            "interview_timezone": slot_dt["timezone"],
             "cancellation_reason": reason,
             "allow_rescheduling": True,
             "contact_email": self.settings.email_from,
@@ -340,13 +490,15 @@ class EmailService:
             "<ul>"
             "<li>Date: {date}</li>"
             "<li>Time: {time}</li>"
+            "<li>Timezone: {timezone}</li>"
             "<li>Reason: {reason}</li>"
             "</ul>"
         ).format(
             name=recruiter.get("name", "Recruiter"),
             candidate_name=candidate.get("name", "Candidate"),
-            date=slot_dt["date"],
-            time=slot_dt["time"],
+            date=recruiter_dt["date"],
+            time=recruiter_dt["time"],
+            timezone=recruiter_dt["timezone"],
             reason=reason,
         )
 
@@ -355,6 +507,106 @@ class EmailService:
             subject=f"Interview Cancelled - {candidate.get('name', 'Candidate')}",
             html_content=recruiter_html,
             text_content=f"Interview cancelled: {reason}",
+        )
+
+        return {
+            "success": candidate_result["success"] and recruiter_result["success"],
+            "candidate": candidate_result,
+            "recruiter": recruiter_result,
+        }
+
+    async def send_replan_notifications(
+        self,
+        candidate: Dict[str, Any],
+        recruiter: Dict[str, Any],
+        job_info: Dict[str, Any],
+        suggested_slots: List[Dict[str, Any]],
+        candidate_action_link: str,
+        reason: str = "",
+        candidate_timezone: Optional[str] = None,
+        recruiter_timezone: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send a new planning email after candidate declines the previously proposed interview time."""
+        safe_slots = list(suggested_slots or [])[:3]
+
+        def _format_slots(slots: List[Dict[str, Any]], tz_name: Optional[str]) -> str:
+            lines: List[str] = []
+            for index, slot in enumerate(slots, start=1):
+                start_raw = slot.get("start_time")
+                if not start_raw:
+                    continue
+
+                try:
+                    start_dt = datetime.fromisoformat(str(start_raw).replace("Z", "+00:00"))
+                    if start_dt.tzinfo:
+                        start_dt = start_dt.astimezone(timezone.utc).replace(tzinfo=None)
+                    formatted = self._format_datetime(start_dt, tz_name)
+                    lines.append(
+                        f"<li>Option {index}: {formatted['date']} at {formatted['time']} ({formatted['timezone']})</li>"
+                    )
+                except Exception:
+                    lines.append(f"<li>Option {index}: {start_raw}</li>")
+
+            return "".join(lines) if lines else "<li>No immediate slot available</li>"
+
+        candidate_slots_html = _format_slots(safe_slots, candidate_timezone)
+        recruiter_slots_html = _format_slots(safe_slots, recruiter_timezone)
+
+        candidate_reason_html = ""
+        if str(reason or "").strip():
+            candidate_reason_html = (
+                f"<p><strong>Your note:</strong> {str(reason).strip()}</p>"
+            )
+
+        candidate_html = (
+            "<p>Hello {name},</p>"
+            "<p>We received your request to change the interview time for <strong>{job}</strong>.</p>"
+            "{reason_html}"
+            "<p>Our scheduling engine generated a new plan. Here are the best alternatives:</p>"
+            "<ul>{slots}</ul>"
+            "<p>Please select and confirm your preferred slot here:</p>"
+            "<p><a href=\"{link}\">Open scheduling page</a></p>"
+            "<p>Thank you.</p>"
+        ).format(
+            name=candidate.get("name", "Candidate"),
+            job=job_info.get("title", "Position"),
+            reason_html=candidate_reason_html,
+            slots=candidate_slots_html,
+            link=candidate_action_link,
+        )
+
+        candidate_result = await self.send_email_batch(
+            recipients=[candidate.get("email", "")],
+            subject=f"Updated interview options - {job_info.get('title', 'Position')}",
+            html_content=candidate_html,
+            text_content="New interview options are available. Please open your scheduling link.",
+        )
+
+        recruiter_reason_html = ""
+        if str(reason or "").strip():
+            recruiter_reason_html = f"<p><strong>Candidate reason:</strong> {str(reason).strip()}</p>"
+
+        recruiter_html = (
+            "<p>Hello {name},</p>"
+            "<p>The candidate <strong>{candidate_name}</strong> cannot attend the previous interview time for <strong>{job}</strong>.</p>"
+            "{reason_html}"
+            "<p>A new scheduling plan was generated:</p>"
+            "<ul>{slots}</ul>"
+            "<p>Candidate self-service link: <a href=\"{link}\">open link</a></p>"
+        ).format(
+            name=recruiter.get("name", "Recruiter"),
+            candidate_name=candidate.get("name", "Candidate"),
+            job=job_info.get("title", "Position"),
+            reason_html=recruiter_reason_html,
+            slots=recruiter_slots_html,
+            link=candidate_action_link,
+        )
+
+        recruiter_result = await self.send_email_batch(
+            recipients=[recruiter.get("email", "")],
+            subject=f"Candidate requested rescheduling - {candidate.get('name', 'Candidate')}",
+            html_content=recruiter_html,
+            text_content="Candidate requested a new interview schedule. Updated alternatives have been generated.",
         )
 
         return {

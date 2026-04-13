@@ -411,6 +411,86 @@ video {
     cursor: not-allowed;
 }
 
+.voice-stream-btn {
+    min-width: 220px;
+    background: linear-gradient(135deg, #1f6feb 0%, #0ea5e9 100%);
+}
+
+.voice-stream-btn.active {
+    background: linear-gradient(135deg, #c2410c 0%, #ef4444 100%);
+}
+
+.voice-stream-status {
+    background: rgba(255, 255, 255, 0.95);
+    color: #1f2937;
+    border: 1px solid rgba(74, 107, 255, 0.18);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.voice-stream-error {
+    color: #b91c1c;
+    font-weight: 600;
+}
+
+.voice-stream-result {
+    background: rgba(255, 255, 255, 0.97);
+    color: #1f2937;
+    border: 1px solid rgba(74, 107, 255, 0.16);
+    border-radius: 10px;
+    padding: 12px;
+    max-width: 360px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.voice-stream-result h3 {
+    font-size: 0.95rem;
+    margin-bottom: 6px;
+}
+
+.voice-stream-result p {
+    font-size: 0.82rem;
+    color: #4b5563;
+    margin-bottom: 10px;
+}
+
+.voice-stream-turns {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.voice-stream-turn {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    background: #f8fbff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+
+.voice-stream-turn strong {
+    color: #1d4ed8;
+    font-size: 0.8rem;
+}
+
+.voice-stream-turn span {
+    color: #111827;
+    font-size: 0.86rem;
+}
+
+.voice-stream-turn small {
+    color: #6b7280;
+    font-size: 0.74rem;
+}
+
 .summary-modal {
     position: fixed;
     top: 50%;
@@ -550,6 +630,10 @@ video {
         bottom: 80px;
         right: 10px;
     }
+    .voice-stream-btn {
+        min-width: 0;
+        width: 100%;
+    }
     .summary-modal {
         width: 90%;
     }
@@ -581,6 +665,10 @@ video {
         padding: 10px;
         background: rgba(0,0,0,0.5);
         margin-top: 10px;
+    }
+    .voice-stream-result {
+        max-width: none;
+        width: 100%;
     }
     .recording-indicator {
         position: static;

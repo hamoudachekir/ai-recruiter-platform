@@ -105,6 +105,12 @@
                     <span class="detail-label">Date & Time:</span>
                     <span class="detail-value">{{ interview_date }} at {{ interview_time }}</span>
                 </div>
+                {% if interview_timezone %}
+                <div class="detail-row">
+                    <span class="detail-label">Timezone:</span>
+                    <span class="detail-value">{{ interview_timezone }}</span>
+                </div>
+                {% endif %}
             </div>
             
             {% if cancellation_reason %}

@@ -40,6 +40,7 @@ Thumbs.db
 uploads/
 uploadsPics/
 Backend/server/AI/uploads/
+Backend/third_party/nvidia_cuda12/*.dll
 
 # Logs
 *.log

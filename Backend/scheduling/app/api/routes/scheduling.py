@@ -8,14 +8,19 @@ from app.schemas.scheduling import (
     StartSchedulingResponse,
     ConfirmSlotRequest,
     ConfirmSlotResponse,
+    CandidateTokenConfirmRequest,
+    CandidateTokenDeclineRequest,
     RescheduleRequest,
     RescheduleResponse,
     CancelRequest,
     CancelResponse,
+    PublicScheduleResponse,
+    AlternativeSlotsResponse,
+    CandidateDeclineResponse,
     ErrorResponse,
     InterviewScheduleResponse
 )
-from app.services.scheduling_orchestrator import SchedulingOrchestrator
+from app.services.scheduling_orchestrator import SchedulingOrchestrator, SchedulingConflictError
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +82,17 @@ async def start_scheduling(
             application_id=request.application_id,
             interview_type=request.interview_type.value,
             interview_mode=request.interview_mode.value,
-            duration_minutes=request.duration_minutes
+            duration_minutes=request.duration_minutes,
+            optimization_options={
+                "buffer_minutes": request.buffer_minutes,
+                "interview_stage": request.interview_stage.value,
+                "job_priority": request.job_priority.value,
+                "candidate_level": request.candidate_level.value,
+                "recruiter_preferences": request.recruiter_preferences.model_dump(),
+                "candidate_timezone": request.candidate_timezone,
+                "recruiter_timezone": request.recruiter_timezone,
+                "top_n": request.top_n,
+            },
         )
         
         return StartSchedulingResponse(
@@ -87,6 +102,9 @@ async def start_scheduling(
             recruiter_info=result["recruiter_info"],
             candidate_info=result["candidate_info"],
             job_info=result["job_info"],
+            candidate_action_link=result.get("candidate_action_link"),
+            alternative_strategies=result.get("alternative_strategies"),
+            optimization_context=result.get("optimization_context"),
             message=result["message"]
         )
     
@@ -111,6 +129,7 @@ async def start_scheduling(
     status_code=status.HTTP_200_OK,
     responses={
         400: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         500: {"model": ErrorResponse}
     }
@@ -162,6 +181,17 @@ async def confirm_slot(
             calendar_event_id=result.get("calendar_event_id"),
             meeting_link=result.get("meeting_link")
         )
+
+    except SchedulingConflictError as e:
+        logger.warning(f"Slot conflict: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": str(e),
+                "code": "slot_conflict",
+                "suggested_slots": e.suggested_slots,
+            },
+        )
     
     except ValueError as e:
         logger.warning(f"Validation error: {str(e)}")
@@ -184,6 +214,7 @@ async def confirm_slot(
     status_code=status.HTTP_200_OK,
     responses={
         400: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
         500: {"model": ErrorResponse}
     }
@@ -228,6 +259,17 @@ async def reschedule_interview(
             interview_schedule_id=result["interview_schedule_id"],
             status=result["status"],
             message=result["message"]
+        )
+
+    except SchedulingConflictError as e:
+        logger.warning(f"Reschedule conflict: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": str(e),
+                "code": "slot_conflict",
+                "suggested_slots": e.suggested_slots,
+            },
         )
     
     except ValueError as e:
@@ -288,6 +330,7 @@ async def cancel_interview(
         return CancelResponse(
             interview_schedule_id=result["interview_schedule_id"],
             status=result["status"],
+            suggested_slots=result.get("suggested_slots"),
             message=result["message"]
         )
     
@@ -303,6 +346,173 @@ async def cancel_interview(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cancel interview"
+        )
+
+
+@router.get(
+    "/public/{candidate_action_token}",
+    response_model=PublicScheduleResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def get_public_schedule(
+    candidate_action_token: str,
+    orchestrator: SchedulingOrchestrator = Depends(get_orchestrator),
+) -> PublicScheduleResponse:
+    """Get candidate-facing scheduling context by token."""
+    logger.info("GET /api/scheduling/public/{token}")
+
+    try:
+        result = await orchestrator.get_public_schedule_by_token(candidate_action_token)
+        return PublicScheduleResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to get public schedule: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve candidate schedule",
+        )
+
+
+@router.post(
+    "/public/{candidate_action_token}/confirm",
+    response_model=ConfirmSlotResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def confirm_slot_public(
+    candidate_action_token: str,
+    request: CandidateTokenConfirmRequest,
+    orchestrator: SchedulingOrchestrator = Depends(get_orchestrator),
+) -> ConfirmSlotResponse:
+    """Confirm interview slot via candidate tokenized flow."""
+    logger.info("POST /api/scheduling/public/{token}/confirm")
+
+    try:
+        slot_data = {
+            "start_time": request.selected_slot.start_time.isoformat(),
+            "end_time": request.selected_slot.end_time.isoformat(),
+        }
+        result = await orchestrator.confirm_slot_by_candidate_token(
+            candidate_action_token=candidate_action_token,
+            selected_slot=slot_data,
+            location=request.location,
+            notes=request.notes or "",
+        )
+        return ConfirmSlotResponse(
+            interview_schedule_id=result["interview_schedule_id"],
+            status=result["status"],
+            message=result["message"],
+            calendar_event_id=result.get("calendar_event_id"),
+            meeting_link=result.get("meeting_link"),
+        )
+    except SchedulingConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": str(e),
+                "code": "slot_conflict",
+                "suggested_slots": e.suggested_slots,
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to confirm public slot: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to confirm interview slot",
+        )
+
+
+@router.post(
+    "/public/{candidate_action_token}/decline",
+    response_model=CandidateDeclineResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def decline_slot_public(
+    candidate_action_token: str,
+    request: CandidateTokenDeclineRequest,
+    orchestrator: SchedulingOrchestrator = Depends(get_orchestrator),
+) -> CandidateDeclineResponse:
+    """Decline current schedule via candidate token and request a regenerated plan."""
+    logger.info("POST /api/scheduling/public/{token}/decline")
+
+    try:
+        preferred_slots = []
+        for slot in request.preferred_slots or []:
+            preferred_slots.append(
+                {
+                    "start_time": slot.start_time.isoformat(),
+                    "end_time": slot.end_time.isoformat(),
+                }
+            )
+
+        result = await orchestrator.decline_slot_by_candidate_token(
+            candidate_action_token=candidate_action_token,
+            reason=request.reason or "",
+            preferred_slots=preferred_slots,
+            notes=request.notes or "",
+        )
+        return CandidateDeclineResponse(
+            interview_schedule_id=result["interview_schedule_id"],
+            status=result["status"],
+            suggested_slots=result.get("suggested_slots") or [],
+            message=result["message"],
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to decline public slot: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to regenerate interview plan",
+        )
+
+
+@router.get(
+    "/public/{candidate_action_token}/alternatives",
+    response_model=AlternativeSlotsResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def get_public_alternatives(
+    candidate_action_token: str,
+    top_n: Optional[int] = 3,
+    orchestrator: SchedulingOrchestrator = Depends(get_orchestrator),
+) -> AlternativeSlotsResponse:
+    """Get optimized alternative slots by candidate token."""
+    logger.info("GET /api/scheduling/public/{token}/alternatives")
+
+    try:
+        result = await orchestrator.get_alternative_slots_by_token(
+            candidate_action_token=candidate_action_token,
+            top_n=max(1, min(int(top_n or 3), 10)),
+        )
+        return AlternativeSlotsResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to get public alternative slots: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate alternative slots",
         )
 
 

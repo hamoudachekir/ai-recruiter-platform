@@ -338,6 +338,106 @@
     font-style: italic;
   }
   
+  /* Image upload styles */
+  .profile-avatar-wrapper {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    margin-right: 1.5rem;
+    border-radius: 50%;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .profile-avatar-wrapper img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border: 3px solid rgba(255, 255, 255, 0.8);
+  }
+
+  .image-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    border: none;
+    border-radius: 50%;
+    padding: 0;
+  }
+
+  .profile-avatar-wrapper:hover .image-overlay {
+    opacity: 1;
+  }
+
+  .profile-avatar:hover .image-overlay {
+    opacity: 1;
+  }
+
+  .camera-icon {
+    font-size: 2rem;
+    color: white;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+
+  .image-actions {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    display: flex;
+    gap: 6px;
+    background-color: rgba(0, 0, 0, 0.7);
+    padding: 6px;
+    border-radius: 8px;
+  }
+
+  .btn-action {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 50%;
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    transition: all 0.2s ease;
+  }
+
+  .btn-confirm {
+    background-color: #10b981;
+    color: #0f172a;
+  }
+
+  .btn-confirm:hover:not(:disabled) {
+    background-color: #059669;
+    transform: scale(1.1);
+  }
+
+  .btn-cancel {
+    background-color: #fca5a5;
+    color: #0f172a;
+  }
+
+  .btn-cancel:hover:not(:disabled) {
+    background-color: #f87171;
+    transform: scale(1.1);
+  }
+
+  .btn-action:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
   /* Responsive styles */
   @media (max-width: 768px) {
     .profile-header {
@@ -352,6 +452,13 @@
       width: 80px;
       height: 80px;
       font-size: 2rem;
+    }
+
+    .profile-avatar-wrapper {
+      margin-right: 0;
+      margin-bottom: 1rem;
+      width: 80px;
+      height: 80px;
     }
     
     .info-grid {

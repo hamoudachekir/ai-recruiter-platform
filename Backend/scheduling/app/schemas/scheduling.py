@@ -16,6 +16,25 @@ class InterviewModeEnum(str, Enum):
     ASYNCHRONOUS = "asynchronous"
 
 
+class InterviewStageEnum(str, Enum):
+    RH = "rh"
+    TECHNICAL = "technical"
+    FINAL = "final"
+
+
+class JobPriorityEnum(str, Enum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
+class CandidateLevelEnum(str, Enum):
+    JUNIOR = "junior"
+    INTERMEDIATE = "intermediate"
+    SENIOR = "senior"
+
+
 class InterviewStatusEnum(str, Enum):
     DRAFT = "draft"
     SUGGESTED_SLOTS_READY = "suggested_slots_ready"
@@ -42,6 +61,24 @@ class ScheduleLogActionEnum(str, Enum):
     INTERVIEW_CANCELLED = "interview_cancelled"
     EMAIL_FAILED = "email_failed"
     CALENDAR_ERROR = "calendar_error"
+    REMINDER_SCHEDULED = "reminder_scheduled"
+    REMINDER_SENT = "reminder_sent"
+
+
+class RecruiterPreferences(BaseModel):
+    """Recruiter preferences used by slot optimization."""
+    preferred_time_ranges: List[str] = Field(default_factory=list)
+    avoid_time_ranges: List[str] = Field(default_factory=list)
+    preferred_days: List[int] = Field(default_factory=list)
+
+    @field_validator("preferred_days")
+    @classmethod
+    def validate_preferred_days(cls, values: List[int]) -> List[int]:
+        valid = []
+        for day in values:
+            if 0 <= int(day) <= 6:
+                valid.append(int(day))
+        return valid
 
 
 class TimeSlot(BaseModel):
@@ -59,11 +96,21 @@ class StartSchedulingRequest(BaseModel):
     application_id: str = Field(..., min_length=1)
     interview_type: InterviewTypeEnum = InterviewTypeEnum.VIDEO
     interview_mode: InterviewModeEnum = InterviewModeEnum.SYNCHRONOUS
-    duration_minutes: int = Field(default=60, ge=15, le=480)
+    interview_stage: InterviewStageEnum = InterviewStageEnum.TECHNICAL
+    duration_minutes: Optional[int] = Field(default=None, ge=15, le=480)
+    buffer_minutes: Optional[int] = Field(default=None, ge=0, le=120)
+    job_priority: JobPriorityEnum = JobPriorityEnum.NORMAL
+    candidate_level: CandidateLevelEnum = CandidateLevelEnum.INTERMEDIATE
+    recruiter_preferences: RecruiterPreferences = Field(default_factory=RecruiterPreferences)
+    candidate_timezone: Optional[str] = Field(default=None, max_length=80)
+    recruiter_timezone: Optional[str] = Field(default=None, max_length=80)
+    top_n: int = Field(default=5, ge=3, le=10)
     
     @field_validator('duration_minutes')
     @classmethod
     def validate_duration(cls, v):
+        if v is None:
+            return v
         if v % 15 != 0:
             raise ValueError('Duration must be in 15-minute increments')
         return v
@@ -74,6 +121,20 @@ class ConfirmSlotRequest(BaseModel):
     interview_schedule_id: str = Field(..., min_length=1)
     selected_slot: TimeSlot
     location: Optional[str] = None
+    notes: Optional[str] = Field(default="", max_length=500)
+
+
+class CandidateTokenConfirmRequest(BaseModel):
+    """Candidate-facing confirmation request using tokenized access."""
+    selected_slot: TimeSlot
+    location: Optional[str] = None
+    notes: Optional[str] = Field(default="", max_length=500)
+
+
+class CandidateTokenDeclineRequest(BaseModel):
+    """Candidate-facing decline request with optional preferred alternatives."""
+    reason: Optional[str] = Field(default="", max_length=500)
+    preferred_slots: Optional[List[TimeSlot]] = None
     notes: Optional[str] = Field(default="", max_length=500)
 
 
@@ -98,7 +159,11 @@ class InterviewScheduleBase(BaseModel):
     application_id: str
     interview_type: str
     interview_mode: str
+    interview_stage: Optional[str] = None
     duration_minutes: int
+    buffer_minutes: int = 0
+    job_priority: Optional[str] = None
+    candidate_level: Optional[str] = None
     status: str = InterviewStatusEnum.DRAFT.value
     email_status: str = EmailStatusEnum.PENDING.value
     notes: Optional[str] = ""
@@ -164,6 +229,9 @@ class StartSchedulingResponse(BaseModel):
     recruiter_info: Dict[str, Any]
     candidate_info: Dict[str, Any]
     job_info: Dict[str, Any]
+    candidate_action_link: Optional[str] = None
+    alternative_strategies: Optional[Dict[str, List[TimeSlot]]] = None
+    optimization_context: Optional[Dict[str, Any]] = None
     message: str
 
 
@@ -174,6 +242,7 @@ class ConfirmSlotResponse(BaseModel):
     message: str
     calendar_event_id: Optional[str] = None
     meeting_link: Optional[str] = None
+    suggested_slots: Optional[List[TimeSlot]] = None
 
 
 class RescheduleResponse(BaseModel):
@@ -187,6 +256,38 @@ class CancelResponse(BaseModel):
     """Response from cancel endpoint."""
     interview_schedule_id: str
     status: str
+    suggested_slots: Optional[List[TimeSlot]] = None
+    message: str
+
+
+class PublicScheduleResponse(BaseModel):
+    """Candidate-friendly schedule response for token-based interaction."""
+    interview_schedule_id: str
+    status: str
+    interview_type: str
+    interview_mode: str
+    interview_stage: Optional[str] = None
+    duration_minutes: int
+    buffer_minutes: int = 0
+    suggested_slots: List[TimeSlot]
+    confirmed_slot: Optional[Dict[str, Any]] = None
+    candidate_action_link: Optional[str] = None
+    candidate_action_expires_at: Optional[datetime] = None
+    message: str
+
+
+class AlternativeSlotsResponse(BaseModel):
+    """Response with optimized alternative slots."""
+    interview_schedule_id: str
+    suggested_slots: List[TimeSlot]
+    message: str
+
+
+class CandidateDeclineResponse(BaseModel):
+    """Response after candidate declines current proposal and requests replanning."""
+    interview_schedule_id: str
+    status: str
+    suggested_slots: List[TimeSlot]
     message: str
 
 

@@ -207,4 +207,83 @@ router.get('/google-token/:recruiterId', verifyInternalApiKey, async (req, res) 
   }
 });
 
+router.post('/candidate-confirmation', verifyInternalApiKey, async (req, res) => {
+  try {
+    const {
+      interviewScheduleId,
+      candidateId,
+      recruiterId,
+      jobId,
+      confirmedSlot,
+    } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(String(candidateId || ''))) {
+      return res.status(400).json({ message: 'candidateId is required and must be valid' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(String(recruiterId || ''))) {
+      return res.status(400).json({ message: 'recruiterId is required and must be valid' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(String(jobId || ''))) {
+      return res.status(400).json({ message: 'jobId is required and must be valid' });
+    }
+
+    const [candidate, recruiter, job] = await Promise.all([
+      UserModel.findById(candidateId).select('name').lean(),
+      UserModel.findById(recruiterId).select('role').lean(),
+      JobModel.findById(jobId).select('title').lean(),
+    ]);
+
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    if (!recruiter) {
+      return res.status(404).json({ message: 'Recruiter not found' });
+    }
+
+    if (recruiter.role !== 'ENTERPRISE' && recruiter.role !== 'ADMIN') {
+      return res.status(400).json({ message: 'User is not eligible as recruiter' });
+    }
+
+    const rawStart = confirmedSlot?.start_time;
+    let formattedStart = '';
+    if (rawStart) {
+      const parsed = new Date(rawStart);
+      if (!Number.isNaN(parsed.getTime())) {
+        formattedStart = parsed.toLocaleString();
+      }
+    }
+
+    const candidateName = candidate.name || 'Candidate';
+    const jobTitle = job?.title || 'Position';
+    const message = formattedStart
+      ? `${candidateName} confirmed attendance for ${jobTitle} on ${formattedStart}.`
+      : `${candidateName} confirmed attendance for ${jobTitle}.`;
+
+    await UserModel.updateOne(
+      { _id: recruiterId },
+      {
+        $push: {
+          notifications: {
+            type: 'INTERVIEW',
+            message,
+            jobId,
+            seen: false,
+            date: new Date(),
+            scheduleId: interviewScheduleId || null,
+          },
+        },
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Recruiter notification stored',
+    });
+  } catch (error) {
+    console.error('Internal candidate confirmation notification endpoint error:', error);
+    return res.status(500).json({ message: 'Failed to store recruiter notification' });
+  }
+});
+
 module.exports = router;

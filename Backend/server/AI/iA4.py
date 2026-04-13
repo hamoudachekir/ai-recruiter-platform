@@ -1,5 +1,8 @@
 import os
 os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
+# Paddle/PaddleOCR on Windows can fail with protobuf>=4 C++ descriptors.
+# Force Python implementation for compatibility in this service process.
+os.environ.setdefault('PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION', 'python')
 import re
 import numpy as np
 import spacy
@@ -34,7 +37,10 @@ ALLOWED_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg'}
 # Load spaCy model
 nlp = spacy.load("en_core_web_sm")
 ocr_engine = None
-print(f"🔍 PaddleOCR available: {'✅ Yes' if PaddleOCR is not None else '❌ Not installed'}")
+if PaddleOCR is not None:
+    print("🔍 PaddleOCR available: ✅ Yes")
+else:
+    print("🔍 PaddleOCR available: ❌ Unavailable (import/runtime dependency issue)")
 
 # Load skills from file
 def load_skill_keywords():

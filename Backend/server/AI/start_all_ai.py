@@ -16,7 +16,7 @@ def start_services():
         {"name": "Hiring Model (Port 5000)", "script": "hiring_model.py"},
         {"name": "Recommendation (Port 5001)", "script": "recommendation_service.py"},
         {"name": "Interview Score (Port 7000)", "script": "interview_score_model.py"},
-        {"name": "Clustering", "script": "clustering.py"},
+        {"name": "Clustering (Port 5006)", "script": "clustering.py"},
         {"name": "Quiz Generation (Port 5003)", "script": "quiz_generation_service.py"}
     ]
     
@@ -24,10 +24,16 @@ def start_services():
     
     for service in services:
         print(f"Starting {service['name']}...")
+        child_env = os.environ.copy()
+        if service['script'] == 'iA4.py':
+            # PaddleOCR compatibility with newer protobuf on Windows.
+            child_env.setdefault('PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION', 'python')
+
         # Start each script in the background with correct working directory
         process = subprocess.Popen(
             [sys.executable, service['script']],
-            cwd=SCRIPT_DIR  # Set working directory to AI folder
+            cwd=SCRIPT_DIR,  # Set working directory to AI folder
+            env=child_env,
         )
         processes.append(process)
         time.sleep(1) # Small delay to prevent output overlapping during startup

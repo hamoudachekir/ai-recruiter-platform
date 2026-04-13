@@ -38,6 +38,15 @@ class GoogleCalendarService:
             return parsed.astimezone(timezone.utc).replace(tzinfo=None)
         return parsed
 
+    @staticmethod
+    def _to_rfc3339_utc(value: datetime) -> str:
+        """Convert aware/naive datetime to RFC3339 UTC format expected by Google APIs."""
+        if value.tzinfo:
+            utc_value = value.astimezone(timezone.utc)
+        else:
+            utc_value = value.replace(tzinfo=timezone.utc)
+        return utc_value.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
     def get_busy_slots(
         self,
         access_token: str,
@@ -51,8 +60,8 @@ class GoogleCalendarService:
         try:
             service = self._build_client(access_token)
             body = {
-                "timeMin": start_time.isoformat(),
-                "timeMax": end_time.isoformat(),
+                "timeMin": self._to_rfc3339_utc(start_time),
+                "timeMax": self._to_rfc3339_utc(end_time),
                 "timeZone": self.timezone,
                 "items": [{"id": calendar}],
             }

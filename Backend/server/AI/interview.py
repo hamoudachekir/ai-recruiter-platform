@@ -1,4 +1,9 @@
 import os
+import glob
+import shutil
+import subprocess
+import tempfile
+import wave
 import sounddevice as sd
 from scipy.io.wavfile import write
 import whisper
@@ -7,6 +12,10 @@ from fpdf import FPDF
 import re
 from datetime import datetime
 import torch
+
+WHISPER_MODEL_NAME = "base.en"
+WHISPER_LANGUAGE = "en"
+FFMPEG_EXECUTABLE = "ffmpeg.exe"
 
 # 🔧 Nettoyage du texte renforcé
 def clean_text(text):
@@ -32,6 +41,104 @@ def record_audio(filename, duration=60, fs=44100):
         print(f"❌ Erreur d'enregistrement : {str(e)}")
         return False
 
+
+def _ffmpeg_supports_audio(ffmpeg_binary):
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav:
+            temp_wav_path = temp_wav.name
+
+        try:
+            # Create a tiny valid WAV file to ensure ffmpeg can decode WAV input.
+            with wave.open(temp_wav_path, "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(16000)
+                wav_file.writeframes(b"\x00\x00" * 160)
+
+            probe = subprocess.run(
+                [ffmpeg_binary, "-hide_banner", "-v", "error", "-i", temp_wav_path, "-f", "null", "-"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            return probe.returncode == 0
+        finally:
+            if os.path.exists(temp_wav_path):
+                os.remove(temp_wav_path)
+    except Exception:
+        return False
+
+
+def ensure_ffmpeg_ready():
+    candidates = []
+
+    explicit_ffmpeg = os.environ.get("VOICE_ENGINE_FFMPEG_PATH", "").strip()
+    if explicit_ffmpeg:
+        candidates.append(explicit_ffmpeg)
+
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    if local_app_data:
+        winget_patterns = [
+            os.path.join(
+                local_app_data,
+                "Microsoft",
+                "WinGet",
+                "Packages",
+                "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe",
+                "ffmpeg-*-full_build",
+                "bin",
+                FFMPEG_EXECUTABLE,
+            ),
+            os.path.join(
+                local_app_data,
+                "Microsoft",
+                "WinGet",
+                "Packages",
+                "*FFmpeg*",
+                "*full_build",
+                "bin",
+                FFMPEG_EXECUTABLE,
+            ),
+        ]
+        for pattern in winget_patterns:
+            candidates.extend(sorted(glob.glob(pattern), reverse=True))
+
+    candidates.extend(
+        [
+            os.path.join("C:\\", "ffmpeg", "bin", FFMPEG_EXECUTABLE),
+            os.path.join("C:\\", "Program Files", "ffmpeg", "bin", FFMPEG_EXECUTABLE),
+            os.path.join("C:\\", "Program Files", "FFmpeg", "bin", FFMPEG_EXECUTABLE),
+        ]
+    )
+
+    ffmpeg_from_path = shutil.which("ffmpeg")
+    if ffmpeg_from_path:
+        candidates.append(ffmpeg_from_path)
+
+    seen = set()
+    for candidate in candidates:
+        resolved = os.path.abspath(os.path.expandvars(os.path.expanduser(str(candidate))))
+        dedupe_key = resolved.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        if not os.path.isfile(resolved):
+            continue
+        if not _ffmpeg_supports_audio(resolved):
+            continue
+
+        ffmpeg_dir = os.path.dirname(resolved)
+        path_parts = [part.lower() for part in os.environ.get("PATH", "").split(os.pathsep) if part]
+        if ffmpeg_dir.lower() not in path_parts:
+            os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+
+        os.environ["VOICE_ENGINE_FFMPEG_PATH_RESOLVED"] = resolved
+        return resolved
+
+    return None
+
 # 🔎 Transcription optimisée
 def transcribe_audio(file):
     if not os.path.exists(file):
@@ -40,8 +147,14 @@ def transcribe_audio(file):
     
     try:
         print("\n🔄 Transcription en cours...")
-        model = whisper.load_model("base" if torch.cuda.is_available() else "tiny")
-        result = model.transcribe(file, language='fr', fp16=torch.cuda.is_available())
+        ffmpeg_binary = ensure_ffmpeg_ready()
+        if not ffmpeg_binary:
+            print("❌ ffmpeg valide introuvable. Installez FFmpeg (full build) ou définissez VOICE_ENGINE_FFMPEG_PATH.")
+            return ""
+
+        print(f"🎛️ ffmpeg détecté : {ffmpeg_binary}")
+        model = whisper.load_model(WHISPER_MODEL_NAME)
+        result = model.transcribe(file, language=WHISPER_LANGUAGE, fp16=torch.cuda.is_available())
         return clean_text(result['text'])
     except Exception as e:
         print(f"❌ Échec de la transcription : {str(e)}")

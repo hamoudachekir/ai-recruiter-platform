@@ -8,6 +8,7 @@ const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const passport = require('passport');
 const fs = require('fs');
+const fsp = require('fs/promises');
 const multer = require('multer');
 const path = require('path');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
@@ -31,7 +32,21 @@ const Application = require("./models/Application");
 const messageRoutes = require('./routes/messages');
 const setupSocketEvents = require('./socket');
 const Message = require('./models/Message');
-
+const voiceRoutes = require('./routes/voiceRoute');
+const {
+  buildWavBuffer,
+  runVoiceEngineAnalysis,
+  startVoiceEngineRealtimeWorker,
+  writeTempWav,
+} = require('./services/voiceEngineService');
+const {
+  aggregateSegmentSentiment,
+  buildCorrectedSegments,
+  inferTranscriptionSentiment,
+  localCleanTranscriptionText,
+  maybeCorrectTranscriptionText,
+  maybeSummarizeTranscriptionText,
+} = require('./services/voiceTextCorrectionService');
 // Create Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
@@ -49,11 +64,52 @@ const io = socketIO(server, {
   pingInterval: 25000
 });
 
+const voiceStreamSessions = new Map();
+const isProd = process.env.NODE_ENV === 'production';
+const uploadsDir = path.resolve(__dirname, 'uploads');
+
+const buildDownloadMeta = (absolutePath) => {
+  if (!absolutePath) return null;
+
+  const normalized = path.resolve(String(absolutePath));
+  const fileName = path.basename(normalized);
+
+  const uploadsPrefix = `${uploadsDir}${path.sep}`;
+  const recordingsPrefix = `${audioDir}${path.sep}`;
+
+  if (normalized === uploadsDir || normalized.startsWith(uploadsPrefix)) {
+    return {
+      fileName,
+      bucket: 'uploads',
+      url: `/api/voice/download/${encodeURIComponent(fileName)}?bucket=uploads`,
+    };
+  }
+
+  if (normalized === audioDir || normalized.startsWith(recordingsPrefix)) {
+    return {
+      fileName,
+      bucket: 'recordings',
+      url: `/api/voice/download/${encodeURIComponent(fileName)}?bucket=recordings`,
+    };
+  }
+
+  return null;
+};
+
 // 🔐 Socket.IO authentication middleware
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) {
-    return next(new Error("Authentication token missing"));
+    if (isProd) {
+      return next(new Error("Authentication token missing"));
+    }
+
+    socket.user = {
+      id: `guest-${socket.id}`,
+      role: 'guest',
+      email: 'guest@local',
+    };
+    return next();
   }
 
   try {
@@ -64,6 +120,16 @@ io.use((socket, next) => {
     if (err?.name === "TokenExpiredError") {
       console.warn(`Socket auth failed: token expired at ${err.expiredAt?.toISOString?.() || err.expiredAt}`);
       return next(new Error("TOKEN_EXPIRED"));
+    }
+
+    if (!isProd) {
+      console.warn('Socket auth fallback to guest in dev:', err?.message || 'invalid token');
+      socket.user = {
+        id: `guest-${socket.id}`,
+        role: 'guest',
+        email: 'guest@local',
+      };
+      return next();
     }
 
     console.warn("Socket auth failed:", err?.message || "invalid token");
@@ -100,10 +166,452 @@ io.on("connection", (socket) => {
       });
   });
 
-  socket.on("disconnect", () => {
-    console.log("❌ Client disconnected:", socket.id);
+  socket.on('join-interview', ({ interviewId }) => {
+    const normalizedInterviewId = String(interviewId || '').trim();
+    if (!normalizedInterviewId) {
+      socket.emit('error', 'Interview ID is required');
+      return;
+    }
+
+    const room = `interview:${normalizedInterviewId}`;
+    socket.join(room);
+    socket.to(room).emit('user-connected', socket.user?.id || socket.id);
+  });
+
+  socket.on('leave-interview', ({ interviewId }) => {
+    const normalizedInterviewId = String(interviewId || '').trim();
+    if (!normalizedInterviewId) return;
+
+    const room = `interview:${normalizedInterviewId}`;
+    socket.leave(room);
+    socket.to(room).emit('user-disconnected', socket.user?.id || socket.id);
+  });
+
+  socket.on('voice-stream:start', ({
+    streamId,
+    interviewId,
+    sampleRate = 16000,
+    channels = 1,
+    language,
+    whisperDevice,
+    whisperModel,
+    realtimeWhisperModel,
+    whisperComputeType,
+    hfToken,
+    enableDiarization,
+    singleSpeakerLabel,
+    vadThreshold,
+    minSpeechMs,
+    minSilenceMs,
+    maxChunkMs,
+    maxTrailingSilenceMs,
+    minChunkRms,
+    minSpeechRatio,
+    minAvgLogprob,
+    maxNoSpeechProb,
+    partialEmitMs,
+    speechPadMs,
+  }) => {
+    if (!streamId) {
+      socket.emit('voice-stream:error', { message: 'streamId is required' });
+      return;
+    }
+
+    const normalizedInterviewId = String(interviewId || '').trim();
+    const interviewRoom = normalizedInterviewId ? `interview:${normalizedInterviewId}` : null;
+
+    if (interviewRoom) {
+      socket.join(interviewRoom);
+    }
+
+    const normalizedWhisperDevice = String(whisperDevice || 'cpu').trim().toLowerCase() || 'cpu';
+    const normalizedLanguage = String(language || '').trim().toLowerCase();
+    const defaultModel = normalizedLanguage === 'en' ? 'base.en' : 'base';
+    const normalizedWhisperModel = String(whisperModel || defaultModel).trim().toLowerCase() || defaultModel;
+    const cpuRealtimeFallbackModel = String(process.env.VOICE_ENGINE_REALTIME_FALLBACK_MODEL || 'small')
+      .trim()
+      .toLowerCase() || 'small';
+    const normalizedRealtimeWhisperModel = String(
+      realtimeWhisperModel
+      || ((normalizedWhisperDevice === 'cpu' && ['medium', 'large', 'large-v2', 'large-v3'].includes(normalizedWhisperModel))
+        ? cpuRealtimeFallbackModel
+        : normalizedWhisperModel),
+    ).trim().toLowerCase() || normalizedWhisperModel;
+
+    if (normalizedRealtimeWhisperModel !== normalizedWhisperModel) {
+      console.warn(
+        `Realtime worker model override for stream ${streamId}: ${normalizedWhisperModel} -> ${normalizedRealtimeWhisperModel} on ${normalizedWhisperDevice}`,
+      );
+    }
+
+    let realtimeWorker = null;
+    try {
+      realtimeWorker = startVoiceEngineRealtimeWorker(
+        {
+          sampleRate,
+          channels,
+          language,
+          whisperDevice: normalizedWhisperDevice,
+          whisperModel: normalizedRealtimeWhisperModel,
+          whisperComputeType,
+          singleSpeakerLabel,
+          vadThreshold,
+          minSpeechMs,
+          minSilenceMs,
+          maxChunkMs,
+          maxTrailingSilenceMs,
+          minChunkRms,
+          minSpeechRatio,
+          minAvgLogprob,
+          maxNoSpeechProb,
+          partialEmitMs,
+        },
+        {
+          onMessage: (payload) => {
+            if (payload?.type === 'ready') {
+              socket.emit('voice-stream:worker-ready', {
+                streamId,
+                realtimeWhisperModel: normalizedRealtimeWhisperModel,
+              });
+              return;
+            }
+
+            if (payload?.type === 'partial' && payload.text) {
+              const correctedPartialText = localCleanTranscriptionText(payload.text, language || 'en');
+              const partialSentiment = inferTranscriptionSentiment(correctedPartialText || payload.text || '');
+              const partialPayload = {
+                streamId,
+                interviewId: normalizedInterviewId || undefined,
+                sourceUserId: socket.user?.id || null,
+                sourceRole: String(socket.user?.role || '').toUpperCase() || null,
+                corrected_text: correctedPartialText,
+                sentiment: partialSentiment.label,
+                sentiment_score: partialSentiment.score,
+                ...payload,
+              };
+
+              socket.emit('voice-stream:partial', partialPayload);
+              if (interviewRoom) {
+                socket.to(interviewRoom).emit('voice-stream:partial', partialPayload);
+              }
+            }
+          },
+          onStderr: (text) => {
+            const stderrLine = String(text || '').trim();
+            if (!stderrLine) return;
+            if (/^Using cache found in\s+/i.test(stderrLine)) return;
+            console.warn('Realtime worker stderr:', stderrLine);
+          },
+          onError: (error) => {
+            const code = String(error?.code || '').toUpperCase();
+            if (['EOF', 'EPIPE', 'ECANCELED', 'ERR_STREAM_DESTROYED'].includes(code)) {
+              return;
+            }
+            console.warn('Realtime worker error:', error?.message || error);
+          },
+          onClose: ({ code, signal, stderr, stopRequested }) => {
+            const session = voiceStreamSessions.get(streamId);
+            if (session) {
+              session.realtimeWorker = null;
+            }
+
+            const expectedStop = Boolean(stopRequested) || signal === 'SIGTERM' || signal === 'SIGINT';
+            if (expectedStop) {
+              return;
+            }
+
+            if (code !== 0) {
+              const stderrText = String(stderr || '').trim();
+              const onlyCacheLine = stderrText
+                && stderrText
+                  .split(/\r?\n/)
+                  .filter(Boolean)
+                  .every((line) => /^Using cache found in\s+/i.test(line.trim()));
+
+              const reason = (stderrText && !onlyCacheLine)
+                ? stderrText
+                : `worker exited with code ${code}`;
+
+              socket.emit('voice-stream:error', {
+                streamId,
+                message: `Realtime worker failed: ${reason}`,
+              });
+            }
+          },
+        },
+      );
+    } catch (error) {
+      console.warn('Realtime worker unavailable:', error?.message || error);
+    }
+
+    voiceStreamSessions.set(streamId, {
+      socketId: socket.id,
+      chunks: [],
+      chunkCount: 0,
+      realtimeWorker,
+      interviewId: normalizedInterviewId,
+      sampleRate,
+      channels,
+      language,
+      whisperDevice,
+      whisperModel: normalizedWhisperModel,
+      realtimeWhisperModel: normalizedRealtimeWhisperModel,
+      whisperComputeType,
+      hfToken,
+      enableDiarization,
+      singleSpeakerLabel,
+      vadThreshold,
+      minSpeechMs,
+      minSilenceMs,
+      maxChunkMs,
+      maxTrailingSilenceMs,
+      minChunkRms,
+      minSpeechRatio,
+      minAvgLogprob,
+      maxNoSpeechProb,
+      partialEmitMs,
+      speechPadMs,
+    });
+
+    socket.join(`voice:${streamId}`);
+    socket.emit('voice-stream:started', {
+      streamId,
+      whisperModel: normalizedWhisperModel,
+      realtimeWhisperModel: normalizedRealtimeWhisperModel,
+    });
+  });
+
+  socket.on('voice-stream:chunk', ({ streamId, chunk }) => {
+    const session = voiceStreamSessions.get(streamId);
+    if (!session || session.socketId !== socket.id) {
+      socket.emit('voice-stream:error', { streamId, message: 'Unknown voice stream session' });
+      return;
+    }
+
+    const binaryChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk || []);
+    session.chunks.push(binaryChunk);
+    session.chunkCount = Number(session.chunkCount || 0) + 1;
+
+    // Temporary debug signal to validate that live chunks are received server-side and broadcast to RH.
+    const ackPayload = {
+      streamId,
+      interviewId: session.interviewId || undefined,
+      chunkCount: session.chunkCount,
+      chunkBytes: binaryChunk.length,
+      sourceUserId: socket.user?.id || null,
+      receivedAt: Date.now(),
+    };
+    socket.emit('voice-stream:chunk-ack', ackPayload);
+
+    if (session.interviewId) {
+      const room = `interview:${session.interviewId}`;
+      socket.to(room).emit('voice-stream:chunk-ack', ackPayload);
+    }
+
+    if (session.realtimeWorker) {
+      try {
+        session.realtimeWorker.sendChunk(binaryChunk);
+      } catch (error) {
+        console.warn('Realtime worker chunk push failed:', error?.message || error);
+        session.realtimeWorker.kill();
+        session.realtimeWorker = null;
+      }
+    }
+  });
+
+  socket.on('voice-stream:stop', async ({ streamId }) => {
+    const session = voiceStreamSessions.get(streamId);
+    if (!session || session.socketId !== socket.id) {
+      socket.emit('voice-stream:error', { streamId, message: 'Unknown voice stream session' });
+      return;
+    }
+
+    voiceStreamSessions.delete(streamId);
+
+    try {
+      if (session.realtimeWorker) {
+        try {
+          await session.realtimeWorker.stop();
+        } catch (workerError) {
+          console.warn('Realtime worker stop failed:', workerError?.message || workerError);
+        }
+      }
+
+      const wavBuffer = buildWavBuffer(session.chunks, session.sampleRate, session.channels);
+      const tempPath = await writeTempWav(wavBuffer);
+      
+      // Save audio file with timestamp and interview ID
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const interviewIdPart = session.interviewId ? `${session.interviewId}_` : '';
+      const audioFileName = `voice_${interviewIdPart}${timestamp}.wav`;
+      const audioFilePath = path.join(audioDir, audioFileName);
+      
+      try {
+        await fsp.copyFile(tempPath, audioFilePath);
+        console.log(`✅ Audio saved: ${audioFileName}`);
+      } catch (saveError) {
+        console.warn('Failed to save audio file:', saveError?.message || saveError);
+      }
+
+      try {
+        const result = await runVoiceEngineAnalysis(tempPath, {
+          sampleRate: session.sampleRate,
+          channels: session.channels,
+          language: session.language,
+          whisperDevice: session.whisperDevice,
+          whisperModel: session.whisperModel,
+          whisperComputeType: session.whisperComputeType,
+          hfToken: session.hfToken,
+          enableDiarization: session.enableDiarization,
+          singleSpeakerLabel: session.singleSpeakerLabel,
+          vadThreshold: session.vadThreshold,
+          minSpeechMs: session.minSpeechMs,
+          minSilenceMs: session.minSilenceMs,
+          speechPadMs: session.speechPadMs,
+          saveDir: uploadsDir,
+        });
+
+        const correctedText = await maybeCorrectTranscriptionText(result?.text || '', session.language || 'en');
+        const summaryText = await maybeSummarizeTranscriptionText(correctedText || result?.text || '', session.language || 'en');
+        const correctedSegments = buildCorrectedSegments(result?.segments || [], session.language || 'en');
+        const overallSentiment = aggregateSegmentSentiment(correctedSegments);
+
+        const savedFiles = result?.saved_files || {};
+        const downloadFiles = {
+          wav: buildDownloadMeta(savedFiles.wav),
+          txt: buildDownloadMeta(savedFiles.txt),
+          pdf: buildDownloadMeta(savedFiles.pdf),
+          rawRecording: buildDownloadMeta(audioFilePath),
+        };
+
+        socket.emit('voice-stream:result', {
+          ...result,
+          corrected_text: correctedText || result?.text || '',
+          summary: summaryText || result?.summary || '',
+          corrected_segments: correctedSegments,
+          sentiment_overall: overallSentiment.label,
+          sentiment_score: overallSentiment.score,
+          sentiment_counts: overallSentiment.counts,
+          audioFile: audioFileName,
+          audioPath: audioFilePath,
+          downloadFiles,
+        });
+
+        if (session.interviewId) {
+          socket.to(`interview:${session.interviewId}`).emit('voice-stream:result', {
+            ...result,
+            corrected_text: correctedText || result?.text || '',
+            summary: summaryText || result?.summary || '',
+            corrected_segments: correctedSegments,
+            sentiment_overall: overallSentiment.label,
+            sentiment_score: overallSentiment.score,
+            sentiment_counts: overallSentiment.counts,
+            audioFile: audioFileName,
+            audioPath: audioFilePath,
+            sourceUserId: socket.user?.id || null,
+            downloadFiles,
+          });
+        }
+      } finally {
+        fs.promises.unlink(tempPath).catch(() => {});
+      }
+    } catch (error) {
+      socket.emit('voice-stream:error', { streamId, message: error.message });
+    }
+  });
+
+  socket.on("disconnect", (reason) => {
+    const safeReason = String(reason || 'unknown');
+    const label = safeReason === 'client namespace disconnect' ? 'info' : 'warn';
+    console.log(`Socket ${label}: client disconnected`, {
+      socketId: socket.id,
+      userId: socket.user?.id || null,
+      reason: safeReason,
+    });
+
+    for (const [streamId, session] of voiceStreamSessions.entries()) {
+      if (session.socketId === socket.id) {
+        if (session.realtimeWorker) {
+          session.realtimeWorker.kill();
+        }
+        voiceStreamSessions.delete(streamId);
+      }
+    }
   });
 });
+
+const canSendEmail = () => Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
+
+const createMailTransporter = () =>
+  nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+
+const sendCandidateDecisionEmail = async ({
+  candidateEmail,
+  candidateName,
+  jobTitle,
+  decision,
+  recruiterNote,
+}) => {
+  if (!candidateEmail || !canSendEmail()) return;
+
+  const safeCandidateName = String(candidateName || "Candidate").trim() || "Candidate";
+  const safeJobTitle = String(jobTitle || "the position").trim() || "the position";
+  const safeDecision = String(decision || "").toUpperCase();
+  const safeRecruiterNote = String(recruiterNote || "").trim();
+  const isRejected = safeDecision === "REJECTED";
+
+  const subject = isRejected
+    ? `Application Update - ${safeJobTitle}`
+    : `Next Step - ${safeJobTitle}`;
+
+  const statusLine = isRejected
+    ? "After careful review, your application was not selected for this role."
+    : "Good news! You have been shortlisted for the interview stage.";
+
+  const noteLine = safeRecruiterNote
+    ? `<p><strong>Recruiter note:</strong> ${safeRecruiterNote}</p>`
+    : "";
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937;">
+      <p>Dear ${safeCandidateName},</p>
+      <p>${statusLine}</p>
+      <p><strong>Position:</strong> ${safeJobTitle}</p>
+      ${noteLine}
+      <p>Thank you for your interest in our company.</p>
+      <p>Best regards,<br/>Recruitment Team</p>
+    </div>
+  `;
+
+  const text = [
+    `Dear ${safeCandidateName},`,
+    "",
+    statusLine,
+    `Position: ${safeJobTitle}`,
+    safeRecruiterNote ? `Recruiter note: ${safeRecruiterNote}` : "",
+    "",
+    "Thank you for your interest in our company.",
+    "Best regards,",
+    "Recruitment Team",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const transporter = createMailTransporter();
+  await transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: candidateEmail,
+    subject,
+    text,
+    html,
+  });
+};
 
 const normalizeSkillList = (skills) => {
   if (!Array.isArray(skills)) return [];
@@ -1146,6 +1654,7 @@ app.use(
   })
 );
 app.use('/api/messages', messageRoutes);
+app.use('/api/voice', voiceRoutes);
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGO_URI)
@@ -1251,6 +1760,7 @@ app.post("/auth/google", async(req, res) => {
 const userRoutes = require('./routes/userRoute');
 const jobRoutes = require('./routes/jobRoute');
 const interviewRoutes = require('./routes/interviewRoute');
+const callRoomRoutes = require('./routes/callRoom');
 const quizRoutes = require('./routes/quizRoute');
 const linkedinRoute = require('./routes/linkedinRoute');
 const linkedinEnrichRoute = require('./routes/linkedinEnrichRoute');
@@ -1265,6 +1775,7 @@ const SCHEDULING_SERVICE_TIMEOUT = Number(process.env.SCHEDULING_SERVICE_TIMEOUT
 app.use('/api', userRoutes);
 app.use('/api', jobRoutes);
 app.use('/api/interviews', interviewRoutes);
+app.use('/api/call-rooms', callRoomRoutes);
 app.use('/quiz', quizRoutes);
 app.use('/api/internal/scheduling', schedulingInternalRoute);
 app.use('/api/recruiter/calendar', recruiterCalendarRoute);
@@ -1274,6 +1785,12 @@ app.use('/auth/google', recruiterCalendarRoute);
 app.use('/api/linkedin', linkedinEnrichRoute);
 app.use('/api/linkedin', linkedinRoute);
 app.use('/auth/linkedin', linkedinRoute);
+
+// Audio recording directory
+const audioDir = path.join(__dirname, 'voice-recordings');
+if (!fs.existsSync(audioDir)) {
+  fs.mkdirSync(audioDir, { recursive: true });
+}
 
 const uploadDir = path.join(__dirname, 'uploads');
 const resumeUpload = multer({
@@ -1553,6 +2070,7 @@ if (!fs.existsSync(uploadPicsDir)) {
 app.use("/uploads", express.static(uploadDir));
 app.use("/uploadsPics", express.static(uploadPicsDir));
 app.use('/uploadsPics', express.static(path.join(__dirname, 'uploadsPics')));
+app.use("/voice-recordings", express.static(audioDir));
 
 // Resume Upload Configuration
 const resumeStorage = multer.diskStorage({
@@ -1686,6 +2204,10 @@ app.get("/Frontend/getUser/:id", async (req, res) => {
   try {
     const userId = req.params.id;
 
+    if (!mongoose.Types.ObjectId.isValid(String(userId || ""))) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
     const user = await UserModel.findById(userId);
 
     if (!user) {
@@ -1707,6 +2229,57 @@ app.get("/Frontend/getUser/:id", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+const normalizeExperiencePayload = (value, fallback) => {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (!item) return null;
+
+        if (typeof item === "string") {
+          const text = item.trim();
+          if (!text) return null;
+          return {
+            title: text,
+            company: "",
+            duration: "",
+            description: "",
+          };
+        }
+
+        if (typeof item === "object") {
+          return {
+            title: String(item.title || "").trim(),
+            company: String(item.company || "").trim(),
+            duration: String(item.duration || "").trim(),
+            description: String(item.description || "").trim(),
+          };
+        }
+
+        return null;
+      })
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => ({
+        title: line,
+        company: "",
+        duration: "",
+        description: "",
+      }));
+  }
+
+  return fallback;
+};
 
 
 
@@ -1737,7 +2310,7 @@ app.put("/Frontend/updateUser/:id", async (req, res) => {
     user.profile.availability = profile.availability ?? user.profile.availability;
     user.profile.skills = profile.skills ?? user.profile.skills;
     user.profile.languages = profile.languages ?? user.profile.languages;
-    user.profile.experience = profile.experience ?? user.profile.experience;
+    user.profile.experience = normalizeExperiencePayload(profile.experience, user.profile.experience);
     user.markModified("profile");
 
     // 🏢 Mise à jour des données entreprise si role === 'ENTERPRISE'
@@ -1755,7 +2328,9 @@ app.put("/Frontend/updateUser/:id", async (req, res) => {
       user.markModified("enterprise");
     }
 
-    await user.save();
+    // Validate only modified fields so stale unrelated fields (e.g. legacy linkedin.url)
+    // do not block profile updates.
+    await user.save({ validateModifiedOnly: true });
 
     console.log("✅ Utilisateur mis à jour avec succès !");
     return res.status(200).json({
@@ -1849,6 +2424,8 @@ app.post('/Frontend/upload-resume', resumeUpload.single('resume'), async (req, r
 });
 
 
+const PROFILE_IMAGE_MAX_SIZE = 15 * 1024 * 1024;
+
 const profileUpload = multer({
     storage: multer.diskStorage({
         destination: uploadPicsDir,
@@ -1858,11 +2435,39 @@ const profileUpload = multer({
         },
     }),
     limits: {
-        fileSize: 5 * 1024 * 1024
+    fileSize: PROFILE_IMAGE_MAX_SIZE
+  },
+  fileFilter: (req, file, cb) => {
+    if (!file?.mimetype?.startsWith('image/')) {
+      return cb(new Error('Only image files are allowed.'));
     }
+    cb(null, true);
+  },
 });
 
-app.post("/Frontend/upload-profile", profileUpload.single("picture"), async(req, res) => {
+app.post("/Frontend/upload-profile", (req, res, next) => {
+  profileUpload.single("picture")(req, res, (error) => {
+    if (!error) {
+      return next();
+    }
+
+    if (error instanceof multer.MulterError) {
+      if (error.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({
+          error: "Image too large. Maximum size is 15MB.",
+        });
+      }
+
+      return res.status(400).json({
+        error: `Upload error: ${error.code}`,
+      });
+    }
+
+    return res.status(400).json({
+      error: error.message || "Invalid upload request.",
+    });
+  });
+}, async(req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: "No image uploaded." });
@@ -1873,13 +2478,17 @@ app.post("/Frontend/upload-profile", profileUpload.single("picture"), async(req,
             return res.status(400).json({ error: "User ID required." });
         }
 
-        const user = await UserModel.findById(userId);
+        const pictureUrl = `/uploadsPics/${req.file.filename}`;
+
+        const user = await UserModel.findByIdAndUpdate(
+          userId,
+          { $set: { picture: pictureUrl } },
+          { new: true, runValidators: false, select: "_id picture" }
+        );
+
         if (!user) {
             return res.status(404).json({ error: "User not found." });
         }
-
-        user.picture = `/uploadsPics/${req.file.filename}`;
-        await user.save();
 
         res.status(200).json({ message: "Profile picture uploaded successfully!", pictureUrl: user.picture });
     } catch (error) {
@@ -1909,10 +2518,10 @@ app.put("/Frontend/user/:id", async(req, res) => {
         user.profile.availability = profile.availability ?? user.profile.availability;
         user.profile.skills = profile.skills ?? user.profile.skills;
         user.profile.languages = profile.languages ?? user.profile.languages;
-        user.profile.experience = profile.experience ?? user.profile.experience;
+        user.profile.experience = normalizeExperiencePayload(profile.experience, user.profile.experience);
 
         user.markModified("profile");
-        await user.save();
+        await user.save({ validateModifiedOnly: true });
         
         return res.status(200).json(user);
     } catch (error) {
@@ -2362,14 +2971,153 @@ app.post("/Frontend/apply-job", uploadCV.single("cv"), async (req, res) => {
 app.get("/Frontend/notifications/:enterpriseId", async (req, res) => {
   try {
     const { enterpriseId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(String(enterpriseId || ""))) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
     const user = await UserModel.findById(enterpriseId).select("notifications");
 
-    if (!user) return res.status(404).json({ message: "Entreprise non trouvée" });
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    res.status(200).json({ notifications: user.notifications || [] });
+    const notifications = Array.isArray(user.notifications)
+      ? [...user.notifications].sort((left, right) => new Date(right?.date || 0) - new Date(left?.date || 0))
+      : [];
+
+    res.status(200).json({ notifications });
   } catch (err) {
     console.error("❌ Erreur récupération notifications:", err);
     res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+app.patch("/Frontend/notifications/:enterpriseId/mark-all-seen", async (req, res) => {
+  try {
+    const { enterpriseId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(String(enterpriseId || ""))) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
+    const user = await UserModel.findById(enterpriseId).select("notifications");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const updatedNotifications = (user.notifications || []).map((notification) => ({
+      ...notification.toObject(),
+      seen: true,
+    }));
+
+    user.notifications = updatedNotifications;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "All notifications kept",
+      notifications: user.notifications || [],
+    });
+  } catch (err) {
+    console.error("❌ Erreur mise à jour notifications:", err);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+app.patch("/Frontend/notifications/:enterpriseId/:notificationId/seen", async (req, res) => {
+  try {
+    const { enterpriseId, notificationId } = req.params;
+    const seen = req.body?.seen !== false;
+
+    if (!mongoose.Types.ObjectId.isValid(String(enterpriseId || ""))) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(notificationId || ""))) {
+      return res.status(400).json({ message: "Invalid notification id" });
+    }
+
+    const updatedUser = await UserModel.findOneAndUpdate(
+      { _id: enterpriseId, "notifications._id": notificationId },
+      { $set: { "notifications.$.seen": seen } },
+      { new: true }
+    ).select("notifications");
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: seen ? "Notification kept" : "Notification marked unread",
+      notifications: updatedUser.notifications || [],
+    });
+  } catch (err) {
+    console.error("❌ Erreur keep notification:", err);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+app.delete("/Frontend/notifications/:enterpriseId/:notificationId", async (req, res) => {
+  try {
+    const { enterpriseId, notificationId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(String(enterpriseId || ""))) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(String(notificationId || ""))) {
+      return res.status(400).json({ message: "Invalid notification id" });
+    }
+
+    const userExists = await UserModel.exists({ _id: enterpriseId });
+    if (!userExists) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const updatedUser = await UserModel.findOneAndUpdate(
+      { _id: enterpriseId, "notifications._id": notificationId },
+      { $pull: { notifications: { _id: notificationId } } },
+      { new: true }
+    ).select("notifications");
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Notification cleared",
+      notifications: updatedUser.notifications || [],
+    });
+  } catch (err) {
+    console.error("❌ Erreur suppression notification:", err);
+    return res.status(500).json({ message: "Erreur serveur" });
+  }
+});
+
+app.delete("/Frontend/notifications/:enterpriseId", async (req, res) => {
+  try {
+    const { enterpriseId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(String(enterpriseId || ""))) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
+    const user = await UserModel.findById(enterpriseId).select("notifications");
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const clearedCount = Array.isArray(user.notifications) ? user.notifications.length : 0;
+    user.notifications = [];
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "All notifications cleared",
+      clearedCount,
+      notifications: [],
+    });
+  } catch (err) {
+    console.error("❌ Erreur clear notifications:", err);
+    return res.status(500).json({ message: "Erreur serveur" });
   }
 });
 
@@ -2414,6 +3162,8 @@ app.put("/Frontend/applications/:applicationId/recruiter-decision", async (req, 
       return res.status(404).json({ message: "Application not found" });
     }
 
+    const previousDecision = String(application.recruiterDecision || "").toUpperCase();
+
     if (String(application.enterpriseId) !== String(enterpriseId)) {
       return res.status(403).json({ message: "Forbidden: application does not belong to this enterprise" });
     }
@@ -2430,6 +3180,53 @@ app.put("/Frontend/applications/:applicationId/recruiter-decision", async (req, 
     application.recruiterDecisionNote = String(note || "").trim();
 
     await application.save();
+
+    if (previousDecision !== normalizedDecision && mongoose.Types.ObjectId.isValid(String(application.candidateId || ""))) {
+      try {
+        const [relatedJob, candidateUser] = await Promise.all([
+          JobModel.findById(application.jobId).select("title").lean(),
+          UserModel.findById(application.candidateId).select("name email").lean(),
+        ]);
+        const safeJobTitle = relatedJob?.title || "the position";
+        const candidateName = candidateUser?.name || "Candidate";
+        const candidateEmail = candidateUser?.email || "";
+
+        const candidateMessage = normalizedDecision === "INTERVIEW"
+          ? `Good news! Your application for ${safeJobTitle} has been accepted. You are now in the interview stage.`
+          : `Update: Your application for ${safeJobTitle} was not selected this time.`;
+
+        await UserModel.updateOne(
+          { _id: application.candidateId },
+          {
+            $push: {
+              notifications: {
+                type: normalizedDecision === "INTERVIEW" ? "INTERVIEW" : "SYSTEM",
+                message: candidateMessage,
+                jobId: application.jobId,
+                seen: false,
+                date: new Date(),
+              },
+            },
+          }
+        );
+
+        if (normalizedDecision === "REJECTED") {
+          try {
+            await sendCandidateDecisionEmail({
+              candidateEmail,
+              candidateName,
+              jobTitle: safeJobTitle,
+              decision: normalizedDecision,
+              recruiterNote: application.recruiterDecisionNote,
+            });
+          } catch (candidateEmailError) {
+            console.error("❌ Failed to send candidate rejection email:", candidateEmailError);
+          }
+        }
+      } catch (notificationError) {
+        console.error("❌ Failed to create candidate notification after recruiter decision:", notificationError);
+      }
+    }
 
     let automation = {
       schedulingTriggered: false,
@@ -3893,9 +4690,51 @@ function calculateSkillMatch(candidateSkills, jobSkills) {
 
 let predictFromSkillsServiceUnavailableUntil = 0;
 
+const toFiniteRatio = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(1, numeric));
+};
+
+const computeWeightedMatchPercent = (matches = {}) => {
+  const skillRatio = toFiniteRatio(matches?.skill_match);
+  const expRatio = toFiniteRatio(matches?.exp_match);
+  const educationRatio = toFiniteRatio(matches?.education_match);
+  const weighted = (skillRatio * 0.55) + (expRatio * 0.3) + (educationRatio * 0.15);
+  return Math.round(Math.max(0, Math.min(100, weighted * 100)));
+};
+
+const buildPredictionPayload = (payload = {}) => {
+  const matches = payload?.matches || {};
+  const skillPercent = Math.round(toFiniteRatio(matches?.skill_match) * 100);
+  const expPercent = Math.round(toFiniteRatio(matches?.exp_match) * 100);
+  const educationPercent = Math.round(toFiniteRatio(matches?.education_match) * 100);
+
+  const rawMatchPercent = Number(payload?.match_percent);
+  const normalizedMatchPercent = Number.isFinite(rawMatchPercent)
+    ? Math.round(Math.max(0, Math.min(100, rawMatchPercent)))
+    : computeWeightedMatchPercent(matches);
+
+  return {
+    ...payload,
+    match_percent: normalizedMatchPercent,
+    match_breakdown: {
+      skill: skillPercent,
+      exp: expPercent,
+      education: educationPercent,
+    },
+  };
+};
+
 const buildPredictionFallback = (details, source = 'backend-fallback') => ({
   hired: 0,
   confidence: 0,
+  match_percent: 0,
+  match_breakdown: {
+    skill: 0,
+    exp: 0,
+    education: 0,
+  },
   matches: {
     skill_match: 0,
     exp_match: 0,
@@ -3932,7 +4771,7 @@ app.post('/predict-from-skills', async (req, res) => {
       timeout: 15000,
     });
     predictFromSkillsServiceUnavailableUntil = 0;
-    res.json(response.data);
+    res.json(buildPredictionPayload(response.data || {}));
   } catch (error) {
     const remoteError = error.response?.data;
     const details =
@@ -3958,6 +4797,83 @@ app.post('/predict-from-skills', async (req, res) => {
 
 const recommendationRoutes = require('./routes/recommendationRoute');
 app.use('/api/recommendations', recommendationRoutes);
+
+// 🎙️ Voice Recording API Endpoints
+app.get('/api/voice-recordings/list', async (req, res) => {
+  try {
+    const files = await fsp.readdir(audioDir);
+    const wavFiles = files.filter(file => file.endsWith('.wav'));
+    
+    const recordings = await Promise.all(
+      wavFiles.map(async (file) => {
+        const filePath = path.join(audioDir, file);
+        const stats = await fsp.stat(filePath);
+        return {
+          filename: file,
+          url: `/voice-recordings/${file}`,
+          size: stats.size,
+          createdAt: stats.birthtime,
+          sizeKB: Math.round(stats.size / 1024),
+        };
+      })
+    );
+    
+    recordings.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({
+      success: true,
+      count: recordings.length,
+      recordings,
+    });
+  } catch (error) {
+    console.error('Error listing voice recordings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to list recordings',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/voice-recordings/:filename', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    if (!filename.endsWith('.wav')) {
+      return res.status(400).json({ message: 'Only WAV files allowed' });
+    }
+    
+    const filePath = path.join(audioDir, filename);
+    const stats = await fsp.stat(filePath);
+    
+    res.set({
+      'Content-Type': 'audio/wav',
+      'Content-Length': stats.size,
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+    
+    res.download(filePath);
+  } catch (error) {
+    console.error('Error downloading recording:', error);
+    res.status(404).json({ message: 'Recording not found' });
+  }
+});
+
+app.delete('/api/voice-recordings/:filename', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    if (!filename.endsWith('.wav')) {
+      return res.status(400).json({ message: 'Invalid filename' });
+    }
+    
+    const filePath = path.join(audioDir, filename);
+    await fsp.unlink(filePath);
+    
+    res.json({ success: true, message: `Recording ${filename} deleted` });
+  } catch (error) {
+    console.error('Error deleting recording:', error);
+    res.status(500).json({ message: 'Failed to delete recording' });
+  }
+});
+
 // Start the server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
