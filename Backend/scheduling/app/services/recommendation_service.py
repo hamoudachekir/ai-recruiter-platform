@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime, timedelta, time, timezone
-from typing import List, Tuple, Optional
-from collections import defaultdict
+from typing import List, Tuple, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +43,8 @@ class RecommendationService:
         recruiter_busy_slots: List[Tuple[datetime, datetime]],
         interview_duration: int = 60,
         start_date: Optional[datetime] = None,
-        top_n: int = 5
+        top_n: int = 5,
+        optimization_context: Optional[Dict[str, Any]] = None,
     ) -> List[dict]:
         """
         Generate recommended interview time slots avoiding recruiter busy times.
@@ -102,7 +102,7 @@ class RecommendationService:
         scored_slots = [
             {
                 **slot,
-                "score": self._calculate_slot_score(slot, start_date)
+                **self._score_slot(slot, start_date, optimization_context)
             }
             for slot in all_slots
         ]
@@ -114,6 +114,51 @@ class RecommendationService:
         logger.info(f"Generated {len(top_slots)} recommended slots from {len(all_slots)} candidates")
         
         return top_slots
+
+    def build_strategy_views(self, scored_slots: List[dict], top_n: int = 3) -> Dict[str, List[dict]]:
+        """Build strategy-oriented views from already scored slots."""
+        safe_top_n = max(1, int(top_n))
+        if not scored_slots:
+            return {
+                "closest_slots": [],
+                "comfortable_slots": [],
+                "urgent_slots": [],
+                "balanced_slots": [],
+            }
+
+        closest_slots = sorted(
+            scored_slots,
+            key=lambda slot: (slot.get("days_ahead", 999), -slot.get("score", 0.0)),
+        )[:safe_top_n]
+
+        comfortable_slots = sorted(
+            scored_slots,
+            key=lambda slot: (
+                -float(slot.get("score_breakdown", {}).get("comfort", 0.0)),
+                -slot.get("score", 0.0),
+            ),
+        )[:safe_top_n]
+
+        urgent_slots = sorted(
+            scored_slots,
+            key=lambda slot: (
+                -float(slot.get("score_breakdown", {}).get("urgency", 0.0)),
+                slot.get("days_ahead", 999),
+                -slot.get("score", 0.0),
+            ),
+        )[:safe_top_n]
+
+        balanced_slots = sorted(
+            scored_slots,
+            key=lambda slot: -slot.get("score", 0.0),
+        )[:safe_top_n]
+
+        return {
+            "closest_slots": [self._clean_strategy_slot(slot) for slot in closest_slots],
+            "comfortable_slots": [self._clean_strategy_slot(slot) for slot in comfortable_slots],
+            "urgent_slots": [self._clean_strategy_slot(slot) for slot in urgent_slots],
+            "balanced_slots": [self._clean_strategy_slot(slot) for slot in balanced_slots],
+        }
     
     def is_slot_available(
         self,
@@ -230,6 +275,119 @@ class RecommendationService:
         
         return slots
     
+    def _score_slot(
+        self,
+        slot: dict,
+        reference_date: datetime,
+        optimization_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Compute a full score object with breakdown and strategy tags."""
+        optimization_context = optimization_context or {}
+        slot_start = slot["start_time"]
+        hour = slot_start.hour
+        days_ahead = max(0, (slot_start.date() - reference_date.date()).days)
+
+        # Base recency score
+        if days_ahead == 0:
+            proximity_score = 3.0
+        elif days_ahead == 1:
+            proximity_score = 2.5
+        elif days_ahead <= 3:
+            proximity_score = 2.0
+        else:
+            proximity_score = max(0.5, 3.0 - (days_ahead * 0.3))
+
+        # Base comfort score by hour
+        if 10 <= hour < 12:
+            comfort_score = 2.8
+        elif 14 <= hour < 16:
+            comfort_score = 2.6
+        elif 9 <= hour < 17:
+            comfort_score = 1.9
+        else:
+            comfort_score = 1.0
+
+        interview_stage = str(optimization_context.get("interview_stage") or "technical").lower()
+        stage_bonus = 0.0
+        if interview_stage == "rh":
+            if 9 <= hour < 12:
+                stage_bonus = 0.9
+            elif 14 <= hour < 17:
+                stage_bonus = 0.6
+        elif interview_stage == "technical":
+            if 10 <= hour < 12:
+                stage_bonus = 1.0
+            elif 14 <= hour < 16:
+                stage_bonus = 0.7
+        elif interview_stage == "final":
+            if 11 <= hour < 12 or 15 <= hour < 17:
+                stage_bonus = 1.0
+            elif 14 <= hour < 15:
+                stage_bonus = 0.5
+
+        job_priority = str(optimization_context.get("job_priority") or "normal").lower()
+        priority_multiplier = {
+            "low": 0.85,
+            "normal": 1.0,
+            "high": 1.2,
+            "urgent": 1.45,
+        }.get(job_priority, 1.0)
+        proximity_score *= priority_multiplier
+
+        urgency_score = 0.0
+        if job_priority in {"high", "urgent"} and days_ahead <= 2:
+            urgency_score += 0.8
+        if job_priority == "urgent" and days_ahead > 3:
+            urgency_score -= 0.9
+
+        recruiter_preferences = optimization_context.get("recruiter_preferences") or {}
+        preferred_ranges = recruiter_preferences.get("preferred_time_ranges") or []
+        avoid_ranges = recruiter_preferences.get("avoid_time_ranges") or []
+        preferred_days = {
+            int(day)
+            for day in recruiter_preferences.get("preferred_days", [])
+            if str(day).isdigit() and 0 <= int(day) <= 6
+        }
+
+        if preferred_days and slot_start.weekday() in preferred_days:
+            comfort_score += 0.7
+        if self._hour_in_ranges(hour, preferred_ranges):
+            comfort_score += 1.0
+        if self._hour_in_ranges(hour, avoid_ranges):
+            comfort_score -= 1.5
+
+        candidate_level = str(optimization_context.get("candidate_level") or "intermediate").lower()
+        level_bonus = 0.0
+        if candidate_level == "junior" and 9 <= hour < 11:
+            level_bonus += 0.25
+        elif candidate_level == "senior" and 14 <= hour < 17:
+            level_bonus += 0.25
+
+        total_score = min(10.0, max(0.5, proximity_score + comfort_score + stage_bonus + urgency_score + level_bonus))
+
+        tags: List[str] = []
+        if days_ahead <= 1:
+            tags.append("closest")
+        if comfort_score >= 2.6:
+            tags.append("comfortable")
+        if urgency_score > 0:
+            tags.append("urgent-priority")
+        if stage_bonus >= 0.9:
+            tags.append(f"stage-{interview_stage}")
+
+        return {
+            "score": round(total_score, 1),
+            "days_ahead": days_ahead,
+            "score_breakdown": {
+                "proximity": round(proximity_score, 2),
+                "comfort": round(comfort_score, 2),
+                "stage": round(stage_bonus, 2),
+                "urgency": round(urgency_score, 2),
+                "candidate_level": round(level_bonus, 2),
+            },
+            "strategy_tags": tags,
+        }
+
     def _calculate_slot_score(self, slot: dict, reference_date: datetime) -> float:
         """
         Calculate recommendation score for a slot.
@@ -248,38 +406,39 @@ class RecommendationService:
         Returns:
             float: Score between 1-10
         """
-        slot_start = slot["start_time"]
-        hour = slot_start.hour
-        
-        # Day recency score (0-3 points)
-        days_ahead = (slot_start.date() - reference_date.date()).days
-        if days_ahead == 0:
-            day_score = 3.0  # Today is best
-        elif days_ahead == 1:
-            day_score = 2.5  # Tomorrow is good
-        elif days_ahead <= 3:
-            day_score = 2.0  # Within 3 days
-        else:
-            day_score = max(0.5, 3.0 - (days_ahead * 0.3))  # Decreasing preference
-        
-        # Time of day score (0-3 points)
-        # Prefer: 10:00-11:00, 14:00-15:00
-        # OK: 09:00-10:00, 11:00-12:00, 15:00-16:00
-        # Less: 13:00-14:00, 16:00-17:00
-        if 10 <= hour < 11:
-            time_score = 3.0
-        elif 14 <= hour < 15:
-            time_score = 3.0
-        elif 9 <= hour < 12:
-            time_score = 2.0
-        elif 15 <= hour < 16:
-            time_score = 2.0
-        else:
-            time_score = 1.0
-        
-        # Combine scores
-        total_score = min(10.0, day_score + time_score)
-        return round(total_score, 1)
+        return self._score_slot(slot, reference_date, {}).get("score", 5.0)
+
+    @staticmethod
+    def _parse_hour_range(range_str: str) -> Optional[Tuple[int, int]]:
+        """Parse HH:MM-HH:MM ranges and return start/end hours."""
+        value = str(range_str or "").strip()
+        if "-" not in value:
+            return None
+        start_raw, end_raw = value.split("-", 1)
+        try:
+            start_hour = int(start_raw.split(":")[0])
+            end_hour = int(end_raw.split(":")[0])
+        except Exception:
+            return None
+        if not (0 <= start_hour <= 23 and 0 <= end_hour <= 23):
+            return None
+        return start_hour, end_hour
+
+    def _hour_in_ranges(self, hour: int, ranges: List[str]) -> bool:
+        for item in ranges:
+            parsed = self._parse_hour_range(item)
+            if not parsed:
+                continue
+            start_hour, end_hour = parsed
+            if start_hour <= hour < max(start_hour + 1, end_hour):
+                return True
+        return False
+
+    @staticmethod
+    def _clean_strategy_slot(slot: dict) -> dict:
+        clean = dict(slot)
+        clean.pop("days_ahead", None)
+        return clean
     
     def _normalize_busy_slots(
         self,

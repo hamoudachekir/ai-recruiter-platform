@@ -2,6 +2,18 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/user');
 const JobModel = require('../models/job');
+const axios = require('axios');
+
+const refreshRecommendationIndex = async () => {
+  try {
+    await axios.post('http://127.0.0.1:5001/refresh-index', {}, {
+      timeout: 15000,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    console.warn('Recommendation index refresh skipped:', error.message);
+  }
+};
 
 // POST /api/jobs/create
 router.post('/jobs/create', async (req, res) => {
@@ -32,6 +44,8 @@ router.post('/jobs/create', async (req, res) => {
       createdDate: job.createdAt,
     });
     await enterprise.save();
+
+    await refreshRecommendationIndex();
 
     res.status(201).json({ message: "Job created", job });
   } catch (error) {
@@ -131,6 +145,8 @@ router.delete('/jobs/delete/:userId/:jobId', async (req, res) => {
     });
 
     await JobModel.findByIdAndDelete(jobId);
+
+    await refreshRecommendationIndex();
 
     res.json({ message: "Job deleted" });
   } catch (err) {

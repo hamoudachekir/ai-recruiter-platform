@@ -1,0 +1,9 @@
+numpy
+soundfile
+sounddevice
+resampy
+torch
+torchaudio
+faster-whisper
+pyannote.audio
+silero-vad

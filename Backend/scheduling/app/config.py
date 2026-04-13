@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     sendgrid_api_key: str = ""
     sendgrid_from_email: str = ""
     frontend_confirmation_url: str = "http://localhost:5173"
+    frontend_candidate_scheduling_path: str = "/candidate/scheduling"
     
     # Interview Configuration
     interview_duration_default: int = 60  # minutes
@@ -64,6 +65,8 @@ class Settings(BaseSettings):
     side_effect_retry_max_attempts: int = 5
     side_effect_retry_backoff_seconds: int = 60
     side_effect_retry_batch_size: int = 10
+    reminder_24h_enabled: bool = True
+    reminder_1h_enabled: bool = True
     
     # Security
     api_key: str = ""

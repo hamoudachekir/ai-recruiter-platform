@@ -1,15 +1,64 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import io from 'socket.io-client';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { jwtDecode } from 'jwt-decode';
 import './VideoCall.css';
 
+const TARGET_VOICE_SAMPLE_RATE = 16000;
+const DEFAULT_VOICE_CHUNK_SIZE = 4096;
+const SUPPORTED_WHISPER_MODEL = 'base.en';
+
+const getPreferredVoiceLanguage = () => {
+    const saved = String(localStorage.getItem('voiceLanguage') || '').trim().toLowerCase();
+    return !saved || saved === 'auto' ? 'en' : saved;
+};
+
+const getPreferredWhisperModel = () => {
+    const saved = String(localStorage.getItem('voiceWhisperModel') || '').trim().toLowerCase();
+    return saved === SUPPORTED_WHISPER_MODEL ? saved : SUPPORTED_WHISPER_MODEL;
+};
+
+const getNumericVoiceSetting = (key, fallback, min, max) => {
+    const parsed = Number(localStorage.getItem(key));
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
+};
+
+const resampleFloat32Buffer = (input, sourceSampleRate, targetSampleRate) => {
+    if (!input || input.length === 0) return new Float32Array();
+    if (sourceSampleRate === targetSampleRate) return new Float32Array(input);
+
+    const ratio = sourceSampleRate / targetSampleRate;
+    const newLength = Math.max(1, Math.round(input.length / ratio));
+    const output = new Float32Array(newLength);
+
+    for (let index = 0; index < newLength; index += 1) {
+        const sourcePosition = index * ratio;
+        const leftIndex = Math.floor(sourcePosition);
+        const rightIndex = Math.min(input.length - 1, leftIndex + 1);
+        const weight = sourcePosition - leftIndex;
+        output[index] = input[leftIndex] * (1 - weight) + input[rightIndex] * weight;
+    }
+
+    return output;
+};
+
+const float32ToInt16 = (input) => {
+    const output = new Int16Array(input.length);
+
+    for (let index = 0; index < input.length; index += 1) {
+        const sample = Math.max(-1, Math.min(1, input[index]));
+        output[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+
+    return output;
+};
+
 const VideoCall = () => {
     const { interviewId } = useParams();
-    const { user, isAuthenticated, loading: authLoading } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const [localStream, setLocalStream] = useState(null);
-    const [remoteStream, setRemoteStream] = useState(null);
     const [status, setStatus] = useState('loading');
     const [isMuted, setIsMuted] = useState(false);
     const [isVideoOff, setIsVideoOff] = useState(false);
@@ -23,6 +72,11 @@ const VideoCall = () => {
     const [interviewSummary, setInterviewSummary] = useState(null);
     const [transcript, setTranscript] = useState([]);
     const [isRecording, setIsRecording] = useState(false);
+    const [isVoiceStreaming, setIsVoiceStreaming] = useState(false);
+    const [voiceStreamStatus, setVoiceStreamStatus] = useState('idle');
+    const [voiceStreamResult, setVoiceStreamResult] = useState(null);
+    const [voiceStreamLiveTurns, setVoiceStreamLiveTurns] = useState([]);
+    const [voiceStreamError, setVoiceStreamError] = useState(null);
 
     const localVideoRef = useRef(null);
     const remoteVideoRef = useRef(null);
@@ -31,6 +85,13 @@ const VideoCall = () => {
     const callTimerRef = useRef(null);
     const videoGridRef = useRef(null);
     const speechRecognitionRef = useRef(null);
+    const localStreamRef = useRef(null);
+    const voiceAudioContextRef = useRef(null);
+    const voiceSourceNodeRef = useRef(null);
+    const voiceProcessorRef = useRef(null);
+    const voiceStreamIdRef = useRef(null);
+    const voiceSequenceRef = useRef(0);
+    const voiceWorkerReadyRef = useRef(false);
 
     const isTokenExpired = (jwtToken) => {
         if (!jwtToken) return true;
@@ -38,7 +99,7 @@ const VideoCall = () => {
             const decoded = jwtDecode(jwtToken);
             if (!decoded?.exp) return true;
             return decoded.exp * 1000 <= Date.now();
-        } catch (error) {
+        } catch {
             return true;
         }
     };
@@ -110,11 +171,163 @@ const VideoCall = () => {
                 setTranscript(prev => [...prev, ...newTranscript]);
             };
 
-            recognition.onerror = (event) => {
-                console.error('Speech recognition error', event.error);
+            recognition.onerror = () => {
+                console.error('Speech recognition error');
             };
 
             speechRecognitionRef.current = recognition;
+        }
+    };
+
+    const getVoiceSocketConfig = () => {
+        return {
+            sampleRate: TARGET_VOICE_SAMPLE_RATE,
+            channels: 1,
+            language: getPreferredVoiceLanguage(),
+            whisperModel: getPreferredWhisperModel(),
+            whisperDevice: localStorage.getItem('voiceWhisperDevice') || 'cpu',
+            whisperComputeType: localStorage.getItem('voiceWhisperComputeType') || 'int8',
+            enableDiarization: false,
+            singleSpeakerLabel: 'CANDIDATE',
+            vadThreshold: getNumericVoiceSetting('voiceVadThreshold', 0.35, 0.25, 0.9),
+            minSpeechMs: getNumericVoiceSetting('voiceMinSpeechMs', 250, 150, 2000),
+            minSilenceMs: getNumericVoiceSetting('voiceMinSilenceMs', 600, 400, 3000),
+            maxChunkMs: getNumericVoiceSetting('voiceMaxChunkMs', 1500, 800, 6000),
+            speechPadMs: getNumericVoiceSetting('voiceSpeechPadMs', 150, 50, 1000),
+        };
+    };
+
+    const cleanupVoiceStream = () => {
+        if (voiceProcessorRef.current) {
+            try {
+                voiceProcessorRef.current.disconnect();
+            } catch (error) {
+                console.warn('Voice processor disconnect failed:', error);
+            }
+            voiceProcessorRef.current.onaudioprocess = null;
+            voiceProcessorRef.current = null;
+        }
+
+        if (voiceSourceNodeRef.current) {
+            try {
+                voiceSourceNodeRef.current.disconnect();
+            } catch (error) {
+                console.warn('Voice source disconnect failed:', error);
+            }
+            voiceSourceNodeRef.current = null;
+        }
+
+        if (voiceAudioContextRef.current) {
+            voiceAudioContextRef.current.close().catch((error) => {
+                console.warn('Voice audio context close failed:', error);
+            });
+            voiceAudioContextRef.current = null;
+        }
+
+        voiceStreamIdRef.current = null;
+        voiceWorkerReadyRef.current = false;
+        setIsVoiceStreaming(false);
+        setVoiceStreamStatus('idle');
+    };
+
+    const startVoiceStream = async () => {
+        if (!socketRef.current || !localStream) {
+            setVoiceStreamError('Voice stream requires an active call and microphone access.');
+            return;
+        }
+
+        if (isVoiceStreaming || voiceProcessorRef.current || voiceAudioContextRef.current) {
+            return;
+        }
+
+        const streamId = `voice-${interviewId}-${Date.now()}-${voiceSequenceRef.current += 1}`;
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        await audioContext.resume();
+        const sourceNode = audioContext.createMediaStreamSource(localStream);
+        const processor = audioContext.createScriptProcessor(DEFAULT_VOICE_CHUNK_SIZE, 1, 1);
+        const sinkNode = audioContext.createGain();
+
+        sinkNode.gain.value = 0;
+
+        voiceAudioContextRef.current = audioContext;
+        voiceSourceNodeRef.current = sourceNode;
+        voiceProcessorRef.current = processor;
+        voiceStreamIdRef.current = streamId;
+        voiceWorkerReadyRef.current = false;
+        setVoiceStreamError(null);
+        setVoiceStreamStatus('starting');
+        setVoiceStreamLiveTurns([]);
+        setVoiceStreamResult(null);
+
+        socketRef.current.emit('voice-stream:start', {
+            streamId,
+            interviewId,
+            ...getVoiceSocketConfig(),
+        });
+
+        processor.onaudioprocess = (event) => {
+            const inputBuffer = event.inputBuffer;
+            const channelCount = inputBuffer.numberOfChannels || 1;
+            const channelData = [];
+
+            for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
+                channelData.push(inputBuffer.getChannelData(channelIndex));
+            }
+
+            const monoLength = channelData[0]?.length || 0;
+            if (monoLength === 0) return;
+
+            const monoFloat = new Float32Array(monoLength);
+            for (let sampleIndex = 0; sampleIndex < monoLength; sampleIndex += 1) {
+                let sum = 0;
+                for (let channelIndex = 0; channelIndex < channelData.length; channelIndex += 1) {
+                    sum += channelData[channelIndex][sampleIndex] || 0;
+                }
+                monoFloat[sampleIndex] = sum / channelData.length;
+            }
+
+            const sourceSampleRate = audioContext.sampleRate || TARGET_VOICE_SAMPLE_RATE;
+            const resampled = resampleFloat32Buffer(monoFloat, sourceSampleRate, TARGET_VOICE_SAMPLE_RATE);
+            const int16Buffer = float32ToInt16(resampled);
+            const binaryChunk = int16Buffer.buffer.slice(int16Buffer.byteOffset, int16Buffer.byteOffset + int16Buffer.byteLength);
+
+            if (socketRef.current?.connected && voiceStreamIdRef.current) {
+                socketRef.current.emit('voice-stream:chunk', {
+                    streamId: voiceStreamIdRef.current,
+                    chunk: binaryChunk,
+                });
+            }
+        };
+
+        sourceNode.connect(processor);
+        processor.connect(sinkNode);
+        sinkNode.connect(audioContext.destination);
+
+        setIsVoiceStreaming(true);
+        setVoiceStreamStatus('starting');
+    };
+
+    const stopVoiceStream = async () => {
+        const streamId = voiceStreamIdRef.current;
+        if (!streamId || !socketRef.current) {
+            cleanupVoiceStream();
+            return;
+        }
+
+        setVoiceStreamStatus('stopping');
+
+        try {
+            socketRef.current.emit('voice-stream:stop', { streamId });
+        } finally {
+            cleanupVoiceStream();
+        }
+    };
+
+    const toggleVoiceStream = async () => {
+        if (isVoiceStreaming) {
+            await stopVoiceStream();
+        } else {
+            await startVoiceStream();
         }
     };
 
@@ -158,6 +371,70 @@ const VideoCall = () => {
         }
     };
 
+    const startCall = async () => {
+        setStatus('connecting');
+        try {
+            socketRef.current.emit('join-interview', { interviewId });
+            
+            if (userRole === 'ENTERPRISE') {
+                const offer = await pcRef.current.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                });
+                await pcRef.current.setLocalDescription(offer);
+                socketRef.current.emit('offer', { interviewId, offer });
+            }
+            
+            setStatus('connected');
+
+            if (String(userRole || '').toUpperCase() === 'CANDIDATE') {
+                try {
+                    await startVoiceStream();
+                } catch (streamError) {
+                    console.warn('Candidate auto voice stream start failed:', streamError);
+                }
+            }
+        } catch (err) {
+            console.error('Call start error:', err);
+            setStatus('error');
+        }
+    };
+
+    const handleOffer = useCallback(async ({ offer }) => {
+        try {
+            if (userRole === 'CANDIDATE') {
+                await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
+                const answer = await pcRef.current.createAnswer();
+                await pcRef.current.setLocalDescription(answer);
+                socketRef.current.emit('answer', { interviewId, answer });
+                socketRef.current.emit('peer-connected', { interviewId });
+            }
+        } catch (err) {
+            console.error('Error handling offer:', err);
+        }
+    }, [interviewId, userRole]);
+
+    const handleAnswer = useCallback(async ({ answer }) => {
+        try {
+            if (userRole === 'ENTERPRISE') {
+                await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+                socketRef.current.emit('peer-connected', { interviewId });
+            }
+        } catch (err) {
+            console.error('Error handling answer:', err);
+        }
+    }, [interviewId, userRole]);
+
+    const handleICECandidate = useCallback(async ({ candidate }) => {
+        try {
+            if (candidate) {
+                await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+            }
+        } catch (err) {
+            console.error('Error adding ICE candidate:', err);
+        }
+    }, []);
+
     // WebRTC and Socket.io implementation
     useEffect(() => {
         if (!initialized) return;
@@ -169,9 +446,15 @@ const VideoCall = () => {
                 // Get media stream
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-                    audio: true
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        channelCount: 1,
+                    }
                 });
                 setLocalStream(stream);
+                localStreamRef.current = stream;
                 if (localVideoRef.current) {
                     localVideoRef.current.srcObject = stream;
                 }
@@ -190,8 +473,8 @@ const VideoCall = () => {
                     reconnection: false
                 });
 
-                socketRef.current.on('connect_error', (error) => {
-                    if (error?.message === 'TOKEN_EXPIRED') {
+                socketRef.current.on('connect_error', (connectError) => {
+                    if (connectError?.message === 'TOKEN_EXPIRED') {
                         console.warn('Video call socket rejected: token expired.');
                         socketRef.current?.disconnect();
                         setStatus('error');
@@ -216,7 +499,6 @@ const VideoCall = () => {
                 // Setup event handlers
                 pcRef.current.ontrack = (event) => {
                     if (!remoteVideoRef.current.srcObject) {
-                        setRemoteStream(event.streams[0]);
                         remoteVideoRef.current.srcObject = event.streams[0];
                         setIsPeerConnected(true);
                     }
@@ -254,6 +536,51 @@ const VideoCall = () => {
                 socketRef.current.on('peer-connected', () => {
                     setIsPeerConnected(true);
                 });
+                socketRef.current.on('voice-stream:started', ({ streamId }) => {
+                    console.log('Voice stream started:', streamId);
+                    setVoiceStreamStatus('starting');
+                    setVoiceStreamLiveTurns([]);
+                });
+                socketRef.current.on('voice-stream:worker-ready', () => {
+                    voiceWorkerReadyRef.current = true;
+                    setVoiceStreamStatus('streaming');
+                });
+                socketRef.current.on('voice-stream:partial', (payload) => {
+                    const text = typeof payload?.text === 'string' ? payload.text.trim() : '';
+                    if (!text) return;
+
+                    const sourceRole = String(payload?.sourceRole || '').toUpperCase();
+                    if (String(userRole || '').toUpperCase() === 'ENTERPRISE' && sourceRole === 'ENTERPRISE') {
+                        return;
+                    }
+
+                    const speaker = sourceRole === 'ENTERPRISE'
+                        ? 'Recruiter'
+                        : (sourceRole ? 'Candidate' : (payload?.speaker || 'CANDIDATE'));
+
+                    setVoiceStreamLiveTurns((previous) => [
+                        ...previous,
+                        {
+                            speaker,
+                            text,
+                            turn_index: payload?.turn_index,
+                            start_ms: payload?.start_ms,
+                            end_ms: payload?.end_ms,
+                            sourceRole,
+                            sourceUserId: payload?.sourceUserId,
+                        },
+                    ]);
+                });
+                socketRef.current.on('voice-stream:result', (result) => {
+                    setVoiceStreamResult(result);
+                    setVoiceStreamStatus('ready');
+                });
+                socketRef.current.on('voice-stream:error', (payload) => {
+                    const message = typeof payload?.message === 'string' ? payload.message : 'Voice streaming failed.';
+                    setVoiceStreamError(message);
+                    setVoiceStreamStatus('error');
+                    setIsVoiceStreaming(false);
+                });
 
                 setStatus('ready');
                 
@@ -266,73 +593,18 @@ const VideoCall = () => {
         init();
 
         return () => {
+            cleanupVoiceStream();
             if (pcRef.current) pcRef.current.close();
             if (socketRef.current) socketRef.current.disconnect();
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
+            if (localStreamRef.current) {
+                localStreamRef.current.getTracks().forEach(track => track.stop());
             }
             if (speechRecognitionRef.current) {
                 speechRecognitionRef.current.stop();
             }
             clearInterval(callTimerRef.current);
         };
-    }, [initialized, interviewId]);
-
-    const startCall = async () => {
-        setStatus('connecting');
-        try {
-            socketRef.current.emit('join-interview', { interviewId });
-            
-            if (userRole === 'ENTERPRISE') {
-                const offer = await pcRef.current.createOffer({
-                    offerToReceiveAudio: true,
-                    offerToReceiveVideo: true
-                });
-                await pcRef.current.setLocalDescription(offer);
-                socketRef.current.emit('offer', { interviewId, offer });
-            }
-            
-            setStatus('connected');
-        } catch (err) {
-            console.error('Call start error:', err);
-            setStatus('error');
-        }
-    };
-
-    const handleOffer = async ({ offer }) => {
-        try {
-            if (userRole === 'CANDIDATE') {
-                await pcRef.current.setRemoteDescription(new RTCSessionDescription(offer));
-                const answer = await pcRef.current.createAnswer();
-                await pcRef.current.setLocalDescription(answer);
-                socketRef.current.emit('answer', { interviewId, answer });
-                socketRef.current.emit('peer-connected', { interviewId });
-            }
-        } catch (err) {
-            console.error('Error handling offer:', err);
-        }
-    };
-
-    const handleAnswer = async ({ answer }) => {
-        try {
-            if (userRole === 'ENTERPRISE') {
-                await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-                socketRef.current.emit('peer-connected', { interviewId });
-            }
-        } catch (err) {
-            console.error('Error handling answer:', err);
-        }
-    };
-
-    const handleICECandidate = async ({ candidate }) => {
-        try {
-            if (candidate) {
-                await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-            }
-        } catch (err) {
-            console.error('Error adding ICE candidate:', err);
-        }
-    };
+    }, [initialized, interviewId, handleAnswer, handleICECandidate, handleOffer]);
 
     const toggleMute = () => {
         if (localStream) {
@@ -353,6 +625,10 @@ const VideoCall = () => {
     };
 
     const endCall = () => {
+        if (voiceStreamIdRef.current && socketRef.current?.connected) {
+            socketRef.current.emit('voice-stream:stop', { streamId: voiceStreamIdRef.current });
+        }
+        cleanupVoiceStream();
         if (pcRef.current) pcRef.current.close();
         if (socketRef.current) {
             socketRef.current.emit('leave-interview', { interviewId });
@@ -545,6 +821,51 @@ const VideoCall = () => {
                             <span>Generate AI Summary</span>
                         )}
                     </button>
+
+                    <button
+                        type="button"
+                        onClick={toggleVoiceStream}
+                        disabled={status !== 'connected' || !socketRef.current}
+                        className={`summary-btn voice-stream-btn ${isVoiceStreaming ? 'active' : ''}`}
+                    >
+                        {isVoiceStreaming ? 'Stop Voice Stream' : 'Start Voice Stream'}
+                    </button>
+
+                    <div className="voice-stream-status">
+                        <span>Voice stream: {voiceStreamStatus}</span>
+                        {voiceStreamError && <span className="voice-stream-error">{voiceStreamError}</span>}
+                    </div>
+
+                    {voiceStreamLiveTurns.length > 0 && (
+                        <div className="voice-stream-result">
+                            <h3>Live Transcript (Realtime)</h3>
+                            <p>{voiceStreamLiveTurns.length} partial updates</p>
+                            <div className="voice-stream-turns">
+                                {voiceStreamLiveTurns.slice(-4).map((turn, index) => (
+                                    <div key={`${turn.turn_index || index}-${index}`} className="voice-stream-turn">
+                                        <strong>{turn.speaker}</strong>
+                                        <span>{turn.text}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {voiceStreamResult?.turns?.length > 0 && (
+                        <div className="voice-stream-result">
+                            <h3>Voice Engine Output</h3>
+                            <p>{voiceStreamResult.turn_count || voiceStreamResult.turns.length} analyzed turns</p>
+                            <div className="voice-stream-turns">
+                                {voiceStreamResult.turns.slice(0, 4).map((turn, index) => (
+                                    <div key={`${turn.speaker}-${turn.start_ms}-${index}`} className="voice-stream-turn">
+                                        <strong>{turn.speaker}</strong>
+                                        <span>{turn.text}</span>
+                                        <small>{Math.round(turn.silence_before_ms || 0)} ms silence before</small>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {interviewSummary && (
                         <div className="summary-modal">

@@ -1,16 +1,31 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import PublicLayout from "../../layouts/PublicLayout";
 import "./CandidateProfile.css";
 
+const PROFILE_IMAGE_MAX_SIZE = 15 * 1024 * 1024;
+
 const CandidateProfile = () => {
   const { id } = useParams();
+  const currentUserId = localStorage.getItem("userId");
+  const isOwnProfile = String(id) === String(currentUserId);
+  const isValidMongoId = /^[a-f\d]{24}$/i.test(String(id || ""));
   const [candidate, setCandidate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
+    if (!isValidMongoId) {
+      setError("Invalid candidate profile link.");
+      setLoading(false);
+      return;
+    }
+
     const fetchCandidate = async () => {
       try {
         const res = await axios.get(`http://localhost:3001/Frontend/getUser/${id}`);
@@ -24,7 +39,76 @@ const CandidateProfile = () => {
     };
     
     fetchCandidate();
-  }, [id]);
+  }, [id, isValidMongoId]);
+
+  const handleCameraClick = () => {
+    if (isOwnProfile) {
+      fileInputRef.current?.click();
+    }
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > PROFILE_IMAGE_MAX_SIZE) {
+      alert("Image too large. Maximum size is 15MB.");
+      e.target.value = "";
+      return;
+    }
+
+    setSelectedFile(file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImagePreview(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCancelImage = () => {
+    setImagePreview(null);
+    setSelectedFile(null);
+  };
+
+  const handleUploadImage = async () => {
+    if (!selectedFile) return;
+
+    setIsUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append("userId", id);
+      formData.append("picture", selectedFile);
+
+      const res = await fetch("http://localhost:3001/Frontend/upload-profile", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorPayload = await res.json().catch(() => null);
+        throw new Error(errorPayload?.error || `Upload failed with status: ${res.status}`);
+      }
+
+      const data = await res.json();
+      console.log("✅ Upload response:", data);
+
+      const pictureUrl = data.pictureUrl || data.picture;
+      if (pictureUrl) {
+        setCandidate(prev => ({ ...prev, picture: pictureUrl }));
+        setImagePreview(null);
+        setSelectedFile(null);
+        alert("✅ Profile picture updated successfully!");
+      } else {
+        console.error("No picture URL in response:", data);
+        alert("❌ Image uploaded but URL not returned. Please refresh the page.");
+      }
+    } catch (err) {
+      console.error("❌ Failed to upload image:", err);
+      alert(`❌ ${err.message || "Failed to upload image. Please try again."}`);
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -72,21 +156,79 @@ const CandidateProfile = () => {
     <PublicLayout>
       <div className="candidate-profile-container">
       <div className="profile-header">
-        {candidateImage ? (
-          <img
-            src={candidateImage}
-            alt={candidate.name || "Candidate"}
-            className="profile-avatar profile-avatar-image"
-            onError={(e) => {
-              e.currentTarget.onerror = null;
-              e.currentTarget.style.display = "none";
-            }}
-          />
+        {imagePreview ? (
+          <div className="profile-avatar-wrapper">
+            <img
+              src={imagePreview}
+              alt="Preview"
+              className="profile-avatar profile-avatar-image"
+            />
+            <div className="image-actions">
+              <button
+                className="btn-action btn-confirm"
+                onClick={handleUploadImage}
+                disabled={isUploadingImage}
+              >
+                {isUploadingImage ? "Uploading..." : "✔"}
+              </button>
+              <button
+                className="btn-action btn-cancel"
+                onClick={handleCancelImage}
+                disabled={isUploadingImage}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ) : candidateImage ? (
+          <div className="profile-avatar-wrapper">
+            <img
+              src={candidateImage}
+              alt={candidate.name || "Candidate"}
+              className="profile-avatar profile-avatar-image"
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.style.display = "none";
+              }}
+            />
+            {isOwnProfile && (
+              <button
+                className="image-overlay"
+                onClick={handleCameraClick}
+                type="button"
+                aria-label="Change profile picture"
+              >
+                <span className="camera-icon">📷</span>
+              </button>
+            )}
+          </div>
+        ) : isOwnProfile ? (
+          <div className="profile-avatar-wrapper">
+            <div className="profile-avatar">
+              {candidate.name?.charAt(0) || "C"}
+            </div>
+            <button
+              className="image-overlay"
+              onClick={handleCameraClick}
+              type="button"
+              aria-label="Add profile picture"
+            >
+              <span className="camera-icon">📷</span>
+            </button>
+          </div>
         ) : (
           <div className="profile-avatar">
             {candidate.name?.charAt(0) || "C"}
           </div>
         )}
+
+        <input
+          type="file"
+          ref={fileInputRef}
+          accept="image/*"
+          onChange={handleImageChange}
+          style={{ display: "none" }}
+        />
         
         <div className="profile-title">
           <h1>{candidate.name || "Candidate"}</h1>

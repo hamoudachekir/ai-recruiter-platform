@@ -7,6 +7,8 @@ import "./EditProfile.css";
 import Navbar from "../components/Navbar/Navbar";
 import Footer from "../components/Footer/Footer";
 
+const PROFILE_IMAGE_MAX_SIZE = 15 * 1024 * 1024;
+
 const skillsList = [
   { value: "JavaScript", label: "JavaScript" }, { value: "Python", label: "Python" },
   { value: "React", label: "React" }, { value: "Node.js", label: "Node.js" },
@@ -66,6 +68,40 @@ const formatExperienceForTextarea = (rawExperience) => {
   return "";
 };
 
+const parseExperienceFromTextarea = (rawValue) => {
+  const content = String(rawValue || "");
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return lines.map((line) => {
+    const [headRaw, ...descriptionParts] = line.split(" - ");
+    const head = String(headRaw || "").trim();
+    const description = descriptionParts.join(" - ").trim();
+
+    let duration = "";
+    let headWithoutDuration = head;
+    const durationRegex = /\(([^)]+)\)\s*$/;
+    const durationMatch = durationRegex.exec(head);
+    if (durationMatch) {
+      duration = String(durationMatch[1] || "").trim();
+      headWithoutDuration = head.replace(/\(([^)]+)\)\s*$/, "").trim();
+    }
+
+    const atIndex = headWithoutDuration.toLowerCase().indexOf(" at ");
+    const title = atIndex >= 0 ? headWithoutDuration.slice(0, atIndex).trim() : headWithoutDuration;
+    const company = atIndex >= 0 ? headWithoutDuration.slice(atIndex + 4).trim() : "";
+
+    return {
+      title,
+      company,
+      duration,
+      description,
+    };
+  });
+};
+
 const EditProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -76,6 +112,7 @@ const EditProfile = () => {
   const [formData, setFormData] = useState({});
   const [oldPassword, setOldPassword] = useState("");
   const [newPicture, setNewPicture] = useState(null);
+  const [selectedPictureFile, setSelectedPictureFile] = useState(null);
 
   const skillOptions = useMemo(() => {
     const fromProfile = Array.isArray(formData.profile?.skills)
@@ -124,11 +161,14 @@ const EditProfile = () => {
 
   const handleSave = async () => {
     try {
+      const normalizedExperience = parseExperienceFromTextarea(formData.profile?.experience);
+
       const payload = {
         ...formData,
         profile: {
           ...formData.profile,
           skills: Array.isArray(formData.profile?.skills) ? formData.profile.skills : [],
+          experience: normalizedExperience,
         },
       };
 
@@ -139,6 +179,27 @@ const EditProfile = () => {
       });
 
       if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+
+      if (selectedPictureFile) {
+        const pictureFormData = new FormData();
+        pictureFormData.append("userId", id);
+        pictureFormData.append("picture", selectedPictureFile);
+
+        const pictureResponse = await fetch("http://localhost:3001/Frontend/upload-profile", {
+          method: "POST",
+          body: pictureFormData,
+        });
+
+        if (!pictureResponse.ok) {
+          const uploadError = await pictureResponse.json().catch(() => null);
+          throw new Error(uploadError?.error || `Image upload failed. Status: ${pictureResponse.status}`);
+        }
+
+        const pictureData = await pictureResponse.json();
+        if (pictureData?.pictureUrl) {
+          setUser((prev) => ({ ...prev, picture: pictureData.pictureUrl }));
+        }
+      }
 
       const data = await response.json();
       console.log("✅ Profil mis à jour avec succès :", data);
@@ -205,13 +266,29 @@ const EditProfile = () => {
     const selectedFile = event.target.files[0];
     if (!selectedFile) return;
 
+    if (selectedFile.size > PROFILE_IMAGE_MAX_SIZE) {
+      window.alert("Image too large. Maximum size is 15MB.");
+      event.target.value = "";
+      return;
+    }
+
     const reader = new FileReader();
     reader.onloadend = () => setNewPicture(reader.result);
     reader.readAsDataURL(selectedFile);
+    setSelectedPictureFile(selectedFile);
   };
 
   if (loading) return <p className="edit-profile-feedback">Loading profile...</p>;
   if (!user) return <p className="edit-profile-feedback">User not found.</p>;
+
+  const pictureValue = user?.picture ? String(user.picture) : "";
+  let normalizedPictureSrc = "/images/team-1.jpg";
+  if (pictureValue) {
+    normalizedPictureSrc = pictureValue.startsWith("http")
+      ? pictureValue
+      : `http://localhost:3001${pictureValue}`;
+  }
+  const profileImageSrc = newPicture || normalizedPictureSrc;
 
 
   return (
@@ -225,7 +302,7 @@ const EditProfile = () => {
           <CardHeader className="card-header">
             <div className="avatar-container">
               <img
-                src={newPicture || `http://localhost:3001${user.picture}`}
+                src={profileImageSrc}
                 className="avatar"
                 alt="Profile"
               />

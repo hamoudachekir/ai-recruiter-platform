@@ -1,4 +1,3 @@
-import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "react-toastify/dist/ReactToastify.css";
@@ -33,10 +32,17 @@ import ResetPassword from "./login/assets/ResetPassword";
 import Profile from "./profileFront/profile";
 import EditProfile from "./profileFront/EditProfile";
 import VideoCallPage from "./interview/VideoCall";
+import VoiceLiveTest from "./interview/VoiceLiveTest";
+import LiveInterviewRoom from "./interview/LiveInterviewRoom";
+import SpeechStackLive from "./interview/SpeechStackLive";
+import CallRoomDashboard from "./interview/CallRoomDashboard";
+import CallRoomAvailable from "./interview/CallRoomAvailable";
+import CallRoomActive from "./interview/CallRoomActive";
 import EntrepriseProfile from "./pages/Entreprise/EntrepriseProfile";
 import JobDetails from "./pages/JobDetails/JobDetails";
 import QuizPage from "./pages/Quiz/QuizPage";
 import CandidateProfile from "./pages/Candidate/CandidateProfile";
+import CandidateScheduling from "./pages/Candidate/CandidateScheduling";
 import CandidateMessages from './pages/CandidateMessages';
 
 
@@ -93,7 +99,15 @@ function App() {
             <Route path="/edit-profile/:id" element={<EditProfile />} />
             <Route path="/entreprise/:id" element={<EntrepriseProfile />} />
             <Route path="/interview/:interviewId" element={<VideoCallPage />} />
+            <Route path="/test-live" element={<VoiceLiveTest />} />
+            <Route path="/interview/test-live" element={<VoiceLiveTest />} />
+            <Route path="/interview/live-room" element={<LiveInterviewRoom />} />
+            <Route path="/speech-stack-live" element={<SpeechStackLive />} />
+            <Route path="/call-room/dashboard" element={<CallRoomDashboard />} />
+            <Route path="/call-room/available" element={<CallRoomAvailable />} />
+            <Route path="/call-room/:roomId" element={<CallRoomActive />} />
             <Route path="/quiz/:jobId" element={<QuizPage />} />
+            <Route path="/candidate/scheduling" element={<CandidateScheduling />} />
             <Route path="/candidate/:id" element={<CandidateProfile />} />
             <Route path="/messages" element={<CandidateMessages />} />
 

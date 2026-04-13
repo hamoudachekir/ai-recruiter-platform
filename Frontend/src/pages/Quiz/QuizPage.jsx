@@ -326,8 +326,28 @@ const QuizPage = () => {
       }
     } catch (err) {
       console.error("Erreur lors de l'envoi du score :", err);
-      const backendMessage = err?.response?.data?.message;
-      setSubmitError(backendMessage || "Impossible de soumettre le quiz. Veuillez réessayer.");
+      const statusCode = Number(err?.response?.status || 0);
+      const backendMessageRaw = err?.response?.data?.message;
+      const backendMessage = typeof backendMessageRaw === "string"
+        ? backendMessageRaw
+        : backendMessageRaw?.message;
+      const answeredQuestions = Number(err?.response?.data?.answeredQuestions || 0);
+      const totalQuestions = Number(err?.response?.data?.totalQuestions || 0);
+
+      if (statusCode === 429) {
+        const retryAfter = err?.response?.data?.retryAfter;
+        setSubmitError(
+          retryAfter
+            ? `Trop de tentatives de soumission. Réessayez dans ${retryAfter}.`
+            : "Trop de tentatives de soumission. Réessayez plus tard."
+        );
+      } else if (statusCode === 400 && totalQuestions > 0) {
+        setSubmitError(
+          backendMessage || `Veuillez répondre à toutes les questions (${answeredQuestions}/${totalQuestions}).`
+        );
+      } else {
+        setSubmitError(backendMessage || "Impossible de soumettre le quiz. Veuillez réessayer.");
+      }
     } finally {
       setIsSubmitting(false);
     }

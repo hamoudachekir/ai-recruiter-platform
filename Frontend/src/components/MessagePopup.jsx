@@ -36,6 +36,8 @@ const MessagePopup = ({ socket, selectedUser, onClose, currentUserId }) => {
 
   // Listen for incoming messages
   useEffect(() => {
+    if (!socket) return undefined;
+
     const handleMessage = (msg) => {
       if (
         (msg.from === currentUserId && msg.to === selectedUser._id) ||
@@ -107,10 +109,10 @@ const MessagePopup = ({ socket, selectedUser, onClose, currentUserId }) => {
         );
 
         // Emit bot response via socket
-        socket.emit("send-message", botResponse);
+        socket?.emit("send-message", botResponse);
       } else {
         // Regular message to human
-        socket.emit("send-message", messageObj);
+        socket?.emit("send-message", messageObj);
       }
     } catch (err) {
       console.error("Error sending message:", err);

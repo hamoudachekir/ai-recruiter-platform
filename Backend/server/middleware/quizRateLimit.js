@@ -31,29 +31,46 @@ if (String(process.env.QUIZ_RATE_LIMIT_USE_REDIS || 'false').toLowerCase() === '
  */
 const quizRateLimiter = rateLimit({
   store: store,
-  keyGenerator: (req, res) => {
-    // Use candidateId from request body as the key
-    const candidateId = req.body?.candidateId || req.query?.candidateId || 'unknown';
-    return `quiz-submit-${candidateId}`;
+  keyGenerator: (req) => {
+    // Scope rate limit by candidate + job to avoid cross-job lockouts.
+    const candidateId = String(req.body?.candidateId || req.query?.candidateId || '').trim();
+    const jobId = String(req.body?.jobId || req.query?.jobId || '').trim();
+
+    if (candidateId && jobId) {
+      return `quiz-submit-${candidateId}-${jobId}`;
+    }
+
+    if (candidateId) {
+      return `quiz-submit-${candidateId}`;
+    }
+
+    // Fallback keeps IPv6 handling safe when candidate id is unavailable.
+    return `quiz-submit-ip-${rateLimit.ipKeyGenerator(req.ip)}`;
   },
   windowMs: 24 * 60 * 60 * 1000, // 24 hours
-  max: parseInt(process.env.QUIZ_MAX_ATTEMPTS_PER_DAY || '3'),
-  message: {
-    status: 429,
-    message: 'Too many quiz submissions. Maximum 3 attempts per 24 hours.',
-    retryAfter: '24 hours',
-  },
+  max: Number.parseInt(process.env.QUIZ_MAX_ATTEMPTS_PER_DAY || '3', 10),
+  message: 'Too many quiz submissions. Maximum 3 attempts per 24 hours.',
   standardHeaders: true,
   legacyHeaders: false,
+  // Validation errors should not consume attempts.
+  skipFailedRequests: true,
   skip: (req, res) => {
     // Skip rate limiting if security disabled
     return process.env.QUIZ_SECURITY_ENABLED === 'false';
   },
-  handler: (req, res, options) => {
-    res.status(options.statusCode).json({
+  handler: (req, res, next, options) => {
+    const statusCode = Number(options?.statusCode) || 429;
+    const configuredMessage = options?.message;
+    const message = typeof configuredMessage === 'string'
+      ? configuredMessage
+      : (configuredMessage?.message || 'Too many quiz submissions. Please try again later.');
+    const retryAfterSeconds = res.getHeader('Retry-After');
+
+    res.status(statusCode).json({
       success: false,
-      message: options.message,
-      retryAfter: options.windowMs / 1000 / 60 + ' minutes',
+      status: statusCode,
+      message,
+      retryAfter: retryAfterSeconds ? `${retryAfterSeconds} seconds` : '24 hours',
     });
   },
 });

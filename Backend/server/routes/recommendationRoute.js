@@ -4,6 +4,34 @@ const express = require('express');
 const router = express.Router();
 const { UserModel } = require('../models/user');
 
+const RECOMMENDATION_SERVICE_URL = 'http://127.0.0.1:5001/recommend';
+const RECOMMENDATION_TIMEOUT_MS = Number(process.env.RECOMMENDATION_TIMEOUT_MS || 3000);
+const RECOMMENDATION_DOWN_COOLDOWN_MS = Number(process.env.RECOMMENDATION_DOWN_COOLDOWN_MS || 15000);
+const RECOMMENDATION_ERROR_LOG_THROTTLE_MS = Number(process.env.RECOMMENDATION_ERROR_LOG_THROTTLE_MS || 10000);
+
+let recommendationDownUntil = 0;
+let lastRecommendationErrorLogAt = 0;
+
+const markRecommendationServiceDown = () => {
+    recommendationDownUntil = Date.now() + RECOMMENDATION_DOWN_COOLDOWN_MS;
+};
+
+const shouldSkipRecommendationCall = () => Date.now() < recommendationDownUntil;
+
+const shouldLogRecommendationError = () => {
+    const now = Date.now();
+    if (now - lastRecommendationErrorLogAt < RECOMMENDATION_ERROR_LOG_THROTTLE_MS) {
+        return false;
+    }
+    lastRecommendationErrorLogAt = now;
+    return true;
+};
+
+const isTransientRecommendationFailure = (error) => {
+    const code = String(error?.code || '').toUpperCase();
+    return ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EHOSTUNREACH'].includes(code);
+};
+
 router.get('/for-user', async(req, res) => {
     try {
         // 1. Verify JWT Token
@@ -20,18 +48,28 @@ router.get('/for-user', async(req, res) => {
         }
 
         // 2. Get recommendations from Python service with lower threshold
+        if (shouldSkipRecommendationCall()) {
+            return res.status(200).json([]);
+        }
+
         let response;
         try {
-            response = await axios.post('http://127.0.0.1:5001/recommend', {
+            response = await axios.post(RECOMMENDATION_SERVICE_URL, {
                 candidate_id: decoded.id,
                 top_k: 10,
                 threshold: 0.2  // Lowered from 0.3 to show more matches
             }, {
-                timeout: 10000,
+                timeout: RECOMMENDATION_TIMEOUT_MS,
                 headers: { 'Content-Type': 'application/json' }
             });
         } catch (err) {
-            console.error('Recommendation service error:', err.response ? err.response.data : err.message);
+            if (isTransientRecommendationFailure(err)) {
+                markRecommendationServiceDown();
+            }
+
+            if (shouldLogRecommendationError()) {
+                console.error('Recommendation service error:', err.response ? err.response.data : err.message);
+            }
             return res.status(200).json([]);
         }
 

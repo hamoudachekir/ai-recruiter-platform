@@ -27,9 +27,14 @@ class SideEffectRetryService:
         payload: Dict[str, Any],
         error_message: str,
         delay_seconds: Optional[int] = None,
+        run_at: Optional[datetime] = None,
     ) -> str:
         now = datetime.utcnow()
         delay = max(5, int(delay_seconds or self.base_backoff_seconds))
+        if isinstance(run_at, datetime):
+            next_run_at = run_at if run_at > now else now + timedelta(seconds=5)
+        else:
+            next_run_at = now + timedelta(seconds=delay)
 
         doc = {
             "job_type": job_type,
@@ -38,7 +43,7 @@ class SideEffectRetryService:
             "status": "pending",
             "attempts": 0,
             "max_attempts": self.max_attempts,
-            "next_run_at": now + timedelta(seconds=delay),
+            "next_run_at": next_run_at,
             "last_error": str(error_message or ""),
             "created_at": now,
             "updated_at": now,

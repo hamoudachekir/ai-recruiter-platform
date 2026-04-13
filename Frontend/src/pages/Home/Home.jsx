@@ -20,7 +20,6 @@ import {
   faLightbulb,
   faStar,
   faMessage,
-  faBell,
   faRobot
 } from "@fortawesome/free-solid-svg-icons";
 import { motion } from "framer-motion";
@@ -60,9 +59,7 @@ const Home = () => {
   const [showMessagePopup, setShowMessagePopup] = useState(false);
   const [chatPartner, setChatPartner] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
-  const [messageNotifications, setMessageNotifications] = useState([]);
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
-  const [messages, setMessages] = useState([]);
   const [applicationStatusByJobId, setApplicationStatusByJobId] = useState({});
 
   const role = localStorage.getItem("role");
@@ -70,16 +67,24 @@ const Home = () => {
   useEffect(() => {
     const userId = localStorage.getItem("userId");
     const canConnectSocket = token && !isTokenExpired(token);
+    let socket = socketRef.current;
 
-    if (canConnectSocket && !socketRef.current) {
-      socketRef.current = io("http://localhost:3001", {
-        auth: { token },
-        transports: ["websocket"],
-        reconnection: false
-      });
+    if (canConnectSocket) {
+      if (!socket || socket.disconnected) {
+        socket = io("http://localhost:3001", {
+          auth: { token },
+          transports: ["websocket", "polling"],
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+        });
+        socketRef.current = socket;
+      }
+    } else if (socket) {
+      socket.disconnect();
+      socketRef.current = null;
+      socket = null;
     }
-
-    const socket = socketRef.current;
     if (userId) {
       setCurrentUserId(userId);
     }
@@ -103,12 +108,53 @@ const Home = () => {
       socket.on("receive-message", (data) => {
         console.log("📥 Message received from:", data.from);
         if (data.to === userId) {
-          setMessages(prev => [...prev, data]);
-          setMessageNotifications(prev => [...prev, data]);
           setHasUnreadMessages(true);
         }
       });
     }
+
+    const fetchCandidateRecommendations = async () => {
+      if (role !== "CANDIDATE" || !token) {
+        return;
+      }
+
+      setRecommendationsLoading(true);
+      setRecommendationsError(null);
+
+      try {
+        const recRes = await axios.get(
+          "http://localhost:3001/api/recommendations/for-user",
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        let recommendationsData = [];
+        if (Array.isArray(recRes.data)) {
+          recommendationsData = recRes.data;
+        } else if (recRes.data?.recommendations) {
+          recommendationsData = recRes.data.recommendations;
+        } else if (Array.isArray(recRes.data?.jobs)) {
+          recommendationsData = recRes.data.jobs.map((job) => ({
+            ...job,
+            match_score: job.score || 0,
+          }));
+        }
+
+        const transformedRecs = recommendationsData.map((rec) => {
+          const jobData = rec.job || rec;
+          return {
+            ...jobData,
+            match_score: rec.score || rec.match_score || 0,
+          };
+        });
+
+        setRecommendations(transformedRecs);
+      } catch (recError) {
+        console.error("❌ Error fetching recommendations:", recError);
+        setRecommendationsError("Failed to load recommendations.");
+      } finally {
+        setRecommendationsLoading(false);
+      }
+    };
 
     const fetchData = async () => {
       try {
@@ -156,7 +202,6 @@ const Home = () => {
               );
 
               if (unreadMessages?.length > 0) {
-                setMessageNotifications(unreadMessages);
                 setHasUnreadMessages(true);
               }
             } catch (msgError) {
@@ -166,40 +211,7 @@ const Home = () => {
 
           // Fetch recommendations (Only for Candidates)
           if (role === "CANDIDATE") {
-            setRecommendationsLoading(true);
-            try {
-              const recRes = await axios.get(
-                "http://localhost:3001/api/recommendations/for-user",
-                { headers: { Authorization: `Bearer ${token}` } }
-              );
-
-              let recommendationsData = [];
-              if (Array.isArray(recRes.data)) {
-                recommendationsData = recRes.data;
-              } else if (recRes.data?.recommendations) {
-                recommendationsData = recRes.data.recommendations;
-              } else if (Array.isArray(recRes.data?.jobs)) {
-                recommendationsData = recRes.data.jobs.map((job) => ({
-                  ...job,
-                  match_score: job.score || 0,
-                }));
-              }
-
-              const transformedRecs = recommendationsData.map((rec) => {
-                const jobData = rec.job || rec;
-                return {
-                  ...jobData,
-                  match_score: rec.score || rec.match_score || 0,
-                };
-              });
-
-              setRecommendations(transformedRecs);
-            } catch (recError) {
-              console.error("❌ Error fetching recommendations:", recError);
-              setRecommendationsError("Failed to load recommendations.");
-            } finally {
-              setRecommendationsLoading(false);
-            }
+            await fetchCandidateRecommendations();
           } else {
             setRecommendationsLoading(false);
           }
@@ -213,13 +225,28 @@ const Home = () => {
 
     fetchData();
 
+    const handleVisibleRefresh = () => {
+      if (document.visibilityState === "visible") {
+        fetchCandidateRecommendations();
+      }
+    };
+
+    window.addEventListener("focus", handleVisibleRefresh);
+    document.addEventListener("visibilitychange", handleVisibleRefresh);
+
     return () => {
       if (socket) {
         socket.off("connect");
         socket.off("disconnect");
         socket.off("connect_error");
         socket.off("receive-message");
+        socket.disconnect();
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
       }
+      window.removeEventListener("focus", handleVisibleRefresh);
+      document.removeEventListener("visibilitychange", handleVisibleRefresh);
     };
   }, [role, token]);
 
@@ -639,7 +666,7 @@ const Home = () => {
       {/* Live Chat Message Popup */}
       {showMessagePopup && chatPartner && (
         <MessagePopup
-          socket={socket}
+          socket={socketRef.current}
           selectedUser={chatPartner}
           onClose={() => setShowMessagePopup(false)}
           currentUserId={currentUserId}

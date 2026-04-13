@@ -11,7 +11,7 @@ import {
   faPeopleGroup, faEdit, faSave, faTimes, 
   faBriefcase, faCamera, faPlus, faMinus, 
   faPlusCircle, faCalendarAlt, faVideo, faBoxArchive, faRotateLeft,
-  faEnvelope, faLock, faKey
+  faEnvelope, faLock, faKey, faBell
 } from "@fortawesome/free-solid-svg-icons";
 
 const EntrepriseProfile = () => {
@@ -76,6 +76,8 @@ const EntrepriseProfile = () => {
   const [calendarActionLoading, setCalendarActionLoading] = useState(false);
   const [testEmailLoading, setTestEmailLoading] = useState(false);
   const [decisionLoadingById, setDecisionLoadingById] = useState({});
+  const [recruiterNotifications, setRecruiterNotifications] = useState([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
 
   const [newJob, setNewJob] = useState({
     title: "",
@@ -109,12 +111,26 @@ const EntrepriseProfile = () => {
   const archivedJobs = enterpriseJobs.filter((job) => job.status === "CLOSED");
   const activeJobsCount = activeJobs.length;
   const archivedJobsCount = archivedJobs.length;
+  const interviewNotifications = recruiterNotifications
+    .filter((notification) => String(notification?.type || "").toUpperCase() === "INTERVIEW")
+    .slice()
+    .sort((left, right) => new Date(right?.date || 0) - new Date(left?.date || 0));
+  const unreadInterviewNotifications = interviewNotifications.filter(
+    (notification) => !notification?.seen
+  );
 
   const formatQuizDuration = (seconds) => {
     const safeSeconds = Math.max(0, Number(seconds) || 0);
     const minutes = Math.floor(safeSeconds / 60);
     const remainingSeconds = safeSeconds % 60;
     return `${minutes}m ${remainingSeconds}s`;
+  };
+
+  const formatNotificationDate = (value) => {
+    if (!value) return "Unknown time";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleString();
   };
 
   const normalizeMongoId = (value) => {
@@ -124,6 +140,38 @@ const EntrepriseProfile = () => {
       return String(value._id || value.id || "");
     }
     return String(value);
+  };
+
+  const clampPercent = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return null;
+    return Math.max(0, Math.min(100, Math.round(numeric)));
+  };
+
+  const deriveProfileJobMatch = (predictionPayload = {}) => {
+    const matches = predictionPayload?.matches || {};
+    const skillPercent = clampPercent(Number(matches?.skill_match || 0) * 100) || 0;
+    const expPercent = clampPercent(Number(matches?.exp_match || 0) * 100) || 0;
+    const educationPercent = clampPercent(Number(matches?.education_match || 0) * 100) || 0;
+
+    const weightedFallback = Math.round((skillPercent * 0.55) + (expPercent * 0.3) + (educationPercent * 0.15));
+    const fromApi = clampPercent(predictionPayload?.match_percent);
+
+    return {
+      matchPercent: fromApi === null ? weightedFallback : fromApi,
+      breakdown: {
+        skill: skillPercent,
+        exp: expPercent,
+        education: educationPercent,
+      },
+    };
+  };
+
+  const getMatchPillClass = (matchPercent) => {
+    if (matchPercent === null || matchPercent === undefined) return "status-pill-neutral";
+    if (matchPercent >= 70) return "status-pill-recommended";
+    if (matchPercent >= 45) return "status-pill-quiz";
+    return "status-pill-not-recommended";
   };
 
   const computeQuizQuality = (validation = {}, totalQuestions = 0) => {
@@ -329,6 +377,44 @@ const EntrepriseProfile = () => {
 
     fetchApplications();
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    let firstLoad = true;
+
+    const fetchRecruiterNotifications = async () => {
+      const enterpriseId = localStorage.getItem("userId") || id;
+      if (!enterpriseId) return;
+
+      if (isMounted && firstLoad) {
+        setNotificationsLoading(true);
+      }
+
+      try {
+        const res = await axios.get(`http://localhost:3001/Frontend/notifications/${enterpriseId}`);
+        if (!isMounted) return;
+        const notifications = Array.isArray(res?.data?.notifications) ? res.data.notifications : [];
+        setRecruiterNotifications(notifications);
+      } catch (error) {
+        if (isMounted) {
+          console.error("❌ Error fetching recruiter notifications:", error);
+        }
+      } finally {
+        if (isMounted && firstLoad) {
+          setNotificationsLoading(false);
+          firstLoad = false;
+        }
+      }
+    };
+
+    fetchRecruiterNotifications();
+    const intervalId = setInterval(fetchRecruiterNotifications, 30000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [id]);
 
   useEffect(() => {
     const fetchEntreprise = async () => {
@@ -771,6 +857,8 @@ const openApplicationModal = async (jobId) => {
         qualifiedCandidates.push({
           ...app,
           mlPrediction: null,
+          profileJobMatchPercent: null,
+          profileJobMatchBreakdown: null,
         });
         continue;
       }
@@ -791,9 +879,13 @@ const openApplicationModal = async (jobId) => {
           qualifiedCandidates.push({
             ...app,
             mlPrediction: null,
+            profileJobMatchPercent: null,
+            profileJobMatchBreakdown: null,
           });
           continue;
         }
+
+        const matchInfo = deriveProfileJobMatch(predictionRes?.data || {});
 
         qualifiedCandidates.push({
           ...app,
@@ -801,7 +893,11 @@ const openApplicationModal = async (jobId) => {
             hired: predictionRes.data.hired === 1,
             confidence: Math.round(predictionRes.data.confidence * 100),
             matches: predictionRes.data.matches,
+            matchPercent: matchInfo.matchPercent,
+            matchBreakdown: matchInfo.breakdown,
           },
+          profileJobMatchPercent: matchInfo.matchPercent,
+          profileJobMatchBreakdown: matchInfo.breakdown,
         });
       } catch (error) {
         const statusCode = error?.response?.status;
@@ -816,6 +912,8 @@ const openApplicationModal = async (jobId) => {
         qualifiedCandidates.push({
           ...app,
           mlPrediction: null,
+          profileJobMatchPercent: null,
+          profileJobMatchBreakdown: null,
         });
       }
     }
@@ -824,8 +922,16 @@ const openApplicationModal = async (jobId) => {
       toast.info("ML prediction service is temporarily unavailable. Candidate list is shown without ML ranking.");
     }
 
-    // Sort candidates by ML prediction confidence (highest first)
+    // Sort candidates by match score first, then by ML confidence.
     qualifiedCandidates.sort((a, b) => {
+      const aMatch = Number(a?.profileJobMatchPercent);
+      const bMatch = Number(b?.profileJobMatchPercent);
+      const safeAMatch = Number.isFinite(aMatch) ? aMatch : -1;
+      const safeBMatch = Number.isFinite(bMatch) ? bMatch : -1;
+      if (safeBMatch !== safeAMatch) {
+        return safeBMatch - safeAMatch;
+      }
+
       if (a.mlPrediction && b.mlPrediction) {
         return b.mlPrediction.confidence - a.mlPrediction.confidence;
       }
@@ -1274,6 +1380,40 @@ const openApplicationModal = async (jobId) => {
                   <span className="chip-label">Interviews</span>
                   <span className="chip-value">{scheduledInterviews.length}</span>
                 </div>
+              </div>
+
+              <div className="recruiter-notifications-card">
+                <div className="recruiter-notifications-header">
+                  <h4>
+                    <FontAwesomeIcon icon={faBell} className="me-2" />
+                    Candidate Confirmations
+                  </h4>
+                  <span className={`notification-pill ${unreadInterviewNotifications.length > 0 ? "notification-pill-unread" : ""}`}>
+                    {unreadInterviewNotifications.length} new
+                  </span>
+                </div>
+
+                {notificationsLoading && interviewNotifications.length === 0 && (
+                  <p className="notification-empty-state">Loading notifications...</p>
+                )}
+
+                {!notificationsLoading && interviewNotifications.length === 0 && (
+                  <p className="notification-empty-state">No candidate confirmations yet.</p>
+                )}
+
+                {interviewNotifications.length > 0 && (
+                  <div className="recruiter-notifications-list">
+                    {interviewNotifications.slice(0, 6).map((notification) => {
+                      const key = `${String(notification?.date || "")}-${String(notification?.message || "")}`;
+                      return (
+                        <div key={key} className="recruiter-notification-item">
+                          <p className="notification-message">{notification?.message || "Candidate confirmed attendance."}</p>
+                          <p className="notification-date">{formatNotificationDate(notification?.date)}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="profile-content">
@@ -1911,7 +2051,10 @@ const openApplicationModal = async (jobId) => {
   <div className="custom-modal-overlay">
     <div className="custom-modal">
       <div className="modal-header">
-        <h5>Candidates Quiz Insights (All Applicants)</h5>
+        <div className="modal-title-wrap">
+          <h5>Candidates Quiz Insights (All Applicants)</h5>
+          <p>Recruitment dashboard with quiz, matching, and workflow tracking.</p>
+        </div>
         <button className="close-button" onClick={() => setShowModal(false)}>
           ✖
         </button>
@@ -1920,16 +2063,19 @@ const openApplicationModal = async (jobId) => {
         <div className="calendar-connection-panel">
           <div>
             <h6>Recruiter Google Calendar</h6>
-            <p>
-              Status: <strong>{calendarStatus.connected ? "Connected" : "Not connected"}</strong>
+            <div className="calendar-status-meta">
+              <span className={`calendar-status-chip ${calendarStatus.connected ? "is-connected" : "is-disconnected"}`}>
+                {calendarStatus.connected ? "Connected" : "Not connected"}
+              </span>
               {calendarStatus.connectedAt && (
-                <>
-                  {" "}
-                  • Connected at {new Date(calendarStatus.connectedAt).toLocaleString()}
-                </>
+                <span className="calendar-status-chip is-muted">
+                  Connected at {new Date(calendarStatus.connectedAt).toLocaleString()}
+                </span>
               )}
-              {calendarStatus.tokenExpired === true && " • Token expired"}
-            </p>
+              {calendarStatus.tokenExpired === true && (
+                <span className="calendar-status-chip is-warning">Token expired</span>
+              )}
+            </div>
           </div>
           <div className="calendar-connection-actions">
             <button
@@ -1972,6 +2118,19 @@ const openApplicationModal = async (jobId) => {
             const isDecisionLoading = Boolean(decisionLoadingById[applicationId]);
             const isInterviewApproved = app.recruiterDecision === "INTERVIEW";
             const workflowSteps = buildAgentWorkflowSteps(app);
+            const profileJobMatchPercent = clampPercent(
+              app?.profileJobMatchPercent ?? app?.mlPrediction?.matchPercent
+            );
+            const profileJobMatchBreakdown =
+              app?.profileJobMatchBreakdown || app?.mlPrediction?.matchBreakdown || null;
+            const mlMatches = app?.mlPrediction?.matches || null;
+            const resolvedMatchBreakdown = profileJobMatchBreakdown || (mlMatches
+              ? {
+                  skill: clampPercent(Number(mlMatches.skill_match || 0) * 100) ?? 0,
+                  exp: clampPercent(Number(mlMatches.exp_match || 0) * 100) ?? 0,
+                  education: clampPercent(Number(mlMatches.education_match || 0) * 100) ?? 0,
+                }
+              : null);
 
             return (
               <div key={app._id || app.candidateId?._id || app.candidateId?.email} className="application-card">
@@ -1985,7 +2144,6 @@ const openApplicationModal = async (jobId) => {
                   </div>
 
                   <div className="candidate-badges">
-                    <span className="status-pill status-pill-quiz">Quiz {quizPercent}%</span>
                     <span className={`status-pill ${app.isQualified ? "status-pill-recommended" : "status-pill-not-recommended"}`}>
                       {app.isQualified ? "Qualified" : "Not Qualified"}
                     </span>
@@ -1994,22 +2152,36 @@ const openApplicationModal = async (jobId) => {
                         {app.mlPrediction.hired ? "Recommended" : "Not Recommended"} ({app.mlPrediction.confidence}%)
                       </span>
                     )}
-                    <span
-                      className={`status-pill ${
-                        app.recruiterDecision === "INTERVIEW"
-                          ? "status-pill-recommended"
-                          : app.recruiterDecision === "REJECTED"
-                            ? "status-pill-not-recommended"
-                            : "status-pill-neutral"
-                      }`}
-                    >
-                      Decision: {app.recruiterDecision || "PENDING"}
-                    </span>
                     {app.interviewSchedule?.status && app.interviewSchedule.status !== "not_scheduled" && (
                       <span className={`status-pill ${app.interviewSchedule.status === "failed" ? "status-pill-not-recommended" : "status-pill-quiz"}`}>
                         Scheduling: {app.interviewSchedule.status}
                       </span>
                     )}
+                  </div>
+                </div>
+
+                <div className="application-kpis">
+                  <div className="kpi-card kpi-card-quiz">
+                    <span className="kpi-label">Quiz Result</span>
+                    <strong className="kpi-value">{quizPercent}%</strong>
+                  </div>
+                  <div className={`kpi-card ${getMatchPillClass(profileJobMatchPercent)}`}>
+                    <span className="kpi-label">Profile Alignment</span>
+                    <strong className="kpi-value">
+                      Job Match: {profileJobMatchPercent === null ? "N/A" : `${profileJobMatchPercent}%`}
+                    </strong>
+                    {profileJobMatchPercent !== null && (
+                      <div className="match-progress" role="presentation" aria-hidden="true">
+                        <div
+                          className="match-progress-fill"
+                          style={{ width: `${profileJobMatchPercent}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="kpi-card kpi-card-recommendation">
+                    <span className="kpi-label">Recruiter Decision</span>
+                    <strong className="kpi-value">{app.recruiterDecision || "PENDING"}</strong>
                   </div>
                 </div>
 
@@ -2033,7 +2205,7 @@ const openApplicationModal = async (jobId) => {
                   <div className="detail-item detail-item-full">
                     <span className="detail-label">Qualification</span>
                     <span className="qualified-text">
-                      {app.isQualified ? "✅ Qualified" : "❌ Not Qualified"} (Needed {app.passingScore} correct answers)
+                      {app.isQualified ? "Qualified" : "Not Qualified"} (Needed {app.passingScore} correct answers)
                     </span>
                   </div>
                   <div className="detail-item detail-item-full">
@@ -2041,6 +2213,23 @@ const openApplicationModal = async (jobId) => {
                     <span className="detail-value">{app.quizRationale || "Generated from candidate profile and job requirements."}</span>
                   </div>
                 </div>
+
+                {resolvedMatchBreakdown && (
+                  <div className="match-details">
+                    <div className="match-item">
+                      <span>Skills Fit</span>
+                      <strong>{resolvedMatchBreakdown.skill ?? 0}%</strong>
+                    </div>
+                    <div className="match-item">
+                      <span>Experience Fit</span>
+                      <strong>{resolvedMatchBreakdown.exp ?? 0}%</strong>
+                    </div>
+                    <div className="match-item">
+                      <span>Education Fit</span>
+                      <strong>{resolvedMatchBreakdown.education ?? 0}%</strong>
+                    </div>
+                  </div>
+                )}
 
                 {Array.isArray(app.quizSkillsUsed) && app.quizSkillsUsed.length > 0 && (
                   <div className="match-details">
@@ -2147,23 +2336,6 @@ const openApplicationModal = async (jobId) => {
                       ))}
                     </div>
                   </details>
-                )}
-
-                {app.mlPrediction && (
-                  <div className="match-details">
-                    <div className="match-item">
-                      <span>Skill Match</span>
-                      <strong>{Math.round(app.mlPrediction.matches.skill_match * 100)}%</strong>
-                    </div>
-                    <div className="match-item">
-                      <span>Experience Match</span>
-                      <strong>{Math.round(app.mlPrediction.matches.exp_match * 100)}%</strong>
-                    </div>
-                    <div className="match-item">
-                      <span>Education Match</span>
-                      <strong>{Math.round(app.mlPrediction.matches.education_match * 100)}%</strong>
-                    </div>
-                  </div>
                 )}
 
                 <div className="agent-workflow-panel">
