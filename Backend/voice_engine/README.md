@@ -91,6 +91,25 @@ Utilisez plutôt:
 
 ## Tester en live depuis la page Front
 
+### Lancer speech stack + interview agent en une seule commande
+
+Depuis la racine du dépôt, vous pouvez démarrer les deux services ensemble avec:
+
+```powershell
+.\Backend\voice_engine\scripts\run_voice_interview_stack.ps1
+```
+
+Par défaut, cela lance:
+- Speech stack sur `http://127.0.0.1:8012/health`
+- Interview agent sur `http://127.0.0.1:8013/health`
+
+Vous pouvez aussi forcer un redémarrage ou changer le modèle LLM:
+
+```powershell
+.\Backend\voice_engine\scripts\run_voice_interview_stack.ps1 -ForceRestart -LLMProvider ollama -OllamaModel qwen2.5:14b-instruct
+```
+
+
 Cette partie est déjà branchée sur la page interview:
 
 - Route front: `/interview/:interviewId`

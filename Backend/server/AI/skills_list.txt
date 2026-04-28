@@ -1,59 +1,454 @@
+# Programming Languages
 python
 java
-c
 c++
-html
-css
+c#
 javascript
 typescript
+php
+ruby
+go
+rust
+swift
+kotlin
+scala
+r
+dart
+perl
+lua
+matlab
+bash
+powershell
+shell scripting
+assembly
+cobol
+fortran
+groovy
+elixir
+haskell
+clojure
+erlang
+objective-c
+vba
+
+# Web Frontend
+html
+css
 react
 react.js
-nodejs
 angular
-spring
+vue
+vue.js
+svelte
+next.js
+nuxt.js
+gatsby
+remix
+astro
+jquery
+bootstrap
+tailwind css
+tailwindcss
+sass
+scss
+less
+webpack
+vite
+parcel
+rollup
+storybook
+redux
+zustand
+mobx
+rxjs
+graphql
+pwa
+web components
+webassembly
+three.js
+d3.js
+
+# Web Backend
+nodejs
+node.js
+express
+express.js
 django
 flask
-php
+fastapi
+spring
+spring boot
+laravel
 symfony
+ruby on rails
+asp.net
+asp.net core
+nestjs
+hapi
+koa
+strapi
+phoenix
+gin
+fiber
+actix
+
+# Mobile Development
+react native
+flutter
+android
+ios
+swift
+kotlin
+ionic
+xamarin
+flutterflow
+expo
+capacitor
+
+# Databases
 sql
-mongodb
 mysql
 postgresql
-git
-docker
+mongodb
+redis
+sqlite
+oracle
+microsoft sql server
+mariadb
+cassandra
+dynamodb
+elasticsearch
+neo4j
+couchdb
+firebase
+supabase
+influxdb
+cockroachdb
+prisma
+sequelize
+typeorm
+mongoose
+hibernate
+
+# Cloud & DevOps
 aws
 azure
 gcp
+google cloud
+docker
+kubernetes
+terraform
+ansible
+jenkins
+github actions
+gitlab ci
+circleci
+travis ci
+helm
+nginx
+apache
 linux
 ubuntu
 centos7
-tailwind css
+centos
+debian
+windows server
+vagrant
+pulumi
+serverless
+openshift
+rancher
+prometheus
+grafana
+elk stack
+logstash
+kibana
+datadog
+new relic
+cloudflare
+vercel
+netlify
+heroku
+digitalocean
+linode
+
+# AI / Machine Learning
+machine learning
+deep learning
+tensorflow
+keras
+pytorch
+scikit-learn
+pandas
+numpy
+matplotlib
+seaborn
+opencv
+huggingface
+transformers
+bert
+gpt
+llm
+langchain
+nlp
+natural language processing
+computer vision
+reinforcement learning
+xgboost
+lightgbm
+catboost
+yolo
+stable diffusion
+rag
+vector database
+pinecone
+weaviate
+chroma
+openai api
+gemini api
+anaconda
+jupyter
+spacy
+nltk
+mlflow
+kubeflow
+airflow
+dbt
+feature engineering
+data augmentation
+t5
+whisper
+
+# Data Science & Analytics
+data analysis
+data visualization
+data engineering
+data science
+data pipeline
+etl
+powerbi
+power bi
+tableau
+looker
+metabase
+google analytics
+google data studio
+bigquery
+spark
+hadoop
+hive
+kafka
+flink
+dask
+plotly
+bokeh
+streamlit
+excel
+power query
+
+# Cybersecurity
+cybersecurity
+penetration testing
+ethical hacking
+kali linux
+metasploit
+wireshark
+nmap
+burp suite
+owasp
+siem
+soc
+firewall
+cryptography
+network security
+vulnerability assessment
+incident response
+blue team
+red team
+security audit
+iso 27001
+gdpr compliance
+zero trust
+devsecops
+snort
+suricata
+vault
+oauth
+jwt
+ssl
+tls
+pki
+
+# Testing & QA
+unit testing
+integration testing
+selenium
+cypress
+playwright
+jest
+mocha
+chai
+pytest
+junit
+testng
+postman
+insomnia
+jmeter
+gatling
+cucumber
+bdd
+tdd
+sonarqube
+eslint
+prettier
+
+# Design & UX/UI
 figma
 adobe photoshop
 adobe illustrator
-wordpress
-seo
-sem
-powerbi
-tableau
-anaconda
-tensorflow
-keras
-scikit-learn
-pytorch
-machine learning
-deep learning
-data analysis
-data visualization
-responsive design
-api integration
-cms
-network infrastructure
-web development
-computer systems
-signal processing
-project management
-scrum
-agile
+adobe xd
+sketch
+invision
+zeplin
+principle
+framer
+canva
+after effects
+premiere pro
+blender
+ux design
+ui design
+wireframing
+prototyping
+user research
+design system
+motion design
+typography
+color theory
+
+# Version Control & Collaboration
+git
+github
+gitlab
+bitbucket
+svn
+mercurial
 jira
 confluence
+trello
+notion
+asana
+slack
+monday.com
+linear
+clickup
+
+# Project Management & Methods
+agile
+scrum
+kanban
+waterfall
+lean
+safe
+prince2
+pmp
+devops
+gitflow
+okr
+sprint planning
+product roadmap
+
+# APIs & Integration
+rest api
+restful api
+graphql
+soap
+websocket
+grpc
+api integration
+openapi
+swagger
+postman
+webhook
+oauth
+jwt
+microservices
+event-driven architecture
+message queue
+rabbitmq
+kafka
+celery
+redis queue
+
+# Networking & Infrastructure
+networking
+tcp/ip
+dns
+dhcp
+vpn
+load balancing
+cdn
+network infrastructure
+cisco
+mikrotik
+vlan
+firewall configuration
+web hosting
+server administration
+
+# ERP / CRM / Business Tools
+sap
+odoo
+salesforce
+hubspot
+zoho
+dynamics 365
+servicenow
+sharepoint
+powerpoint
+excel
+word
+google workspace
+microsoft 365
+
+# Other Technical Skills
+responsive design
+web development
+cms
+wordpress
+shopify
+magento
+woocommerce
+computer systems
+signal processing
+embedded systems
+iot
+arduino
+raspberry pi
+fpga
+vhdl
+verilog
+can bus
+rtos
+computer vision
+image processing
+3d modeling
+autocad
+solidworks
+matlab simulink
+labview
+plc programming
+
+# Soft Skills (Technical Context)
+project management
+technical writing
+code review
+problem solving
+system design
+software architecture
+api design
+database design
+performance optimization
+ci/cd
+documentation
+open source

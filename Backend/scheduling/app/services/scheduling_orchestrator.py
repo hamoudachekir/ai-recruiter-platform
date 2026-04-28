@@ -135,10 +135,13 @@ class SchedulingOrchestrator:
             )
 
             candidate_action_token = uuid4().hex
+            recruiter_action_token = uuid4().hex
             candidate_action_expires_at = self._utcnow_naive() + timedelta(
                 days=max(7, int(self.settings.scheduling_days_ahead or 7))
             )
+            recruiter_action_expires_at = candidate_action_expires_at
             candidate_action_link = self._build_candidate_action_link(candidate_action_token)
+            recruiter_action_link = self._build_recruiter_action_link(recruiter_action_token)
 
             schedule_data = {
                 "candidate_id": candidate_id,
@@ -166,6 +169,9 @@ class SchedulingOrchestrator:
                 "candidate_action_token": candidate_action_token,
                 "candidate_action_expires_at": candidate_action_expires_at,
                 "candidate_action_link": candidate_action_link,
+                "recruiter_action_token": recruiter_action_token,
+                "recruiter_action_expires_at": recruiter_action_expires_at,
+                "recruiter_action_link": recruiter_action_link,
                 "notes": "",
             }
             
@@ -200,7 +206,7 @@ class SchedulingOrchestrator:
                 suggested_slots = self.recommendation_service.generate_candidate_slots(
                     recruiter_busy_slots=busy_slots,
                     interview_duration=resolved_duration,
-                    start_date=self._utcnow_naive(),
+                    start_date=self._utcnow_naive() + timedelta(days=3),
                     top_n=normalized_top_n,
                     optimization_context=optimization_context,
                 )
@@ -1017,10 +1023,13 @@ class SchedulingOrchestrator:
             "buffer_minutes": int(schedule.get("buffer_minutes") or 0),
             "suggested_slots": list(schedule.get("suggested_slots") or []),
             "confirmed_slot": schedule.get("confirmed_slot"),
+            "candidate_timezone": schedule.get("candidate_timezone"),
+            "recruiter_timezone": schedule.get("recruiter_timezone"),
             "candidate_action_link": str(
                 schedule.get("candidate_action_link")
                 or self._build_candidate_action_link(candidate_action_token)
             ),
+            "pending_reschedule": schedule.get("pending_reschedule"),
             "candidate_action_expires_at": schedule.get("candidate_action_expires_at"),
             "message": "Candidate scheduling context retrieved successfully",
         }
@@ -1086,6 +1095,247 @@ class SchedulingOrchestrator:
             "interview_schedule_id": schedule_id,
             "suggested_slots": suggestions,
             "message": "Alternative slots generated successfully",
+        }
+
+    async def reschedule_by_candidate_token(
+        self,
+        candidate_action_token: str,
+        new_slot: Dict[str, str],
+        location: Optional[str] = None,
+        notes: str = "",
+    ) -> Dict[str, Any]:
+        """Create a candidate reschedule request pending recruiter approval."""
+        schedule = await self._get_schedule_by_candidate_token(candidate_action_token)
+        schedule_id = str(schedule.get("_id"))
+        current_status = str(schedule.get("status") or "").lower()
+
+        if current_status not in ["confirmed", "rescheduled"]:
+            raise ValueError(
+                f"Interview must be confirmed before rescheduling (current status: {current_status or 'unknown'})"
+            )
+
+        new_start_iso = str(new_slot.get("start_time") or "").strip()
+        new_end_iso = str(new_slot.get("end_time") or "").strip()
+        if not new_start_iso or not new_end_iso:
+            raise ValueError("new_slot must include start_time and end_time")
+
+        confirmed_slot = schedule.get("confirmed_slot") or {}
+        current_start_iso = str(confirmed_slot.get("start_time") or "").strip()
+        if not current_start_iso:
+            raise ValueError("Current confirmed slot is missing")
+
+        recruiter_action_token = str(schedule.get("recruiter_action_token") or "").strip()
+        if not recruiter_action_token:
+            recruiter_action_token = uuid4().hex
+            await self.schedule_repo.update(schedule_id, {"recruiter_action_token": recruiter_action_token})
+
+        action_base = self._build_recruiter_action_link(recruiter_action_token)
+        approve_link = f"{action_base}/reschedule-request/approve"
+        decline_link = f"{action_base}/reschedule-request/decline"
+
+        pending_payload = {
+            "status": "pending",
+            "requested_slot": {
+                "start_time": new_start_iso,
+                "end_time": new_end_iso,
+            },
+            "requested_at": self._utcnow_naive(),
+            "requested_by": "candidate",
+            "reason": notes or "",
+            "location": (str(location).strip() if location is not None else str(schedule.get("location") or "")),
+            "approve_link": approve_link,
+            "decline_link": decline_link,
+        }
+
+        await self.schedule_repo.update(
+            schedule_id,
+            {
+                "pending_reschedule": pending_payload,
+            },
+        )
+
+        candidate_info, recruiter_info, job_info = await self._fetch_external_data(
+            str(schedule.get("candidate_id") or ""),
+            str(schedule.get("recruiter_id") or ""),
+            str(schedule.get("job_id") or ""),
+        )
+
+        try:
+            await self.email_service.send_recruiter_reschedule_request_notification(
+                candidate=candidate_info,
+                recruiter=recruiter_info,
+                job_info=job_info,
+                current_start_time=self._to_naive_utc(self._parse_iso_datetime(current_start_iso)),
+                requested_start_time=self._to_naive_utc(self._parse_iso_datetime(new_start_iso)),
+                duration_minutes=int(schedule.get("duration_minutes") or self.settings.interview_duration_default),
+                approve_link=approve_link,
+                decline_link=decline_link,
+                reason=notes or "",
+                recruiter_timezone=schedule.get("recruiter_timezone"),
+                candidate_timezone=schedule.get("candidate_timezone"),
+            )
+            await self.schedule_repo.update(schedule_id, {"email_status": "sent"})
+        except Exception as exc:
+            await self.schedule_repo.update(schedule_id, {"email_status": "failed"})
+            await self.log_repo.log_action(
+                schedule_id,
+                "email_failed",
+                {
+                    "phase": "candidate_reschedule_request",
+                    "error": str(exc),
+                },
+            )
+
+        await self.log_repo.log_action(
+            schedule_id,
+            "candidate_reschedule_requested",
+            {
+                "current_slot": confirmed_slot,
+                "requested_slot": {
+                    "start_time": new_start_iso,
+                    "end_time": new_end_iso,
+                },
+                "reason": notes or "",
+            },
+        )
+
+        return {
+            "interview_schedule_id": schedule_id,
+            "status": "reschedule_pending_recruiter",
+            "message": "Reschedule request sent to recruiter for approval.",
+        }
+
+    async def recruiter_approve_reschedule_request_by_token(self, recruiter_action_token: str) -> Dict[str, Any]:
+        """Approve pending candidate reschedule request via recruiter token link."""
+        schedule = await self._get_schedule_by_recruiter_token(recruiter_action_token)
+        schedule_id = str(schedule.get("_id"))
+        pending = schedule.get("pending_reschedule") or {}
+
+        if str(pending.get("status") or "").lower() != "pending":
+            raise ValueError("No pending reschedule request found")
+
+        requested_slot = pending.get("requested_slot") or {}
+        requested_reason = str(pending.get("reason") or "").strip()
+
+        result = await self.reschedule_interview(
+            interview_schedule_id=schedule_id,
+            new_slot={
+                "start_time": requested_slot.get("start_time"),
+                "end_time": requested_slot.get("end_time"),
+            },
+            notes=requested_reason or "Approved candidate reschedule request",
+        )
+
+        await self.schedule_repo.update(
+            schedule_id,
+            {
+                "pending_reschedule": {
+                    **pending,
+                    "status": "approved",
+                    "decided_at": self._utcnow_naive(),
+                }
+            },
+        )
+
+        await self.log_repo.log_action(
+            schedule_id,
+            "recruiter_reschedule_request_approved",
+            {
+                "requested_slot": requested_slot,
+            },
+        )
+
+        return result
+
+    async def recruiter_decline_reschedule_request_by_token(self, recruiter_action_token: str) -> Dict[str, Any]:
+        """Decline pending candidate reschedule request via recruiter token link."""
+        schedule = await self._get_schedule_by_recruiter_token(recruiter_action_token)
+        schedule_id = str(schedule.get("_id"))
+        pending = schedule.get("pending_reschedule") or {}
+
+        if str(pending.get("status") or "").lower() != "pending":
+            raise ValueError("No pending reschedule request found")
+
+        requested_slot = pending.get("requested_slot") or {}
+
+        await self.schedule_repo.update(
+            schedule_id,
+            {
+                "pending_reschedule": {
+                    **pending,
+                    "status": "declined",
+                    "decided_at": self._utcnow_naive(),
+                }
+            },
+        )
+
+        candidate_info, recruiter_info, job_info = await self._fetch_external_data(
+            str(schedule.get("candidate_id") or ""),
+            str(schedule.get("recruiter_id") or ""),
+            str(schedule.get("job_id") or ""),
+        )
+
+        try:
+            requested_start_time = self._to_naive_utc(
+                self._parse_iso_datetime(str(requested_slot.get("start_time") or self._utcnow_naive().isoformat()))
+            )
+            await self.email_service.send_candidate_reschedule_declined_notification(
+                candidate=candidate_info,
+                recruiter=recruiter_info,
+                job_info=job_info,
+                requested_start_time=requested_start_time,
+                candidate_timezone=schedule.get("candidate_timezone"),
+            )
+        except Exception as exc:
+            await self.log_repo.log_action(
+                schedule_id,
+                "email_failed",
+                {
+                    "phase": "candidate_reschedule_declined",
+                    "error": str(exc),
+                },
+            )
+
+        await self.log_repo.log_action(
+            schedule_id,
+            "recruiter_reschedule_request_declined",
+            {
+                "requested_slot": requested_slot,
+            },
+        )
+
+        return {
+            "interview_schedule_id": schedule_id,
+            "status": str(schedule.get("status") or "confirmed"),
+            "message": "Reschedule request declined. Current confirmed slot remains unchanged.",
+        }
+
+    async def get_recruiter_reschedule_request_by_token(self, recruiter_action_token: str) -> Dict[str, Any]:
+        """Return recruiter-facing summary for pending reschedule request (read-only)."""
+        schedule = await self._get_schedule_by_recruiter_token(recruiter_action_token)
+        pending = schedule.get("pending_reschedule") or {}
+
+        candidate_info, recruiter_info, job_info = await self._fetch_external_data(
+            str(schedule.get("candidate_id") or ""),
+            str(schedule.get("recruiter_id") or ""),
+            str(schedule.get("job_id") or ""),
+        )
+
+        confirmed_slot = schedule.get("confirmed_slot") or {}
+        requested_slot = pending.get("requested_slot") or {}
+
+        return {
+            "interview_schedule_id": str(schedule.get("_id") or ""),
+            "schedule_status": str(schedule.get("status") or ""),
+            "pending_status": str(pending.get("status") or "none"),
+            "candidate_name": candidate_info.get("name") or "Candidate",
+            "recruiter_name": recruiter_info.get("name") or "Recruiter",
+            "job_title": job_info.get("title") or "Position",
+            "current_slot": confirmed_slot,
+            "requested_slot": requested_slot,
+            "reason": str(pending.get("reason") or "").strip(),
+            "candidate_timezone": schedule.get("candidate_timezone"),
+            "recruiter_timezone": schedule.get("recruiter_timezone"),
         }
 
     async def decline_slot_by_candidate_token(
@@ -1619,6 +1869,16 @@ class SchedulingOrchestrator:
             return f"{base}{suffix}"
         return suffix
 
+    def _build_recruiter_action_link(self, recruiter_action_token: str) -> str:
+        """Build public scheduling service link for recruiter approve/decline actions."""
+        token = str(recruiter_action_token or "").strip()
+        if not token:
+            return ""
+
+        base = str(self.settings.scheduling_public_base_url or "").rstrip("/")
+        path = f"/api/scheduling/public/recruiter/{token}"
+        return f"{base}{path}" if base else path
+
     def _serialize_slots(self, slots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Serialize recommendation slot payload into API-friendly dictionaries."""
         serialized: List[Dict[str, Any]] = []
@@ -1668,6 +1928,23 @@ class SchedulingOrchestrator:
 
         return schedule
 
+    async def _get_schedule_by_recruiter_token(self, recruiter_action_token: str) -> Dict[str, Any]:
+        """Resolve schedule by recruiter token and validate token freshness."""
+        token = str(recruiter_action_token or "").strip()
+        if not token:
+            raise ValueError("Recruiter action token is required")
+
+        schedule = await self.schedule_repo.get_by_recruiter_action_token(token)
+        if not schedule:
+            raise ValueError("Invalid recruiter action token")
+
+        expires_at = schedule.get("recruiter_action_expires_at")
+        if isinstance(expires_at, datetime):
+            if self._to_naive_utc(expires_at) < self._utcnow_naive():
+                raise ValueError("Recruiter action link has expired")
+
+        return schedule
+
     async def _build_alternative_slots_for_schedule(
         self,
         schedule: Dict[str, Any],
@@ -1703,7 +1980,7 @@ class SchedulingOrchestrator:
         generated = self.recommendation_service.generate_candidate_slots(
             recruiter_busy_slots=busy_slots,
             interview_duration=duration_minutes,
-            start_date=self._utcnow_naive(),
+            start_date=self._utcnow_naive() + timedelta(days=3),
             top_n=max(1, min(int(top_n or 3), 10)),
             optimization_context=optimization_context,
         )

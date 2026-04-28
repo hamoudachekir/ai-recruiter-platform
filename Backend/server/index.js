@@ -21,6 +21,17 @@ const fetch = require("node-fetch");
 const http = require('http');
 const socketIO = require('socket.io');
 const { exec } = require('child_process');
+const DEFAULT_ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5174',
+];
+const configuredOrigins = (process.env.ALLOWED_FRONTEND_URLS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set([...DEFAULT_ALLOWED_ORIGINS, ...configuredOrigins]);
 const ApplicationModel = require('./models/Application'); // Chemin exact vers le model
 const uploadCV = require("./middleware/uploadCV");
 const quizRateLimiter = require("./middleware/quizRateLimit");
@@ -30,9 +41,11 @@ const CandidateQuizModel = require("./models/CandidateQuiz");
 const QuizResultModel = require("./models/QuizResultModel");
 const Application = require("./models/Application");
 const messageRoutes = require('./routes/messages');
-const setupSocketEvents = require('./socket');
 const Message = require('./models/Message');
+const CallRoom = require('./models/CallRoom');
+const interviewAgent = require('./services/interviewAgentService');
 const voiceRoutes = require('./routes/voiceRoute');
+const { requestSpeechStackTts } = require('./services/speechStackService');
 const {
   buildWavBuffer,
   runVoiceEngineAnalysis,
@@ -54,7 +67,13 @@ const server = http.createServer(app);
 // Initialize Socket.IO
 const io = socketIO(server, {
   cors: {
-    origin: "http://localhost:5173",
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.has(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ["GET", "POST"],
     credentials: true
   },
@@ -63,6 +82,110 @@ const io = socketIO(server, {
   pingTimeout: 60000,
   pingInterval: 25000
 });
+
+const SOCKET_TRACE_ENABLED = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.SOCKET_TRACE || '').trim().toLowerCase(),
+);
+
+const shouldTraceSocketEvent = (eventName) => {
+  const name = String(eventName || '');
+  return (
+    name.startsWith('agent:')
+    || name === 'transcription-update'
+    || name === 'update-call-transcription'
+    || name === 'voice-stream:result'
+    || name === 'voice-stream:partial'
+  );
+};
+
+const summarizeSocketTraceArg = (value) => {
+  if (Buffer.isBuffer(value)) {
+    return { __type: 'Buffer', bytes: value.length };
+  }
+
+  if (Array.isArray(value)) {
+    return { __type: 'Array', length: value.length };
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const out = {};
+  const keys = [
+    'roomId',
+    'roomDbId',
+    'interviewId',
+    'phase',
+    'turnIndex',
+    'streamId',
+    'sentiment',
+    'text',
+    'corrected_text',
+    'summary',
+    'message',
+    'sourceUserId',
+    'sourceRole',
+  ];
+
+  for (const key of keys) {
+    if (value[key] == null) continue;
+    if (typeof value[key] === 'string') {
+      const normalized = value[key].replace(/\s+/g, ' ').trim();
+      out[key] = normalized.length > 160 ? `${normalized.slice(0, 160)}…` : normalized;
+      continue;
+    }
+    out[key] = value[key];
+  }
+
+  if (value.segment?.text) {
+    const segmentText = String(value.segment.text).replace(/\s+/g, ' ').trim();
+    out.segmentText = segmentText.length > 160 ? `${segmentText.slice(0, 160)}…` : segmentText;
+  }
+
+  if (typeof value.chunkCount === 'number') out.chunkCount = value.chunkCount;
+  if (typeof value.chunkBytes === 'number') out.chunkBytes = value.chunkBytes;
+  if (!Object.keys(out).length) out.__keys = Object.keys(value).slice(0, 10);
+
+  return out;
+};
+
+const traceSocketEvent = (direction, socket, eventName, args) => {
+  if (!SOCKET_TRACE_ENABLED || !shouldTraceSocketEvent(eventName)) return;
+
+  const summarizedArgs = Array.isArray(args)
+    ? args.slice(0, 3).map((arg) => summarizeSocketTraceArg(arg))
+    : [];
+
+  console.log('[SOCKET_TRACE]', {
+    direction,
+    event: eventName,
+    socketId: socket?.id || null,
+    userId: socket?.user?.id || null,
+    args: summarizedArgs,
+  });
+};
+
+const normalizeAgentSentiment = (sentiment) => {
+  if (!sentiment) return null;
+
+  if (typeof sentiment === 'string') {
+    const label = sentiment.trim().toUpperCase();
+    return label ? { label, score: 0 } : null;
+  }
+
+  if (typeof sentiment === 'object') {
+    const rawLabel = String(sentiment.label || sentiment.sentiment || '').trim().toUpperCase();
+    const rawScore = Number(sentiment.score);
+
+    return {
+      label: rawLabel || 'NEUTRAL',
+      score: Number.isFinite(rawScore) ? rawScore : 0,
+    };
+  }
+
+  return null;
+};
 
 const voiceStreamSessions = new Map();
 const isProd = process.env.NODE_ENV === 'production';
@@ -141,29 +264,27 @@ io.use((socket, next) => {
 io.on("connection", (socket) => {
   console.log("✅ Client connected:", socket.id, "User ID:", socket.user?.id);
 
+  if (SOCKET_TRACE_ENABLED) {
+    socket.onAny((eventName, ...args) => {
+      traceSocketEvent('in', socket, eventName, args);
+    });
+
+    if (typeof socket.onAnyOutgoing === 'function') {
+      socket.onAnyOutgoing((eventName, ...args) => {
+        traceSocketEvent('out', socket, eventName, args);
+      });
+    }
+  }
+
   // Each user joins their own room for private messaging
   if (socket.user?.id) {
     socket.join(socket.user.id);
   }
 
-  // Message handling
+  // Message handling — DB save is done by the HTTP POST /api/messages/send endpoint.
+  // The socket handler only relays the message in real-time to the recipient.
   socket.on("send-message", ({ to, from, text, timestamp }) => {
-    // Save to database first
-    const newMessage = new Message({
-      from,
-      to,
-      text,
-      timestamp
-    });
-    
-    newMessage.save()
-      .then(() => {
-        // Then emit to recipient
-        io.to(to).emit("receive-message", { from, to, text, timestamp });
-      })
-      .catch(err => {
-        console.error("Error saving message:", err);
-      });
+    io.to(String(to)).emit("receive-message", { from, to, text, timestamp });
   });
 
   socket.on('join-interview', ({ interviewId }) => {
@@ -186,6 +307,458 @@ io.on("connection", (socket) => {
     socket.leave(room);
     socket.to(room).emit('user-disconnected', socket.user?.id || socket.id);
   });
+
+  // ── Call Room Socket Events ───────────────────────────────────────────────
+
+  // Subscribe to the public list of available rooms (candidates)
+  socket.on('subscribe-to-available-rooms', () => {
+    socket.join('available-rooms');
+  });
+
+  socket.on('unsubscribe-from-available-rooms', () => {
+    socket.leave('available-rooms');
+  });
+
+  // Join a specific call room channel (both recruiter and candidate)
+  socket.on('join-room', ({ roomId }) => {
+    if (roomId) {
+      socket.join(`call-room:${roomId}`);
+      socket.join(roomId);
+    }
+  });
+
+  // Recruiter creates a room → broadcast to candidates browsing available rooms
+  socket.on('call-room-created', ({ roomId, room }) => {
+    io.to('available-rooms').emit('new-call-room', { room });
+  });
+
+  // Candidate requests to join → notify the recruiter (by their user ID room)
+  socket.on('call-room-join-request', ({ roomId, candidateId, initiatorId }) => {
+    if (initiatorId) {
+      io.to(String(initiatorId)).emit('candidate-join-request', { roomId, candidateId });
+    }
+    socket.to(`call-room:${roomId}`).emit('candidate-join-request', { roomId, candidateId });
+  });
+
+  // Recruiter confirms → notify the candidate and update available rooms list
+  socket.on('confirm-candidate-join', ({ roomId, roomDbId, candidateId }) => {
+    if (candidateId) {
+      io.to(String(candidateId)).emit('join-confirmed', { roomId, roomDbId });
+    }
+    socket.to(`call-room:${roomId}`).emit('join-confirmed', { roomId, roomDbId });
+    io.to('available-rooms').emit('call-room-status-update', { roomId, roomDbId, status: 'active' });
+  });
+
+  // Recruiter rejects → notify the candidate
+  socket.on('reject-candidate-join', ({ roomId, roomDbId, candidateId }) => {
+    if (candidateId) {
+      io.to(String(candidateId)).emit('join-rejected', { roomId, roomDbId });
+    }
+    socket.to(`call-room:${roomId}`).emit('join-rejected', { roomId, roomDbId });
+  });
+
+  // Either party ends the call
+  socket.on('end-call-room', ({ roomId, roomDbId }) => {
+    socket.to(`call-room:${roomId}`).emit('call-room-ended', { roomId, roomDbId });
+    io.to('available-rooms').emit('call-room-status-update', { roomId, roomDbId, status: 'ended' });
+  });
+
+  // Transcription update from candidate → forward to recruiter watching the room
+  socket.on('update-call-transcription', ({ roomId, roomDbId, segment, sentiment }) => {
+    if (!roomId) return;
+    io.to(`call-room:${roomId}`).emit('transcription-update', { roomId, roomDbId, segment, sentiment });
+  });
+
+  // Live STT/typing draft from candidate → forward to recruiter so the RH chat
+  // panel shows a "typing" ghost bubble while the candidate is still speaking.
+  socket.on('candidate:draft', ({ roomId, roomDbId, text }) => {
+    if (!roomId) return;
+    io.to(`call-room:${roomId}`).emit('candidate:draft', {
+      roomId,
+      roomDbId,
+      text: String(text || ''),
+      ts: Date.now(),
+    });
+  });
+
+  // Generic status update relay (e.g. delete)
+  socket.on('call-room-status-update', ({ roomId, roomDbId, status }) => {
+    io.to('available-rooms').emit('call-room-status-update', { roomId, roomDbId, status });
+    socket.to(`call-room:${roomId}`).emit('call-room-status-update', { roomId, roomDbId, status });
+  });
+
+  // ============ ADAPTIVE INTERVIEW AGENT EVENTS ============
+
+  const callRoomChannelName = (roomId) => (roomId ? `call-room:${roomId}` : null);
+  const resolveDocumentId = (value) => {
+    if (!value) return null;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object' && value._id) return String(value._id);
+    if (typeof value.toString === 'function') return String(value.toString());
+    return null;
+  };
+
+  const buildAgentMessagePayload = (interviewId, resolvedRoomId, result) => ({
+    interviewId,
+    roomId: resolvedRoomId,
+    phase: result.phase,
+    turnIndex: result.turn_index,
+    text: result.agent_message?.text,
+    difficulty: result.agent_message?.difficulty,
+    skillFocus: result.agent_message?.skill_focus,
+  });
+
+  const callRoomInterviewStyle = String(process.env.CALL_ROOM_INTERVIEW_STYLE || 'fast_screening').trim() || 'fast_screening';
+  const AGENT_TTS_MAX_CHARS = Math.max(80, Number(process.env.AGENT_TTS_MAX_CHARS || 220));
+
+  const broadcastAgentMessage = (roomId, payload) => {
+    if (!roomId) return;
+    const channel = callRoomChannelName(roomId);
+    if (channel) io.to(channel).emit('agent:message', payload);
+  };
+
+  const broadcastAgentEnded = (roomId, payload) => {
+    if (!roomId) return;
+    const channel = callRoomChannelName(roomId);
+    if (channel) io.to(channel).emit('agent:ended', payload);
+  };
+
+  // Echo a candidate utterance (typed or voice) to every participant in the
+  // call-room channel so the RH chat panel sees what the candidate said,
+  // not just the agent's reply.
+  const broadcastCandidateMessage = (room, payload) => {
+    const channel = callRoomChannelName(room?.roomId);
+    if (channel) io.to(channel).emit('candidate:message', payload);
+
+    const initiatorId = resolveDocumentId(room?.initiator);
+    if (initiatorId) io.to(initiatorId).emit('candidate:message', payload);
+  };
+
+  const sendAgentScore = async (roomDbId, roomId, payload) => {
+    try {
+      let initiatorId = null;
+
+      if (roomDbId) {
+        const room = await CallRoom.findById(roomDbId).select('initiator');
+        initiatorId = room?.initiator?.toString();
+      }
+
+      if (!initiatorId && roomId) {
+        const room = await CallRoom.findOne({ roomId }).select('initiator');
+        initiatorId = room?.initiator?.toString();
+      }
+
+      if (initiatorId) {
+        io.to(initiatorId).emit('agent:score', payload);
+      }
+    } catch (error) {
+      console.error('agent:score routing failed:', error?.message || error);
+    }
+  };
+
+  const buildFastTtsText = (rawText) => {
+    const normalized = String(rawText || '').replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+
+    // Strip common conversational filler that does not add interview value.
+    let cleaned = normalized
+      .replace(/^(of course\.?\s*)+/i, '')
+      .replace(/^(sure\.?\s*)+/i, '')
+      .replace(/^(absolutely\.?\s*)+/i, '')
+      .replace(/^(no problem[,.!?]*\s*)+/i, '')
+      .replace(/^(let me rephrase[:\-]?\s*)+/i, '')
+      .trim();
+
+    // Prefer the last explicit question when present for snappier audio prompts.
+    const questionParts = cleaned.match(/[^?]*\?/g);
+    if (Array.isArray(questionParts) && questionParts.length) {
+      cleaned = String(questionParts[questionParts.length - 1] || '').trim();
+    }
+
+    if (!cleaned) cleaned = normalized;
+
+    if (cleaned.length > AGENT_TTS_MAX_CHARS) {
+      const clipped = cleaned.slice(0, AGENT_TTS_MAX_CHARS);
+      const lastPunctuation = Math.max(clipped.lastIndexOf('?'), clipped.lastIndexOf('.'), clipped.lastIndexOf('!'));
+      cleaned = (lastPunctuation > 40 ? clipped.slice(0, lastPunctuation + 1) : clipped).trim();
+    }
+
+    return cleaned || normalized;
+  };
+
+  const sendAgentTtsToCandidate = async (room, payload) => {
+    try {
+      const candidateId = resolveDocumentId(room?.candidate);
+      const normalizedText = String(payload?.text || '').trim();
+      if (!candidateId || !normalizedText) return;
+      const ttsText = buildFastTtsText(normalizedText);
+      if (!ttsText) return;
+
+      const result = await requestSpeechStackTts({
+        text: ttsText,
+        language: process.env.FW_TTS_LANGUAGE || 'en',
+      });
+
+      io.to(candidateId).emit('agent:tts', {
+        interviewId: payload.interviewId,
+        roomId: payload.roomId,
+        phase: payload.phase,
+        turnIndex: payload.turnIndex,
+        text: ttsText,
+        sourceText: normalizedText,
+        contentType: result.contentType,
+        audioBase64: result.buffer.toString('base64'),
+        provider: 'xtts_v2',
+      });
+    } catch (error) {
+      console.error('agent:tts routing failed:', error?.message || error);
+    }
+  };
+
+  const resolveRoomForAgent = async (roomId, roomDbId) => {
+    if (roomDbId) {
+      return CallRoom.findById(roomDbId)
+        .populate('job', 'title skills description')
+        .populate('candidate', 'name email skills profile domain linkedin')
+        .populate('initiator', 'name email domain enterprise');
+    }
+
+    if (roomId) {
+      return CallRoom.findOne({ roomId })
+        .populate('job', 'title skills description')
+        .populate('candidate', 'name email skills profile domain linkedin')
+        .populate('initiator', 'name email domain enterprise');
+    }
+
+    return null;
+  };
+
+  socket.on('agent:start-session', async ({ roomId, roomDbId, phase = 'intro', prepareTts = false }) => {
+    try {
+      if (!roomId && !roomDbId) {
+        socket.emit('agent:error', { message: 'roomId or roomDbId required' });
+        return;
+      }
+
+      const room = await resolveRoomForAgent(roomId, roomDbId);
+      if (!room) {
+        socket.emit('agent:error', { message: 'Call room not found' });
+        return;
+      }
+
+      const interviewId = room._id.toString();
+      const jobTitle = room.job?.title || '';
+      const jobSkills = Array.isArray(room.job?.skills) ? room.job.skills : [];
+      const enterpriseContext = [
+        room.initiator?.enterprise?.name,
+        room.initiator?.enterprise?.industry,
+        room.initiator?.enterprise?.location,
+        room.initiator?.domain,
+      ]
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .join(' | ');
+      const jobDescription = [room.job?.description || '', enterpriseContext ? `Enterprise context: ${enterpriseContext}` : '']
+        .filter(Boolean)
+        .join('\n');
+      const candidateName = room.candidate?.name || room.candidate?.email || '';
+      const profile = room.candidate?.profile || {};
+      const linkedin = room.candidate?.linkedin || {};
+
+      const normalizeSkill = (value) => String(value || '').trim().toLowerCase();
+      const candidateSkillSources = [
+        ...(Array.isArray(room.candidate?.skills) ? room.candidate.skills : []),
+        ...(Array.isArray(room.candidate?.profile?.skills) ? room.candidate.profile.skills : []),
+      ];
+      const candidateSkillSet = new Set(
+        candidateSkillSources
+          .map((skill) => normalizeSkill(skill))
+          .filter(Boolean),
+      );
+      const matchedSkills = jobSkills.filter((skill) => candidateSkillSet.has(normalizeSkill(skill)));
+      const prioritizedSkills = [
+        ...matchedSkills,
+        ...jobSkills.filter((skill) => !candidateSkillSet.has(normalizeSkill(skill))),
+      ];
+
+      const result = await interviewAgent.startSession({
+        interviewId,
+        jobTitle,
+        jobSkills: prioritizedSkills,
+        jobDescription,
+        candidateName,
+        candidateProfile: {
+          short_description: profile.shortDescription || '',
+          skills: [
+            ...(Array.isArray(profile.skills) ? profile.skills.filter(Boolean) : []),
+            ...(Array.isArray(linkedin.skills) ? linkedin.skills.filter(Boolean) : []),
+          ],
+          languages: Array.isArray(profile.languages) ? profile.languages.filter(Boolean) : [],
+          domain: profile.domain || room.candidate?.domain || '',
+          availability: profile.availability || '',
+          experience: [
+            ...(Array.isArray(profile.experience)
+              ? profile.experience.map((e) => ({
+                  title: e?.title || '',
+                  company: e?.company || '',
+                  duration: e?.duration || '',
+                  description: e?.description || '',
+                }))
+              : []),
+            ...(Array.isArray(linkedin.experience)
+              ? linkedin.experience.slice(0, 6).map((e) => ({
+                  title: e?.title || e?.position || '',
+                  company: e?.companyName || e?.company || '',
+                  duration: e?.duration || '',
+                  description: e?.description || '',
+                }))
+              : []),
+          ],
+          linkedin: {
+            url: linkedin.url || '',
+            headline: linkedin.headline || '',
+            current_role: linkedin.currentRole || linkedin.currentPosition || '',
+            current_company: linkedin.currentCompany || '',
+            about: linkedin.about || '',
+            location: linkedin.location || '',
+          },
+        },
+        interviewStyle: callRoomInterviewStyle,
+        phase,
+      });
+
+      const resolvedRoomId = room.roomId;
+      const agentMessagePayload = buildAgentMessagePayload(interviewId, resolvedRoomId, result);
+      if (result.resumed) {
+        socket.emit('agent:message', agentMessagePayload);
+        if (prepareTts) {
+          void sendAgentTtsToCandidate(room, agentMessagePayload);
+        }
+      } else {
+        broadcastAgentMessage(resolvedRoomId, agentMessagePayload);
+        void sendAgentTtsToCandidate(room, agentMessagePayload);
+      }
+
+      await sendAgentScore(interviewId, resolvedRoomId, {
+        interviewId,
+        roomId: resolvedRoomId,
+        phase: result.phase,
+        turnIndex: result.turn_index,
+        scoring: result.scoring,
+        done: result.done,
+      });
+
+      console.log(`🤖 Agent session started for ${resolvedRoomId} (phase=${result.phase})`);
+    } catch (error) {
+      console.error('agent:start-session failed:', error);
+      socket.emit('agent:error', { message: error?.message || 'Failed to start agent session' });
+    }
+  });
+
+  socket.on('agent:candidate-turn', async ({ roomId, roomDbId, text, sentiment, source }) => {
+    try {
+      if (!text || !String(text).trim()) return;
+
+      const room = await resolveRoomForAgent(roomId, roomDbId);
+      if (!room) {
+        socket.emit('agent:error', { message: 'interview session not found' });
+        return;
+      }
+
+      const interviewId = room._id.toString();
+      const resolvedRoomId = room.roomId;
+      const normalizedSentiment = normalizeAgentSentiment(sentiment);
+      const candidateText = String(text || '').trim();
+      const candidateSource = String(source || 'voice').toLowerCase();
+
+      broadcastCandidateMessage(room, {
+        interviewId,
+        roomId: resolvedRoomId,
+        text: candidateText,
+        sentiment: normalizedSentiment,
+        source: candidateSource,
+        ts: Date.now(),
+      });
+
+      const result = await interviewAgent.candidateTurn({
+        interviewId,
+        text,
+        sentiment: normalizedSentiment,
+      });
+
+      const agentMessagePayload = buildAgentMessagePayload(interviewId, resolvedRoomId, result);
+      broadcastAgentMessage(resolvedRoomId, agentMessagePayload);
+      void sendAgentTtsToCandidate(room, agentMessagePayload);
+
+      await sendAgentScore(interviewId, resolvedRoomId, {
+        interviewId,
+        roomId: resolvedRoomId,
+        phase: result.phase,
+        turnIndex: result.turn_index,
+        scoring: result.scoring,
+        done: result.done,
+      });
+    } catch (error) {
+      console.error('agent:candidate-turn failed:', error);
+      socket.emit('agent:error', { message: error?.message || 'Failed to process candidate turn' });
+    }
+  });
+
+  socket.on('agent:switch-phase', async ({ roomId, roomDbId, phase }) => {
+    try {
+      const room = await resolveRoomForAgent(roomId, roomDbId);
+      if (!room) {
+        socket.emit('agent:error', { message: 'session not found' });
+        return;
+      }
+
+      const interviewId = room._id.toString();
+      const resolvedRoomId = room.roomId;
+      const result = await interviewAgent.switchPhase({ interviewId, phase });
+
+      const agentMessagePayload = buildAgentMessagePayload(interviewId, resolvedRoomId, result);
+      broadcastAgentMessage(resolvedRoomId, agentMessagePayload);
+      void sendAgentTtsToCandidate(room, agentMessagePayload);
+
+      await sendAgentScore(interviewId, resolvedRoomId, {
+        interviewId,
+        roomId: resolvedRoomId,
+        phase: result.phase,
+        turnIndex: result.turn_index,
+        scoring: result.scoring,
+        done: result.done,
+      });
+
+      console.log(`🤖 Agent phase switched to ${result.phase} for ${resolvedRoomId}`);
+    } catch (error) {
+      console.error('agent:switch-phase failed:', error);
+      socket.emit('agent:error', { message: error?.message || 'Failed to switch agent phase' });
+    }
+  });
+
+  socket.on('agent:end-session', async ({ roomId, roomDbId }) => {
+    try {
+      const room = await resolveRoomForAgent(roomId, roomDbId);
+      if (!room) return;
+
+      const interviewId = room._id.toString();
+      const resolvedRoomId = room.roomId;
+      const snapshot = await interviewAgent.endSession({ interviewId });
+
+      broadcastAgentEnded(resolvedRoomId, {
+        interviewId,
+        roomId: resolvedRoomId,
+        snapshot,
+      });
+
+      console.log(`🤖 Agent session ended for ${resolvedRoomId}`);
+    } catch (error) {
+      console.error('agent:end-session failed:', error);
+      socket.emit('agent:error', { message: error?.message || 'Failed to end agent session' });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   socket.on('voice-stream:start', ({
     streamId,
@@ -1636,15 +2209,10 @@ app.use(express.json());
 app.use(cookieParser());
 
 // CORS Configuration
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://127.0.0.1:5173",
-];
-
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.has(origin)) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
@@ -1740,7 +2308,7 @@ app.post("/auth/google", async(req, res) => {
     }
 
     const token = jwt.sign({ id: user._id, email: user.email },
-      process.env.JWT_SECRET_KEY, { expiresIn: "1h" }
+      process.env.JWT_SECRET_KEY, { expiresIn: "7d" }
     );
 
     res.status(200).json({
@@ -1842,7 +2410,7 @@ const resumeUpload = multer({
       const token = jwt.sign(
         { id: user._id, email: user.email },
         process.env.JWT_SECRET_KEY,
-        { expiresIn: "1h" }
+        { expiresIn: "7d" }
       );
 
       
@@ -2659,6 +3227,18 @@ app.post("/Frontend/transcribe-audio", audioUpload.single("audio"), async(req, r
     }
 });
 
+const refreshRecommendationIndexSafe = async () => {
+  try {
+    await axios.post("http://127.0.0.1:5001/refresh-index", {}, {
+      timeout: 15000,
+      headers: { "Content-Type": "application/json" }
+    });
+  } catch (error) {
+    // Keep job CRUD successful even when recommendation service is unavailable.
+    console.warn("Recommendation index refresh skipped:", error.message);
+  }
+};
+
 app.post("/Frontend/add-job", async (req, res) => {
     try {
       const { title, description, location, salary, entrepriseId, languages, skills } = req.body;
@@ -2691,6 +3271,8 @@ app.post("/Frontend/add-job", async (req, res) => {
   
       user.markModified('jobsPosted');
       await user.save();
+
+      await refreshRecommendationIndexSafe();
   
       return res.status(201).json({ message: "Job ajouté avec succès", job: newJob });
   
@@ -2753,6 +3335,8 @@ app.delete("/Frontend/delete-job/:id", async (req, res) => {
         { _id: deletedJob.entrepriseId },
         { $pull: { jobsPosted: { jobId: deletedJob._id } } }
       );
+
+      await refreshRecommendationIndexSafe();
   
       res.status(200).json({ message: "Job supprimé avec succès" });
     } catch (error) {
@@ -2802,6 +3386,8 @@ app.put("/Frontend/update-job/:id", async (req, res) => {
       }
     );
 
+    await refreshRecommendationIndexSafe();
+
     return res.status(200).json({ message: "Job mis à jour avec succès", job });
   } catch (error) {
     console.error("❌ Erreur lors de la mise à jour du job :", error);
@@ -2839,6 +3425,8 @@ app.put("/Frontend/archive-job/:id", async (req, res) => {
       }
     );
 
+    await refreshRecommendationIndexSafe();
+
     return res.status(200).json({ message: "Job archivé avec succès", job });
   } catch (error) {
     console.error("❌ Erreur lors de l'archivage du job :", error);
@@ -2875,6 +3463,8 @@ app.put("/Frontend/unarchive-job/:id", async (req, res) => {
         }
       }
     );
+
+    await refreshRecommendationIndexSafe();
 
     return res.status(200).json({ message: "Job désarchivé avec succès", job });
   } catch (error) {

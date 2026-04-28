@@ -246,13 +246,21 @@ class RecommendationService:
             microsecond=0,
         )
         
+        # Minimum start: never schedule a slot in the past
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        if work_start < now_naive:
+            # Snap to next 30-min boundary after now
+            minutes_past = int((now_naive - work_start).total_seconds() / 60)
+            snapped_minutes = ((minutes_past // 30) + 1) * 30
+            work_start = work_start + timedelta(minutes=snapped_minutes)
+
         # Generate 30-minute intervals
         current_time = work_start
         interval_minutes = 30
-        
+
         while current_time + timedelta(minutes=interview_duration) <= work_end:
             slot_end = current_time + timedelta(minutes=interview_duration)
-            
+
             # Check slot doesn't cross lunch break
             if not self._intervals_overlap(current_time, slot_end, lunch_start, lunch_end):
                 # Check slot doesn't conflict with busy time

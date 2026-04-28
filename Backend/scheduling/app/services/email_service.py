@@ -615,6 +615,134 @@ class EmailService:
             "recruiter": recruiter_result,
         }
 
+    async def send_recruiter_reschedule_request_notification(
+        self,
+        candidate: Dict[str, Any],
+        recruiter: Dict[str, Any],
+        job_info: Dict[str, Any],
+        current_start_time: datetime,
+        requested_start_time: datetime,
+        duration_minutes: int,
+        approve_link: str,
+        decline_link: str,
+        reason: str = "",
+        recruiter_timezone: Optional[str] = None,
+        candidate_timezone: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Notify recruiter that candidate requested date/time change and ask for approval."""
+        current_dt_for_recruiter = self._format_datetime(current_start_time, recruiter_timezone)
+        requested_dt_for_recruiter = self._format_datetime(requested_start_time, recruiter_timezone)
+        requested_dt_for_candidate = self._format_datetime(requested_start_time, candidate_timezone)
+
+        reason_block = ""
+        if str(reason or "").strip():
+            reason_block = f"<p><strong>Candidate note:</strong> {str(reason).strip()}</p>"
+
+        recruiter_html = (
+            "<p>Hello {name},</p>"
+            "<p><strong>{candidate_name}</strong> requested to change interview time for <strong>{job_title}</strong>.</p>"
+            "<ul>"
+            "<li>Current slot: {current_date} at {current_time} ({current_tz})</li>"
+            "<li>Requested slot: {requested_date} at {requested_time} ({requested_tz})</li>"
+            "<li>Duration: {duration} minutes</li>"
+            "</ul>"
+            "{reason_block}"
+            "<p>Please choose an action:</p>"
+            "<p><a href=\"{approve_link}\">Approve reschedule</a></p>"
+            "<p><a href=\"{decline_link}\">Decline request</a></p>"
+        ).format(
+            name=recruiter.get("name", "Recruiter"),
+            candidate_name=candidate.get("name", "Candidate"),
+            job_title=job_info.get("title", "Position"),
+            current_date=current_dt_for_recruiter["date"],
+            current_time=current_dt_for_recruiter["time"],
+            current_tz=current_dt_for_recruiter["timezone"],
+            requested_date=requested_dt_for_recruiter["date"],
+            requested_time=requested_dt_for_recruiter["time"],
+            requested_tz=requested_dt_for_recruiter["timezone"],
+            duration=duration_minutes,
+            reason_block=reason_block,
+            approve_link=approve_link,
+            decline_link=decline_link,
+        )
+
+        recruiter_text = (
+            f"{candidate.get('name', 'Candidate')} requested a reschedule for {job_info.get('title', 'Position')}. "
+            f"Current: {current_dt_for_recruiter['date']} {current_dt_for_recruiter['time']} ({current_dt_for_recruiter['timezone']}). "
+            f"Requested: {requested_dt_for_recruiter['date']} {requested_dt_for_recruiter['time']} ({requested_dt_for_recruiter['timezone']}). "
+            f"Approve: {approve_link} | Decline: {decline_link}"
+        )
+
+        recruiter_result = await self.send_email_batch(
+            recipients=[recruiter.get("email", "")],
+            subject=f"Approval needed: Candidate reschedule request - {candidate.get('name', 'Candidate')}",
+            html_content=recruiter_html,
+            text_content=recruiter_text,
+        )
+
+        candidate_html = (
+            "<p>Hello {name},</p>"
+            "<p>Your request to change interview time for <strong>{job_title}</strong> was sent to the recruiter.</p>"
+            "<p>Requested slot: {date} at {time} ({timezone})</p>"
+            "<p>We will notify you once the recruiter approves or declines your request.</p>"
+        ).format(
+            name=candidate.get("name", "Candidate"),
+            job_title=job_info.get("title", "Position"),
+            date=requested_dt_for_candidate["date"],
+            time=requested_dt_for_candidate["time"],
+            timezone=requested_dt_for_candidate["timezone"],
+        )
+
+        candidate_result = await self.send_email_batch(
+            recipients=[candidate.get("email", "")],
+            subject=f"Reschedule request sent - {job_info.get('title', 'Position')}",
+            html_content=candidate_html,
+            text_content="Your reschedule request was sent to the recruiter and is pending approval.",
+        )
+
+        return {
+            "success": recruiter_result["success"] and candidate_result["success"],
+            "candidate": candidate_result,
+            "recruiter": recruiter_result,
+        }
+
+    async def send_candidate_reschedule_declined_notification(
+        self,
+        candidate: Dict[str, Any],
+        recruiter: Dict[str, Any],
+        job_info: Dict[str, Any],
+        requested_start_time: datetime,
+        candidate_timezone: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Notify candidate when recruiter declines a reschedule request."""
+        requested_dt = self._format_datetime(requested_start_time, candidate_timezone)
+
+        candidate_html = (
+            "<p>Hello {name},</p>"
+            "<p>Your request to change the interview time for <strong>{job_title}</strong> was declined by {recruiter_name}.</p>"
+            "<p>Requested slot: {date} at {time} ({timezone})</p>"
+            "<p>Your currently confirmed slot remains unchanged. You can request another slot from your scheduling page.</p>"
+        ).format(
+            name=candidate.get("name", "Candidate"),
+            job_title=job_info.get("title", "Position"),
+            recruiter_name=recruiter.get("name", "Recruiter"),
+            date=requested_dt["date"],
+            time=requested_dt["time"],
+            timezone=requested_dt["timezone"],
+        )
+
+        candidate_result = await self.send_email_batch(
+            recipients=[candidate.get("email", "")],
+            subject=f"Reschedule request declined - {job_info.get('title', 'Position')}",
+            html_content=candidate_html,
+            text_content="Your requested reschedule was declined. Your current confirmed interview time remains active.",
+        )
+
+        return {
+            "success": candidate_result["success"],
+            "candidate": candidate_result,
+        }
+
 
 def create_email_service(settings: Settings, template_service: TemplateService) -> EmailService:
     """Factory for email service."""

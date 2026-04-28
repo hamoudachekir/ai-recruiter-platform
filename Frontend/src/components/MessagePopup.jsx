@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import PropTypes from "prop-types";
 import "./MessagePopup.css";
 import axios from "axios";
 
@@ -21,7 +22,19 @@ const MessagePopup = ({ socket, selectedUser, onClose, currentUserId }) => {
             }
           }
         );
-        setMessages(res.data.messages || []);
+        const raw = res.data.messages || [];
+        // Deduplicate by (from + to + text + rounded timestamp) to remove any DB double-saves
+        const seen = new Set();
+        const deduped = raw.filter((msg) => {
+          const ts = msg.timestamp
+            ? Math.round(new Date(msg.timestamp).getTime() / 2000)
+            : 0;
+          const key = `${msg.from}|${msg.to}|${msg.text}|${ts}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setMessages(deduped);
         setError(null);
       } catch (err) {
         console.error("Error loading messages", err);
@@ -34,15 +47,13 @@ const MessagePopup = ({ socket, selectedUser, onClose, currentUserId }) => {
     }
   }, [selectedUser._id, currentUserId]);
 
-  // Listen for incoming messages
+  // Listen for incoming messages — only handle messages FROM the other person.
+  // Self-sent messages are already added optimistically in sendMessage().
   useEffect(() => {
     if (!socket) return undefined;
 
     const handleMessage = (msg) => {
-      if (
-        (msg.from === currentUserId && msg.to === selectedUser._id) ||
-        (msg.from === selectedUser._id && msg.to === currentUserId)
-      ) {
+      if (msg.from === selectedUser._id && msg.to === currentUserId) {
         setMessages((prev) => [...prev, msg]);
       }
     };
@@ -121,7 +132,7 @@ const MessagePopup = ({ socket, selectedUser, onClose, currentUserId }) => {
     }
   };
 
-  const handleKeyPress = (e) => {
+  const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -172,15 +183,19 @@ const MessagePopup = ({ socket, selectedUser, onClose, currentUserId }) => {
             )}
           </div>
         ) : (
-          messages.map((msg, i) => (
+          messages.map((msg, i) => {
+            const msgKey = msg._id || `${msg.from}-${msg.to}-${msg.timestamp || i}`;
+            return (
             <div
-              key={i}
+              key={msgKey}
               className={`msg ${msg.from === currentUserId ? "sent" : "received"} ${
                 msg.from === 'bot' ? "bot-msg" : ""
               }`}
             >
               <div className="msg-content">
                 {msg.text.split('\n').map((line, idx) => (
+                  // line index is stable within a single message bubble
+                  // eslint-disable-next-line react/no-array-index-key
                   <p key={idx}>{line}</p>
                 ))}
               </div>
@@ -192,7 +207,8 @@ const MessagePopup = ({ socket, selectedUser, onClose, currentUserId }) => {
                 {msg.from === 'bot' && <span className="bot-indicator">AI</span>}
               </div>
             </div>
-          ))
+            );
+          })
         )}
         {isBotTyping && (
           <div className="msg received bot-msg">
@@ -209,7 +225,7 @@ const MessagePopup = ({ socket, selectedUser, onClose, currentUserId }) => {
         <textarea
           value={newMsg}
           onChange={(e) => setNewMsg(e.target.value)}
-          onKeyPress={handleKeyPress}
+          onKeyDown={handleKeyDown}
           placeholder={
             selectedUser._id === 'bot'
               ? "Ask me about jobs, applications, or interviews..."
@@ -223,6 +239,21 @@ const MessagePopup = ({ socket, selectedUser, onClose, currentUserId }) => {
       </div>
     </div>
   );
+};
+
+MessagePopup.propTypes = {
+  socket: PropTypes.object,
+  selectedUser: PropTypes.shape({
+    _id: PropTypes.string.isRequired,
+    name: PropTypes.string,
+    picture: PropTypes.string,
+  }).isRequired,
+  onClose: PropTypes.func.isRequired,
+  currentUserId: PropTypes.string.isRequired,
+};
+
+MessagePopup.defaultProps = {
+  socket: null,
 };
 
 export default MessagePopup;

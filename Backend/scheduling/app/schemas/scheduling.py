@@ -138,6 +138,13 @@ class CandidateTokenDeclineRequest(BaseModel):
     notes: Optional[str] = Field(default="", max_length=500)
 
 
+class CandidateTokenRescheduleRequest(BaseModel):
+    """Candidate-facing reschedule request using tokenized access."""
+    new_slot: TimeSlot
+    location: Optional[str] = None
+    notes: Optional[str] = Field(default="", max_length=500)
+
+
 class RescheduleRequest(BaseModel):
     """Request to reschedule an interview."""
     interview_schedule_id: str = Field(..., min_length=1)
@@ -271,6 +278,8 @@ class PublicScheduleResponse(BaseModel):
     buffer_minutes: int = 0
     suggested_slots: List[TimeSlot]
     confirmed_slot: Optional[Dict[str, Any]] = None
+    candidate_timezone: Optional[str] = None
+    recruiter_timezone: Optional[str] = None
     candidate_action_link: Optional[str] = None
     candidate_action_expires_at: Optional[datetime] = None
     message: str

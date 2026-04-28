@@ -4,6 +4,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { runVoiceEngineAnalysis } = require('../services/voiceEngineService');
+const { requestSpeechStackTts } = require('../services/speechStackService');
 
 const router = express.Router();
 const upload = multer({ dest: path.join(os.tmpdir(), 'voice-engine-upload') });
@@ -82,6 +83,29 @@ const normalizeOverrides = (body = {}) => ({
 
 router.get('/health', (req, res) => {
   res.status(200).json({ ok: true, service: 'voice-engine' });
+});
+
+router.post('/tts', async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    if (!text) {
+      return res.status(400).json({ ok: false, message: 'text is required' });
+    }
+
+    const result = await requestSpeechStackTts({
+      text,
+      rate: parseMaybeNumber(req.body?.rate),
+      volume: parseMaybeNumber(req.body?.volume),
+      voiceId: req.body?.voiceId || req.body?.voice_id || null,
+      language: req.body?.language || null,
+    });
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', result.contentDisposition);
+    return res.status(200).send(result.buffer);
+  } catch (error) {
+    return res.status(500).json({ ok: false, message: error.message });
+  }
 });
 
 router.get('/download/:fileName', async (req, res) => {

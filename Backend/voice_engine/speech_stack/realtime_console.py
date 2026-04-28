@@ -15,7 +15,7 @@ except ImportError as exc:
         "Missing dependency 'sounddevice'. Install with pip install sounddevice"
     ) from exc
 
-from voice_engine.speech_stack.speech_stack import SpeechStack
+from .speech_stack import SpeechStack
 
 
 class AudioStreamer:

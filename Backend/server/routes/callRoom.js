@@ -93,9 +93,9 @@ router.get('/available', verifyToken, async (req, res) => {
 router.get('/by-room/:publicRoomId', verifyToken, async (req, res) => {
   try {
     const callRoom = await CallRoom.findOne({ roomId: req.params.publicRoomId })
-      .populate('initiator', 'email firstName lastName')
+      .populate('initiator', 'email name firstName lastName role domain enterprise profile')
       .populate('candidate', 'email firstName lastName')
-      .populate('job', 'title company');
+      .populate('job', 'title description skills languages location');
 
     if (!callRoom) {
       return res.status(404).json({ message: 'Room not found' });
