@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import axios from "axios";
 import { toast } from "react-toastify";
 import PublicLayout from "../../layouts/PublicLayout";
@@ -2114,6 +2114,8 @@ const openApplicationModal = async (jobId) => {
             const quizPercent = app.quizPercent || 0;
             const candidateName = app.candidateId?.name || "Candidate";
             const candidateInitial = candidateName.charAt(0).toUpperCase();
+            const candidateProfileId = normalizeMongoId(app?.candidateId?._id || app?.candidateId?.id);
+            const candidateProfilePath = candidateProfileId ? `/candidate/${candidateProfileId}` : "";
             const applicationId = normalizeMongoId(app?._id);
             const isDecisionLoading = Boolean(decisionLoadingById[applicationId]);
             const isInterviewApproved = app.recruiterDecision === "INTERVIEW";
@@ -2136,9 +2138,23 @@ const openApplicationModal = async (jobId) => {
               <div key={app._id || app.candidateId?._id || app.candidateId?.email} className="application-card">
                 <div className="application-card-header">
                   <div className="candidate-identity">
-                    <div className="candidate-avatar">{candidateInitial}</div>
+                    {candidateProfilePath ? (
+                      <Link to={candidateProfilePath} className="candidate-avatar" title="Open candidate profile">
+                        {candidateInitial}
+                      </Link>
+                    ) : (
+                      <div className="candidate-avatar">{candidateInitial}</div>
+                    )}
                     <div className="candidate-text">
-                      <h6>{candidateName}</h6>
+                      {candidateProfilePath ? (
+                        <h6>
+                          <Link to={candidateProfilePath} title="Open candidate profile">
+                            {candidateName}
+                          </Link>
+                        </h6>
+                      ) : (
+                        <h6>{candidateName}</h6>
+                      )}
                       <p>{app.candidateId?.email}</p>
                     </div>
                   </div>
@@ -2211,6 +2227,22 @@ const openApplicationModal = async (jobId) => {
                   <div className="detail-item detail-item-full">
                     <span className="detail-label">Why this quiz was generated</span>
                     <span className="detail-value">{app.quizRationale || "Generated from candidate profile and job requirements."}</span>
+                  </div>
+                  <div className="detail-item detail-item-full">
+                    <span className="detail-label">LinkedIn</span>
+                    <span className="detail-value">
+                      {app.candidateId?.linkedin?.url ? (
+                        <>
+                          <a href={app.candidateId.linkedin.url} target="_blank" rel="noreferrer">
+                            {app.candidateId.linkedin.url}
+                          </a>
+                          {app.candidateId?.linkedin?.headline ? ` — ${app.candidateId.linkedin.headline}` : ""}
+                          {app.candidateId?.linkedin?.currentRole ? ` (${app.candidateId.linkedin.currentRole})` : ""}
+                        </>
+                      ) : (
+                        "Not connected"
+                      )}
+                    </span>
                   </div>
                 </div>
 

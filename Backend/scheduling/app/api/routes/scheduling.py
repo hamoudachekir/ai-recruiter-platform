@@ -1,6 +1,7 @@
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi.responses import HTMLResponse
 from datetime import datetime
 
 from app.schemas.scheduling import (
@@ -10,6 +11,7 @@ from app.schemas.scheduling import (
     ConfirmSlotResponse,
     CandidateTokenConfirmRequest,
     CandidateTokenDeclineRequest,
+    CandidateTokenRescheduleRequest,
     RescheduleRequest,
     RescheduleResponse,
     CancelRequest,
@@ -480,6 +482,377 @@ async def decline_slot_public(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to regenerate interview plan",
+        )
+
+
+@router.post(
+    "/public/{candidate_action_token}/reschedule",
+    response_model=RescheduleResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def reschedule_slot_public(
+    candidate_action_token: str,
+    request: CandidateTokenRescheduleRequest,
+    orchestrator: SchedulingOrchestrator = Depends(get_orchestrator),
+) -> RescheduleResponse:
+    """Reschedule an already confirmed interview via candidate token."""
+    logger.info("POST /api/scheduling/public/{token}/reschedule")
+
+    try:
+        slot_data = {
+            "start_time": request.new_slot.start_time.isoformat(),
+            "end_time": request.new_slot.end_time.isoformat(),
+        }
+        result = await orchestrator.reschedule_by_candidate_token(
+            candidate_action_token=candidate_action_token,
+            new_slot=slot_data,
+            location=request.location,
+            notes=request.notes or "",
+        )
+        return RescheduleResponse(
+            interview_schedule_id=result["interview_schedule_id"],
+            status=result["status"],
+            message=result["message"],
+        )
+    except SchedulingConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": str(e),
+                "code": "slot_conflict",
+                "suggested_slots": e.suggested_slots,
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to reschedule public slot: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to reschedule interview slot",
+        )
+
+
+@router.get(
+    "/public/recruiter/{recruiter_action_token}/reschedule-request/approve",
+    response_class=HTMLResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def approve_reschedule_request_public(
+    recruiter_action_token: str,
+    orchestrator: SchedulingOrchestrator = Depends(get_orchestrator),
+) -> HTMLResponse:
+    """Render recruiter approval confirmation page (safe GET)."""
+    try:
+        summary = await orchestrator.get_recruiter_reschedule_request_by_token(recruiter_action_token)
+        pending_status = str(summary.get("pending_status") or "none").lower()
+
+        if pending_status != "pending":
+            return HTMLResponse(
+                content=(
+                    "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                    "<h2>Request already processed</h2>"
+                    f"<p>Current request status: <strong>{summary.get('pending_status', 'none')}</strong></p>"
+                    "</body></html>"
+                )
+            )
+
+        requested_start = (summary.get("requested_slot") or {}).get("start_time") or "N/A"
+        current_start = (summary.get("current_slot") or {}).get("start_time") or "N/A"
+
+        return HTMLResponse(
+            content=(
+                "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                "<h2>Approve reschedule request</h2>"
+                f"<p><strong>Candidate:</strong> {summary.get('candidate_name', 'Candidate')}</p>"
+                f"<p><strong>Job:</strong> {summary.get('job_title', 'Position')}</p>"
+                f"<p><strong>Current slot:</strong> {current_start}</p>"
+                f"<p><strong>Requested slot:</strong> {requested_start}</p>"
+                "<form method='post'>"
+                "<button type='submit' style='padding:10px 16px;background:#1456c0;color:#fff;border:0;border-radius:6px;cursor:pointer;'>Confirm Approve</button>"
+                "</form>"
+                "</body></html>"
+            )
+        )
+    except ValueError as e:
+        return HTMLResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=(
+                "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                "<h2>Cannot approve request</h2>"
+                f"<p>{str(e)}</p>"
+                "</body></html>"
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Failed to approve recruiter reschedule request: {str(e)}", exc_info=True)
+        return HTMLResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=(
+                "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                "<h2>Internal error</h2>"
+                "<p>Failed to load approval page.</p>"
+                "</body></html>"
+            ),
+        )
+
+
+@router.post(
+    "/public/recruiter/{recruiter_action_token}/reschedule-request/approve",
+    response_class=HTMLResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def approve_reschedule_request_public_submit(
+    recruiter_action_token: str,
+    orchestrator: SchedulingOrchestrator = Depends(get_orchestrator),
+) -> HTMLResponse:
+    """Execute recruiter approval action (POST)."""
+    try:
+        result = await orchestrator.recruiter_approve_reschedule_request_by_token(recruiter_action_token)
+        return HTMLResponse(
+            content=(
+                "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                "<h2>Reschedule request approved</h2>"
+                f"<p>{result.get('message', 'The interview has been rescheduled successfully.')}</p>"
+                "</body></html>"
+            )
+        )
+    except ValueError as e:
+        return HTMLResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=(
+                "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                "<h2>Cannot approve request</h2>"
+                f"<p>{str(e)}</p>"
+                "</body></html>"
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Failed to approve recruiter reschedule request: {str(e)}", exc_info=True)
+        return HTMLResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=(
+                "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                "<h2>Internal error</h2>"
+                "<p>Failed to approve the reschedule request.</p>"
+                "</body></html>"
+            ),
+        )
+
+
+@router.get(
+    "/public/recruiter/{recruiter_action_token}/reschedule-request/decline",
+    response_class=HTMLResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def decline_reschedule_request_public(
+    recruiter_action_token: str,
+    orchestrator: SchedulingOrchestrator = Depends(get_orchestrator),
+) -> HTMLResponse:
+    """Render recruiter decline confirmation page (safe GET)."""
+    try:
+        summary = await orchestrator.get_recruiter_reschedule_request_by_token(recruiter_action_token)
+        pending_status = str(summary.get("pending_status") or "none").lower()
+
+        if pending_status != "pending":
+            return HTMLResponse(
+                content=(
+                    "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                    "<h2>Request already processed</h2>"
+                    f"<p>Current request status: <strong>{summary.get('pending_status', 'none')}</strong></p>"
+                    "</body></html>"
+                )
+            )
+
+        requested_start = (summary.get("requested_slot") or {}).get("start_time") or "N/A"
+        current_start = (summary.get("current_slot") or {}).get("start_time") or "N/A"
+
+        return HTMLResponse(
+            content=(
+                "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                "<h2>Decline reschedule request</h2>"
+                f"<p><strong>Candidate:</strong> {summary.get('candidate_name', 'Candidate')}</p>"
+                f"<p><strong>Job:</strong> {summary.get('job_title', 'Position')}</p>"
+                f"<p><strong>Current slot:</strong> {current_start}</p>"
+                f"<p><strong>Requested slot:</strong> {requested_start}</p>"
+                "<form method='post'>"
+                "<button type='submit' style='padding:10px 16px;background:#b42318;color:#fff;border:0;border-radius:6px;cursor:pointer;'>Confirm Decline</button>"
+                "</form>"
+                "</body></html>"
+            )
+        )
+    except ValueError as e:
+        return HTMLResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=(
+                "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                "<h2>Cannot decline request</h2>"
+                f"<p>{str(e)}</p>"
+                "</body></html>"
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Failed to decline recruiter reschedule request: {str(e)}", exc_info=True)
+        return HTMLResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=(
+                "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                "<h2>Internal error</h2>"
+                "<p>Failed to load decline page.</p>"
+                "</body></html>"
+            ),
+        )
+
+
+@router.post(
+    "/public/recruiter/{recruiter_action_token}/reschedule-request/decline",
+    response_class=HTMLResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def decline_reschedule_request_public_submit(
+    recruiter_action_token: str,
+    orchestrator: SchedulingOrchestrator = Depends(get_orchestrator),
+) -> HTMLResponse:
+    """Execute recruiter decline action (POST)."""
+    try:
+        result = await orchestrator.recruiter_decline_reschedule_request_by_token(recruiter_action_token)
+        return HTMLResponse(
+            content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Reschedule Declined</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        padding: 32px 16px;
+                        background: #f5f7fa;
+                        margin: 0;
+                    }}
+                    .container {{
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 80vh;
+                    }}
+                    .card {{
+                        width: 100%;
+                        max-width: 860px;
+                        background: #ffffff;
+                        border: 1px solid #dce4ef;
+                        border-radius: 16px;
+                        box-shadow: 0 8px 24px rgba(8, 28, 66, 0.08);
+                        padding: 32px 24px;
+                        text-align: center;
+                    }}
+                    .success-icon {{
+                        font-size: 48px;
+                        margin-bottom: 16px;
+                    }}
+                    h1 {{
+                        margin: 0 0 16px 0;
+                        color: #7a4a0f;
+                        font-size: 28px;
+                    }}
+                    .message {{
+                        margin-top: 16px;
+                        padding: 12px 14px;
+                        border-radius: 10px;
+                        background: #fff9f0;
+                        border: 1px solid #ffe0c6;
+                        color: #7a4a0f;
+                        font-size: 16px;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="card">
+                        <div class="success-icon">✓</div>
+                        <h1>Reschedule Declined</h1>
+                        <div class="message">
+                            {result.get('message', 'The candidate has been notified. The original interview time remains scheduled.')}
+                        </div>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+        )
+    except ValueError as e:
+        return HTMLResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Error</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        padding: 32px 16px;
+                        background: #f5f7fa;
+                        margin: 0;
+                    }}
+                    .container {{
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 80vh;
+                    }}
+                    .card {{
+                        width: 100%;
+                        max-width: 860px;
+                        background: #ffffff;
+                        border: 1px solid #dce4ef;
+                        border-radius: 16px;
+                        box-shadow: 0 8px 24px rgba(8, 28, 66, 0.08);
+                        padding: 32px 24px;
+                    }}
+                    h1 {{
+                        margin: 0 0 16px 0;
+                        color: #8c1d18;
+                        font-size: 28px;
+                    }}
+                    .error-message {{
+                        margin-top: 16px;
+                        padding: 12px 14px;
+                        border-radius: 10px;
+                        background: #fff1f1;
+                        color: #8c1d18;
+                        font-size: 16px;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="card">
+                        <h1>⚠ Cannot Decline Request</h1>
+                        <div class="error-message">{str(e)}</div>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
+        )
+    except Exception as e:
+        logger.error(f"Failed to decline recruiter reschedule request: {str(e)}", exc_info=True)
+        return HTMLResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=(
+                "<html><body style='font-family:Arial,sans-serif;padding:24px;'>"
+                "<h2>Internal error</h2>"
+                "<p>Failed to decline the reschedule request.</p>"
+                "</body></html>"
+            ),
         )
 
 

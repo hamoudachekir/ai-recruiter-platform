@@ -781,3 +781,84 @@
   .dashboard-content { padding: 12px; gap: 12px; }
   .panel-header h2 { font-size: 14px; }
 }
+
+/* ── Inline notification banner ───────────────────── */
+.call-room-notification {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: 10px 24px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  animation: notif-slide-in 0.25s ease;
+}
+
+@keyframes notif-slide-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.call-room-notification--info {
+  background: rgba(91, 134, 229, 0.18);
+  border-bottom: 1px solid rgba(91, 134, 229, 0.35);
+  color: #dbeafe;
+}
+
+.call-room-notification--success {
+  background: rgba(34, 197, 94, 0.15);
+  border-bottom: 1px solid rgba(34, 197, 94, 0.3);
+  color: #dcfce7;
+}
+
+.call-room-notification--error {
+  background: rgba(239, 68, 68, 0.15);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fee2e2;
+}
+
+/* ── Room item with a pending join request ────────── */
+.room-item--has-request {
+  border-color: rgba(251, 191, 36, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.18), 0 4px 16px rgba(0, 0, 0, 0.3) !important;
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.18), 0 4px 16px rgba(0, 0, 0, 0.3); }
+  50%       { box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.30), 0 4px 20px rgba(0, 0, 0, 0.4); }
+}
+
+/* ── Waiting-for-candidate placeholder ───────────── */
+.waiting-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  gap: 10px;
+}
+
+.waiting-icon {
+  font-size: 40px;
+  animation: waiting-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes waiting-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.waiting-text {
+  font-size: 15px;
+  font-weight: 500;
+  color: #cbd5e1;
+  margin: 0;
+}
+
+.waiting-hint {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+}

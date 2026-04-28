@@ -1,5 +1,6 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
+import AgentChatPanel from './AgentChatPanel';
 import PublicLayout from '../layouts/PublicLayout';
 import './CallRoomDashboard.css';
 
@@ -7,7 +8,6 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
 
 const isTokenExpired = (jwtToken) => {
   if (!jwtToken) return true;
-
   try {
     const payload = JSON.parse(atob(jwtToken.split('.')[1] || ''));
     if (!payload?.exp) return true;
@@ -17,85 +17,73 @@ const isTokenExpired = (jwtToken) => {
   }
 };
 
+const normalizeTranscriptText = (text) =>
+  String(text || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/’/g, "'")
+    .trim();
+
+const stripLeadingTranscriptNoise = (text) =>
+  normalizeTranscriptText(text)
+    .replace(/^(?:thank you(?: very much)?|thanks|positive|negative|neutral)(?:[.!?,:;\s]+)(?=\S)/i, '')
+    .trim();
+
 const CallRoomDashboard = () => {
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedRoom, setSelectedRoom] = useState(null);
+  // Track only the ID — selectedRoom is always derived fresh from the rooms array
+  const [selectedRoomId, setSelectedRoomId] = useState(null);
   const [transcription, setTranscription] = useState([]);
   const [overallSentiment, setOverallSentiment] = useState({ label: 'NEUTRAL', score: 0 });
+  const [notification, setNotification] = useState(null); // { type: 'info'|'success'|'error', msg }
+  const [socketClient, setSocketClient] = useState(null);
   const socketRef = useRef(null);
+  const notifyTimerRef = useRef(null);
 
   const token = localStorage.getItem('token');
 
-  // Fetch RH's rooms
-  useEffect(() => {
-    const fetchRooms = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/call-rooms/rh/my-rooms`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        if (data.success) {
-          setRooms(data.rooms);
-        }
-      } catch (error) {
-        console.error('Failed to fetch rooms:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  // selectedRoom is always fresh — derived from rooms state
+  const selectedRoom = rooms.find(r => r._id === selectedRoomId) || null;
 
-    fetchRooms();
+  const notify = useCallback((msg, type = 'info') => {
+    setNotification({ msg, type });
+    clearTimeout(notifyTimerRef.current);
+    notifyTimerRef.current = setTimeout(() => setNotification(null), 3500);
+  }, []);
+
+  // ── Fetch rooms list ──────────────────────────────────────────────────────
+
+  const fetchRooms = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/call-rooms/rh/my-rooms`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (data.success) {
+        setRooms(data.rooms);
+      }
+    } catch (error) {
+      console.error('Failed to fetch rooms:', error);
+    }
   }, [token]);
 
-  // Socket.IO for real-time updates
   useEffect(() => {
-    if (!token || isTokenExpired(token)) {
-      return undefined;
-    }
+    fetchRooms().finally(() => setLoading(false));
+  }, [fetchRooms]);
 
-    socketRef.current = io(API_BASE, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 3,
-      reconnectionDelay: 1200,
-    });
-
-    socketRef.current.on('connect_error', (error) => {
-      if (error?.message === 'TOKEN_EXPIRED') {
-        console.warn('Socket session expired on dashboard. Please login again.');
-        socketRef.current?.disconnect();
-      }
-    });
-
-    socketRef.current.on('candidate-join-request', ({ roomId, candidateId }) => {
-      console.log(`Candidate ${candidateId} requesting to join room ${roomId}`);
-      // Refresh room details
-      setRooms(prev => prev.map(r => r._id === roomId ? { ...r, reload: true } : r));
-    });
-
-    socketRef.current.on('transcription-update', ({ text, segment, sentiment }) => {
-      if (segment) {
-        setTranscription(prev => [...prev, segment]);
-      }
-      if (sentiment) {
-        setOverallSentiment(sentiment);
-      }
-    });
-
-    return () => {
-      socketRef.current?.off('connect_error');
-      socketRef.current?.disconnect();
-    };
-  }, [token]);
-
-  // Poll selected active room as a fallback so RH always sees updates,
-  // even if a socket event is missed.
+  // ── Poll waiting rooms so join requests appear without a page reload ──────
   useEffect(() => {
-    if (!selectedRoom?._id || selectedRoom?.status !== 'active') {
-      return undefined;
-    }
+    const hasWaiting = rooms.some(r => r.status === 'waiting_confirmation');
+    if (!hasWaiting) return undefined;
+
+    const interval = setInterval(fetchRooms, 3000);
+    return () => clearInterval(interval);
+  }, [rooms, fetchRooms]);
+
+  // ── Poll active selected room for live transcription updates ─────────────
+  useEffect(() => {
+    if (!selectedRoom?._id || selectedRoom?.status !== 'active') return undefined;
 
     const fetchRoomDetails = async () => {
       try {
@@ -104,7 +92,7 @@ const CallRoomDashboard = () => {
         });
         const data = await response.json();
         if (data.success && data.room) {
-          setSelectedRoom(data.room);
+          setRooms(prev => prev.map(r => r._id === data.room._id ? data.room : r));
           if (Array.isArray(data.room?.transcription?.segments)) {
             setTranscription(data.room.transcription.segments);
           }
@@ -112,16 +100,110 @@ const CallRoomDashboard = () => {
             setOverallSentiment(data.room.transcription.overallSentiment);
           }
         }
-      } catch (error) {
+      } catch (_) {
         // Keep UI resilient if one polling call fails.
       }
     };
 
     fetchRoomDetails();
     const intervalId = setInterval(fetchRoomDetails, 2500);
-
     return () => clearInterval(intervalId);
   }, [selectedRoom?._id, selectedRoom?.status, token]);
+
+  // ── Socket.IO ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!token || isTokenExpired(token)) return undefined;
+
+    socketRef.current = io(API_BASE, {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1200,
+    });
+    setSocketClient(socketRef.current);
+
+    socketRef.current.on('connect_error', (error) => {
+      if (error?.message === 'TOKEN_EXPIRED') {
+        socketRef.current?.disconnect();
+      }
+    });
+
+    // Candidate sent a join request → refresh rooms so the panel updates immediately
+    socketRef.current.on('candidate-join-request', ({ roomId: eventRoomId }) => {
+      // Fetch the specific room to get candidate details
+      fetch(`${API_BASE}/api/call-rooms/by-room/${encodeURIComponent(eventRoomId)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success && data.room) {
+            setRooms(prev => {
+              const exists = prev.some(r => r.roomId === eventRoomId);
+              if (!exists) return prev;
+              return prev.map(r => r.roomId === eventRoomId ? data.room : r);
+            });
+            // Auto-select the room that received the request
+            setSelectedRoomId(prev => prev ?? data.room._id);
+            notify(`Candidate ${data.room.candidate?.email || ''} is requesting to join`, 'info');
+          }
+        })
+        .catch(() => {});
+    });
+
+    socketRef.current.on('transcription-update', ({ segment, sentiment }) => {
+      if (segment) {
+        const cleanedSegment = {
+          ...segment,
+          text: stripLeadingTranscriptNoise(segment.text),
+          corrected_text: stripLeadingTranscriptNoise(segment.corrected_text),
+        };
+        setTranscription(prev => [...prev, cleanedSegment]);
+        // Promote each finalized STT segment into a chat bubble inside the
+        // AgentChatPanel so RH sees the candidate's speech in the thread.
+        const text = String(cleanedSegment.text || '').trim();
+        if (text) {
+          globalThis.dispatchEvent(
+            new CustomEvent('candidate-local-message', {
+              detail: { text, sentiment: segment.sentiment || sentiment, ts: Date.now() },
+            }),
+          );
+        }
+      }
+      if (sentiment) {
+        setOverallSentiment(sentiment);
+      }
+    });
+
+    socketRef.current.on('call-room-ended', () => {
+      fetchRooms();
+    });
+
+    return () => {
+      socketRef.current?.off('candidate-join-request');
+      socketRef.current?.off('transcription-update');
+      socketRef.current?.off('call-room-ended');
+      socketRef.current?.off('connect_error');
+      socketRef.current?.disconnect();
+      setSocketClient(null);
+    };
+  }, [token, notify, fetchRooms]);
+
+  // ── Join the socket room for the currently selected call room ─────────────
+  useEffect(() => {
+    if (!selectedRoom?.roomId || !socketRef.current) return;
+    socketRef.current.emit('join-room', { roomId: selectedRoom.roomId });
+  }, [selectedRoom?.roomId]);
+
+  // ── Reset transcription when switching rooms ──────────────────────────────
+  useEffect(() => {
+    if (!selectedRoomId) {
+      setTranscription([]);
+      setOverallSentiment({ label: 'NEUTRAL', score: 0 });
+    }
+  }, [selectedRoomId]);
+
+  // ── Actions ───────────────────────────────────────────────────────────────
 
   const createRoom = async (jobId = null) => {
     try {
@@ -137,15 +219,15 @@ const CallRoomDashboard = () => {
       const data = await response.json();
       if (data.success) {
         setRooms(prev => [data.room, ...prev]);
-        socketRef.current?.emit('call-room-created', { 
-          roomId: data.room.roomId, 
-          room: data.room 
+        socketRef.current?.emit('call-room-created', {
+          roomId: data.room.roomId,
+          room: data.room
         });
-        alert(`Room created! ID: ${data.room.roomId}`);
+        notify(`Room created: ${data.room.roomId}`, 'success');
       }
     } catch (error) {
       console.error('Failed to create room:', error);
-      alert('Failed to create room');
+      notify('Failed to create room', 'error');
     }
   };
 
@@ -160,16 +242,21 @@ const CallRoomDashboard = () => {
       if (data.success) {
         setRooms(prev => prev.map(r => r._id === roomId ? data.room : r));
         const candidateId = data.room?.candidate?._id || data.room?.candidate;
-        socketRef.current?.emit('confirm-candidate-join', { 
+        socketRef.current?.emit('confirm-candidate-join', {
           roomId: data.room.roomId,
           roomDbId: roomId,
-          candidateId
+          candidateId: String(candidateId)
         });
-        alert('Candidate confirmed! Recording started.');
+        // Also join the room socket channel now that it's active
+        socketRef.current?.emit('join-room', { roomId: data.room.roomId });
+        // Reset transcription for fresh session
+        setTranscription([]);
+        setOverallSentiment({ label: 'NEUTRAL', score: 0 });
+        notify('Candidate confirmed — recording started', 'success');
       }
     } catch (error) {
       console.error('Failed to confirm join:', error);
-      alert('Failed to confirm');
+      notify('Failed to confirm', 'error');
     }
   };
 
@@ -183,7 +270,16 @@ const CallRoomDashboard = () => {
       const data = await response.json();
       if (data.success) {
         setRooms(prev => prev.map(r => r._id === roomId ? data.room : r));
-        alert('Candidate rejected');
+        const rejectedRoom = rooms.find(r => r._id === roomId);
+        const candidateId = rejectedRoom?.candidate?._id || rejectedRoom?.candidate;
+        if (candidateId) {
+          socketRef.current?.emit('reject-candidate-join', {
+            roomId: data.room.roomId,
+            roomDbId: roomId,
+            candidateId: String(candidateId)
+          });
+        }
+        notify('Candidate rejected', 'info');
       }
     } catch (error) {
       console.error('Failed to reject:', error);
@@ -201,9 +297,9 @@ const CallRoomDashboard = () => {
       if (data.success) {
         setRooms(prev => prev.map(r => r._id === roomId ? data.room : r));
         socketRef.current?.emit('end-call-room', { roomId: data.room.roomId, roomDbId: roomId });
-        setSelectedRoom(null);
+        setSelectedRoomId(null);
         setTranscription([]);
-        alert('Call ended');
+        notify('Call ended', 'info');
       }
     } catch (error) {
       console.error('Failed to end call:', error);
@@ -212,9 +308,7 @@ const CallRoomDashboard = () => {
 
   const deleteRoom = async (roomId) => {
     const shouldDelete = globalThis.confirm('Supprimer cette room ? Cette action est irreversible.');
-    if (!shouldDelete) {
-      return;
-    }
+    if (!shouldDelete) return;
 
     try {
       const response = await fetch(`${API_BASE}/api/call-rooms/${roomId}`, {
@@ -225,27 +319,27 @@ const CallRoomDashboard = () => {
       const data = await response.json();
       if (data.success) {
         setRooms(prev => prev.filter(r => r._id !== roomId));
-        if (selectedRoom?._id === roomId) {
-          setSelectedRoom(null);
+        if (selectedRoomId === roomId) {
+          setSelectedRoomId(null);
           setTranscription([]);
           setOverallSentiment({ label: 'NEUTRAL', score: 0 });
         }
-
         socketRef.current?.emit('call-room-status-update', {
           roomId: data.room?.roomId,
           roomDbId: roomId,
           status: 'deleted',
         });
-
-        alert('Room supprimee avec succes');
+        notify('Room supprimée avec succès', 'success');
       } else {
-        alert(data.message || 'Impossible de supprimer la room');
+        notify(data.message || 'Impossible de supprimer la room', 'error');
       }
     } catch (error) {
       console.error('Failed to delete room:', error);
-      alert('Erreur lors de la suppression');
+      notify('Erreur lors de la suppression', 'error');
     }
   };
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   const renderRoomStatus = (room) => {
     if (room.status === 'waiting_confirmation') {
@@ -261,6 +355,7 @@ const CallRoomDashboard = () => {
     if (room.status === 'ended') {
       return <div className="status-badge ended">Ended</div>;
     }
+    return null;
   };
 
   const getSentimentColor = (label) => {
@@ -276,7 +371,9 @@ const CallRoomDashboard = () => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // ── Download helpers ──────────────────────────────────────────────────────────
+  const getDisplayTranscriptText = (segment) => stripLeadingTranscriptNoise(segment?.corrected_text || segment?.text || '');
+
+  // ── Download helpers ──────────────────────────────────────────────────────
 
   const downloadTxt = (room) => {
     const segments = room.transcription?.segments || [];
@@ -294,7 +391,7 @@ const CallRoomDashboard = () => {
       '',
       'SPEECH SEGMENTS',
       '---------------',
-      ...segments.map(s => `[${formatTranscriptTime(s.timestamp) || '??:??'}] (${s.sentiment?.label || 'NEUTRAL'}) ${s.text}`),
+      ...segments.map(s => `[${formatTranscriptTime(s.timestamp) || '??:??'}] (${s.sentiment?.label || 'NEUTRAL'}) ${getDisplayTranscriptText(s)}`),
       '',
       'FULL TRANSCRIPT',
       '---------------',
@@ -373,7 +470,6 @@ const CallRoomDashboard = () => {
 </body>
 </html>`;
 
-    // Use a hidden iframe so no new tab is ever opened
     const iframe = document.createElement('iframe');
     iframe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;border:none;opacity:0;';
     document.body.appendChild(iframe);
@@ -386,7 +482,7 @@ const CallRoomDashboard = () => {
 
   const downloadAudio = (room) => {
     if (!room.recordingUrl) {
-      alert('No audio recording available for this room.\nAudio is saved when the candidate ends the call using the End Call button.');
+      notify('No audio recording available for this room.', 'error');
       return;
     }
     const a = document.createElement('a');
@@ -396,11 +492,12 @@ const CallRoomDashboard = () => {
     a.click();
   };
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
 
   const selectedTranscriptSegments = Array.isArray(selectedRoom?.transcription?.segments)
     ? selectedRoom.transcription.segments
     : [];
+  const displayedTranscriptSegments = transcription.length > 0 ? transcription : selectedTranscriptSegments;
 
   if (loading) {
     return (
@@ -413,6 +510,14 @@ const CallRoomDashboard = () => {
   return (
     <PublicLayout>
       <div className="call-room-dashboard">
+
+        {/* Inline notification banner */}
+        {notification && (
+          <div className={`call-room-notification call-room-notification--${notification.type}`}>
+            {notification.msg}
+          </div>
+        )}
+
         <div className="dashboard-header">
           <h1>Interview Call Rooms</h1>
           <button className="btn-primary" onClick={() => createRoom()}>
@@ -431,8 +536,8 @@ const CallRoomDashboard = () => {
                 rooms.map(room => (
                   <div
                     key={room._id}
-                    className={`room-item ${selectedRoom?._id === room._id ? 'active' : ''}`}
-                    onClick={() => setSelectedRoom(room)}
+                    className={`room-item ${selectedRoomId === room._id ? 'active' : ''} ${room.status === 'waiting_confirmation' && room.candidate ? 'room-item--has-request' : ''}`}
+                    onClick={() => setSelectedRoomId(room._id)}
                   >
                     <div className="room-header">
                       <span className="room-id" title={room.roomId}>{room.roomId}</span>
@@ -474,7 +579,7 @@ const CallRoomDashboard = () => {
                 <h2>Room: {selectedRoom.roomId}</h2>
                 <button
                   className="btn-close"
-                  onClick={() => setSelectedRoom(null)}
+                  onClick={() => setSelectedRoomId(null)}
                 >×</button>
               </div>
 
@@ -506,6 +611,15 @@ const CallRoomDashboard = () => {
                 </div>
               )}
 
+              {/* Waiting — no candidate yet */}
+              {selectedRoom.status === 'waiting_confirmation' && !selectedRoom.candidate && (
+                <div className="waiting-section">
+                  <div className="waiting-icon">⏳</div>
+                  <p className="waiting-text">Waiting for a candidate to request access…</p>
+                  <p className="waiting-hint">Share the room ID <strong>{selectedRoom.roomId}</strong> with the candidate.</p>
+                </div>
+              )}
+
               {/* Candidate Join Request Section */}
               {selectedRoom.status === 'waiting_confirmation' && selectedRoom.candidate && (
                 <div className="candidate-request-section">
@@ -519,7 +633,7 @@ const CallRoomDashboard = () => {
                       className="btn-confirm"
                       onClick={() => confirmCandidateJoin(selectedRoom._id)}
                     >
-                      Confirm & Start Recording
+                      Confirm &amp; Start Recording
                     </button>
                     <button
                       className="btn-reject"
@@ -539,30 +653,45 @@ const CallRoomDashboard = () => {
                     Recording Active
                   </div>
 
-                  {/* Real-time Transcription */}
-                  <div className="transcription-section">
-                    <h3>Live Transcription</h3>
-                    <div className="sentiment-badge" style={{ backgroundColor: getSentimentColor(overallSentiment.label) }}>
-                      {overallSentiment.label} ({(overallSentiment.score || 0).toFixed(2)})
-                    </div>
+                  {/* Overall sentiment pill — detailed per-segment transcription now lives inside the chat */}
+                  <div className="sentiment-badge" style={{ backgroundColor: getSentimentColor(overallSentiment.label) }}>
+                    {overallSentiment.label} ({(overallSentiment.score || 0).toFixed(2)})
+                  </div>
 
-                    <div className="transcription-display">
-                      {transcription.length === 0 ? (
-                        <p className="no-transcription">Waiting for audio...</p>
-                      ) : (
-                        transcription.map((seg, idx) => (
-                          <div key={idx} className="transcript-segment">
-                            <span className="segment-text">{seg.text}</span>
-                            <span
-                              className="segment-sentiment"
-                              style={{ backgroundColor: getSentimentColor(seg.sentiment?.label) }}
-                            >
-                              {seg.sentiment?.label}
-                            </span>
+                  <div className="speech-history-section">
+                    <h4>Candidate Messages</h4>
+                    {displayedTranscriptSegments.length === 0 ? (
+                      <p className="no-speech-history">Waiting for candidate speech...</p>
+                    ) : (
+                      <div className="speech-history-list">
+                        {displayedTranscriptSegments.map((segment, index) => (
+                          <div key={`${segment.timestamp || 'segment'}-${index}`} className="speech-history-item">
+                            <div className="speech-history-meta">
+                              <span className="speech-history-time">
+                                {formatTranscriptTime(segment.timestamp) || `Message ${index + 1}`}
+                              </span>
+                              <span
+                                className="segment-sentiment"
+                                style={{ backgroundColor: getSentimentColor(segment.sentiment?.label) }}
+                              >
+                                {segment.sentiment?.label || 'NEUTRAL'}
+                              </span>
+                            </div>
+                            <p className="speech-history-text">{getDisplayTranscriptText(segment)}</p>
                           </div>
-                        ))
-                      )}
-                    </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Adaptive AI Interviewer — RH controls + scoring readout */}
+                  <div style={{ margin: '16px 0' }}>
+                    <AgentChatPanel
+                      socket={socketClient}
+                      roomId={selectedRoom.roomId}
+                      roomDbId={selectedRoom._id}
+                      isRH={true}
+                    />
                   </div>
 
                   <button
@@ -625,16 +754,16 @@ const CallRoomDashboard = () => {
                   </div>
 
                   <div className="speech-history-section">
-                    <h4>Speech History</h4>
-                    {selectedTranscriptSegments.length === 0 ? (
+                    <h4>Candidate Messages</h4>
+                    {displayedTranscriptSegments.length === 0 ? (
                       <p className="no-speech-history">No speech history saved for this room.</p>
                     ) : (
                       <div className="speech-history-list">
-                        {selectedTranscriptSegments.map((segment, index) => (
+                        {displayedTranscriptSegments.map((segment, index) => (
                           <div key={`${segment.timestamp || 'segment'}-${index}`} className="speech-history-item">
                             <div className="speech-history-meta">
                               <span className="speech-history-time">
-                                {formatTranscriptTime(segment.timestamp) || `Segment ${index + 1}`}
+                                {formatTranscriptTime(segment.timestamp) || `Message ${index + 1}`}
                               </span>
                               <span
                                 className="segment-sentiment"
@@ -643,7 +772,7 @@ const CallRoomDashboard = () => {
                                 {segment.sentiment?.label || 'NEUTRAL'}
                               </span>
                             </div>
-                            <p className="speech-history-text">{segment.text}</p>
+                            <p className="speech-history-text">{getDisplayTranscriptText(segment)}</p>
                           </div>
                         ))}
                       </div>

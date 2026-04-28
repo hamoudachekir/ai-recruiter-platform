@@ -1,0 +1,20 @@
+{
+  "replacements": {
+    "the world corps patch": "the worker patch",
+    "i will rewired": "I will rewire",
+    "i am validated links": "I am validating next"
+  },
+  "aliases": {
+    "Node.js": ["node js", "nodejs"],
+    "Next.js": ["next js", "nextjs"],
+    "React": ["reactjs", "react js"],
+    "TypeScript": ["type script", "typescript"],
+    "JavaScript": ["java script", "javascript"],
+    "MongoDB": ["mongo db", "mongodb"],
+    "PostgreSQL": ["postgre sql", "postgres sql", "postgresql"],
+    "MySQL": ["my sql", "mysql"],
+    "C#": ["c sharp", "csharp"],
+    "C++": ["c plus plus", "cplusplus"],
+    "GitHub": ["git hub", "github"]
+  }
+}

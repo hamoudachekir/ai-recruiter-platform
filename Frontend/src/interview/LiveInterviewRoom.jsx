@@ -77,6 +77,17 @@ const mergeSegments = (previous, incoming) => {
 
 const getDisplaySegmentText = (segment) => String(segment?.corrected_text || segment?.text || '').trim();
 
+const stripLeadingTranscriptNoise = (text) =>
+  String(text || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/’/g, "'")
+    .trim()
+    .replace(/^(?:thank you(?: very much)?|thanks|positive|negative|neutral)(?:[.!?,:;\s]+)(?=\S)/i, '')
+    .trim();
+
+const getSanitizedDisplaySegmentText = (segment) => stripLeadingTranscriptNoise(getDisplaySegmentText(segment));
+
 const normalizeSentiment = (value) => {
   const normalized = String(value || 'NEUTRAL').trim().toUpperCase();
   if (normalized === 'POSITIVE' || normalized === 'NEGATIVE') return normalized;
@@ -106,7 +117,7 @@ const LiveInterviewRoom = () => {
 
   const transcriptText = useMemo(() => {
     return segments
-      .map((segment) => getDisplaySegmentText(segment))
+      .map((segment) => getSanitizedDisplaySegmentText(segment))
       .filter(Boolean)
       .join(' ')
       .trim();
@@ -445,7 +456,7 @@ const LiveInterviewRoom = () => {
                       {normalizeSentiment(segment?.sentiment)}
                     </span>
                   </small>
-                  <span>{getDisplaySegmentText(segment)}</span>
+                  <span>{getSanitizedDisplaySegmentText(segment)}</span>
                   <small>{formatMs(segment?.start_ms)} - {formatMs(segment?.end_ms)}</small>
                 </div>
               ))}

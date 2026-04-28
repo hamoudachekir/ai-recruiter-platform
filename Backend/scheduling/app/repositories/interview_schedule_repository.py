@@ -208,6 +208,26 @@ class InterviewScheduleRepository:
             )
             return None
 
+    async def get_by_recruiter_action_token(self, recruiter_action_token: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve interview schedule by recruiter action token.
+
+        Args:
+            recruiter_action_token: Token used in recruiter action links
+
+        Returns:
+            Optional[Dict]: Schedule document or None if not found
+        """
+        try:
+            return await self.collection.find_one({"recruiter_action_token": str(recruiter_action_token or "")})
+        except Exception as e:
+            logger.error(
+                "Failed to get schedule by recruiter action token %s: %s",
+                recruiter_action_token,
+                str(e),
+            )
+            return None
+
     async def has_recruiter_conflict(
         self,
         recruiter_id: str,

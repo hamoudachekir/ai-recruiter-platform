@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     sendgrid_from_email: str = ""
     frontend_confirmation_url: str = "http://localhost:5173"
     frontend_candidate_scheduling_path: str = "/candidate/scheduling"
+    scheduling_public_base_url: str = "http://localhost:5004"
     
     # Interview Configuration
     interview_duration_default: int = 60  # minutes

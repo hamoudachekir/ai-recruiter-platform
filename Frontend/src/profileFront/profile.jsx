@@ -374,21 +374,42 @@ const Profile = () => {
                 </>
               )}
 
-              {activeTab === "experience" && user.profile?.experience?.length > 0 && (
+              {activeTab === "experience" && (
                 <div className="profile-detail description-detail">
                   <div className="detail-icon">
                     <FaBriefcase />
                   </div>
                   <div className="detail-content">
                     <label>Experience</label>
-                    <ul className="experience-list">
-                      {user.profile.experience.map((exp, idx) => (
-                        <li key={idx}>
-                          <strong>{exp.title}</strong> at {exp.company} – {exp.duration}<br />
-                          <em>{exp.description}</em>
-                        </li>
-                      ))}
-                    </ul>
+                    {user.profile?.experience?.length > 0 ? (
+                      <div className="experience-list">
+                        {user.profile.experience.map((exp, idx) => (
+                          <div key={idx} className="experience-card">
+                            <div className="experience-header">
+                              <span className="experience-title">{exp.title || "Position"}</span>
+                              {exp.company && (
+                                <span className="experience-company"> at {exp.company}</span>
+                              )}
+                            </div>
+                            {exp.duration && (
+                              <div className="experience-duration">
+                                <FaBriefcase style={{ marginRight: 5, fontSize: "0.75rem" }} />
+                                {exp.duration}
+                              </div>
+                            )}
+                            {exp.description && (
+                              <p className="experience-description">{exp.description}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="experience-empty">
+                        <FaBriefcase className="experience-empty-icon" />
+                        <p>No experience extracted yet.</p>
+                        <span>Upload your CV in the <strong>CV</strong> tab to automatically extract your experience.</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

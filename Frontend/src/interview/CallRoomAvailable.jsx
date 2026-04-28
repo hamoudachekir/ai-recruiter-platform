@@ -8,7 +8,6 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
 
 const isTokenExpired = (jwtToken) => {
   if (!jwtToken) return true;
-
   try {
     const payload = JSON.parse(atob(jwtToken.split('.')[1] || ''));
     if (!payload?.exp) return true;
@@ -22,13 +21,27 @@ const CallRoomAvailable = () => {
   const [availableRooms, setAvailableRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pendingRoomId, setPendingRoomId] = useState('');
+  // Per-room status messages so the UI reflects state without alert()
+  const [roomMessages, setRoomMessages] = useState({}); // { [room._id]: { type, text } }
   const socketRef = useRef(null);
   const navigate = useNavigate();
 
   const token = localStorage.getItem('token');
   const currentUserId = localStorage.getItem('userId');
 
-  // Fetch available rooms
+  const setRoomMsg = (roomDbId, text, type = 'info') => {
+    setRoomMessages(prev => ({ ...prev, [roomDbId]: { text, type } }));
+  };
+
+  const clearRoomMsg = (roomDbId) => {
+    setRoomMessages(prev => {
+      const next = { ...prev };
+      delete next[roomDbId];
+      return next;
+    });
+  };
+
+  // ── Fetch available rooms ─────────────────────────────────────────────────
   useEffect(() => {
     const fetchAvailableRooms = async () => {
       try {
@@ -49,88 +62,101 @@ const CallRoomAvailable = () => {
     fetchAvailableRooms();
   }, [token]);
 
-  // Fallback auto-redirect in case socket confirm event is missed.
+  // ── Fallback poll: redirect when room becomes active ──────────────────────
   useEffect(() => {
     if (!pendingRoomId || !token) return undefined;
 
     const timer = setInterval(async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/call-rooms/by-room/${encodeURIComponent(pendingRoomId)}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await fetch(
+          `${API_BASE}/api/call-rooms/by-room/${encodeURIComponent(pendingRoomId)}`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
         const data = await response.json();
         if (data.success && data.room?.status === 'active') {
           clearInterval(timer);
           navigate(`/call-room/${encodeURIComponent(data.room.roomId)}`);
         }
-      } catch (error) {
-        // Ignore polling errors and keep retrying.
+      } catch (_) {
+        // Keep retrying silently
       }
     }, 2500);
 
     return () => clearInterval(timer);
   }, [navigate, pendingRoomId, token]);
 
-  // Socket.IO subscription
+  // ── Socket.IO ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!token || isTokenExpired(token)) {
-      return undefined;
-    }
+    if (!token || isTokenExpired(token)) return undefined;
 
     socketRef.current = io(API_BASE, {
       auth: { token },
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: 3,
+      reconnectionAttempts: 5,
       reconnectionDelay: 1200,
     });
 
     socketRef.current.on('connect_error', (error) => {
       if (error?.message === 'TOKEN_EXPIRED') {
-        console.warn('Socket session expired on available rooms. Please login again.');
         socketRef.current?.disconnect();
       }
     });
 
-    // Subscribe to available rooms
     socketRef.current.emit('subscribe-to-available-rooms');
 
-    // Listen for new rooms
+    // New room appeared
     socketRef.current.on('new-call-room', ({ room }) => {
       setAvailableRooms(prev => [room, ...prev]);
     });
 
-    // Listen for join confirmation
-    socketRef.current.on('join-confirmed', ({ roomId, roomDbId }) => {
-      setAvailableRooms(prev => prev.filter(r => !(r._id === roomDbId || r.roomId === roomId)));
-      alert('Confirmed! Redirecting to call room...');
+    // Recruiter confirmed this candidate → redirect immediately, no alert
+    socketRef.current.on('join-confirmed', ({ roomId }) => {
+      setAvailableRooms(prev => prev.filter(r => r.roomId !== roomId));
       if (roomId) {
         navigate(`/call-room/${encodeURIComponent(roomId)}`);
       }
     });
 
-    // Listen for join rejection
+    // Recruiter rejected
     socketRef.current.on('join-rejected', ({ roomId, roomDbId }) => {
-      alert('Your join request was rejected');
-      setAvailableRooms(prev => 
-        prev.map(r => (r._id === roomDbId || r.roomId === roomId) ? { ...r, candidate: null } : r)
+      setAvailableRooms(prev =>
+        prev.map(r =>
+          r._id === roomDbId || r.roomId === roomId
+            ? { ...r, candidate: null, candidateJoinRequestedAt: null }
+            : r
+        )
       );
+      setPendingRoomId('');
+      // Show inline message on the affected room
+      const targetRoom = availableRooms.find(r => r._id === roomDbId || r.roomId === roomId);
+      if (targetRoom) {
+        setRoomMsg(targetRoom._id, 'Your join request was rejected. You can try again.', 'error');
+        setTimeout(() => clearRoomMsg(targetRoom._id), 5000);
+      }
     });
 
-    // Listen for status updates
+    // Room closed / deleted / became active — remove from list
     socketRef.current.on('call-room-status-update', ({ roomId, roomDbId, status }) => {
-      setAvailableRooms(prev => 
-        prev.filter(r => !((r._id === roomDbId || r.roomId === roomId) && (status === 'active' || status === 'deleted')))
-      );
+      if (status === 'active' || status === 'deleted' || status === 'ended') {
+        setAvailableRooms(prev =>
+          prev.filter(r => !(r._id === roomDbId || r.roomId === roomId))
+        );
+      }
     });
 
     return () => {
-      socketRef.current?.off('connect_error');
       socketRef.current?.emit('unsubscribe-from-available-rooms');
+      socketRef.current?.off('connect_error');
+      socketRef.current?.off('new-call-room');
+      socketRef.current?.off('join-confirmed');
+      socketRef.current?.off('join-rejected');
+      socketRef.current?.off('call-room-status-update');
       socketRef.current?.disconnect();
     };
-  }, [navigate, token]);
+  }, [navigate, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Request to join ───────────────────────────────────────────────────────
   const requestJoin = async (room) => {
     try {
       const response = await fetch(`${API_BASE}/api/call-rooms/${room._id}/request-join`, {
@@ -144,21 +170,30 @@ const CallRoomAvailable = () => {
           prev.map(r => r._id === room._id ? data.room : r)
         );
         setPendingRoomId(room.roomId || '');
+
+        // Join the socket channel for this room so we receive direct events
+        socketRef.current?.emit('join-room', { roomId: room.roomId });
+
+        // Notify the recruiter via socket
         socketRef.current?.emit('call-room-join-request', {
           roomId: room.roomId,
-          candidateId: localStorage.getItem('userId'),
+          candidateId: currentUserId,
           initiatorId: room.initiator?._id
         });
-        alert('Join request sent! Waiting for confirmation...');
+
+        setRoomMsg(room._id, 'Request sent — waiting for the recruiter to confirm…', 'info');
       } else {
-        alert(data.message || 'Failed to request join');
+        setRoomMsg(room._id, data.message || 'Failed to request join', 'error');
+        setTimeout(() => clearRoomMsg(room._id), 4000);
       }
     } catch (error) {
       console.error('Failed to request join:', error);
-      alert('Error requesting to join');
+      setRoomMsg(room._id, 'Network error — please try again', 'error');
+      setTimeout(() => clearRoomMsg(room._id), 4000);
     }
   };
 
+  // ── Render ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <PublicLayout>
@@ -182,58 +217,71 @@ const CallRoomAvailable = () => {
           </div>
         ) : (
           <div className="rooms-grid">
-            {availableRooms.map(room => (
-              <div key={room._id} className="room-card">
-                <div className="room-card-header">
-                  <h3>Interview Room</h3>
-                  <span className="room-id-badge">{room.roomId}</span>
-                </div>
+            {availableRooms.map(room => {
+              const msg = roomMessages[room._id];
+              const isMine = String(room.candidate?._id || room.candidate) === String(currentUserId);
+              const isPending = room.roomId === pendingRoomId;
 
-                <div className="room-card-body">
-                  {room.job && (
-                    <div className="job-info">
-                      <p><strong>Position:</strong> {room.job.title}</p>
-                      <p><strong>Company:</strong> {room.job.company}</p>
-                    </div>
-                  )}
-
-                  <div className="rh-info">
-                    <p>
-                      <strong>Interviewer:</strong> {room.initiator.firstName} {room.initiator.lastName}
-                    </p>
-                    <p><strong>Email:</strong> {room.initiator.email}</p>
+              return (
+                <div key={room._id} className="room-card">
+                  <div className="room-card-header">
+                    <h3>Interview Room</h3>
+                    <span className="room-id-badge">{room.roomId}</span>
                   </div>
 
-                  <p className="created-time">
-                    Created: {new Date(room.createdAt).toLocaleTimeString()}
-                  </p>
-                </div>
+                  <div className="room-card-body">
+                    {room.job && (
+                      <div className="job-info">
+                        <p><strong>Position:</strong> {room.job.title}</p>
+                        <p><strong>Company:</strong> {room.job.company}</p>
+                      </div>
+                    )}
 
-                <div className="room-card-footer">
-                  {room.candidate ? (
-                    <div className="waiting-confirmation">
-                      <span className="badge-waiting">Waiting for Confirmation</span>
-                      {String(room.candidate?._id || room.candidate) === String(currentUserId) && (
-                        <button
-                          className="btn-request-join"
-                          onClick={() => navigate(`/call-room/${encodeURIComponent(room.roomId)}`)}
-                          style={{ marginTop: '10px' }}
-                        >
-                          Enter Room
-                        </button>
-                      )}
+                    <div className="rh-info">
+                      <p>
+                        <strong>Interviewer:</strong>{' '}
+                        {room.initiator.firstName} {room.initiator.lastName}
+                      </p>
+                      <p><strong>Email:</strong> {room.initiator.email}</p>
                     </div>
-                  ) : (
-                    <button
-                      className="btn-request-join"
-                      onClick={() => requestJoin(room)}
-                    >
-                      Request to Join
-                    </button>
+
+                    <p className="created-time">
+                      Created: {new Date(room.createdAt).toLocaleTimeString()}
+                    </p>
+                  </div>
+
+                  {/* Inline status message */}
+                  {msg && (
+                    <div className={`room-card-message room-card-message--${msg.type}`}>
+                      {msg.text}
+                    </div>
                   )}
+
+                  <div className="room-card-footer">
+                    {room.candidate ? (
+                      <div className="waiting-confirmation">
+                        {isMine ? (
+                          <>
+                            <span className="badge-waiting">
+                              {isPending ? '⏳ Waiting for confirmation…' : 'Waiting for Confirmation'}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="badge-taken">Room taken</span>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        className="btn-request-join"
+                        onClick={() => requestJoin(room)}
+                      >
+                        Request to Join
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

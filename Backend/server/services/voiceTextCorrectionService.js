@@ -16,8 +16,18 @@ const NEGATIVE_TOKENS = [
 
 const normalizeWhitespace = (value) => String(value || '').replace(/\s+/g, ' ').trim();
 
+const stripLeadingTranscriptNoise = (value) => {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) return '';
+
+  return normalized
+    .replace(/^(?:thank you(?: very much)?|thanks|positive|negative|neutral)(?:[.!?,:;\s]+)(?=\S)/i, '')
+    .trim();
+};
+
 const localCleanTranscriptionText = (text, language = 'en') => {
-  const normalized = normalizeWhitespace(text)
+  const normalized = stripLeadingTranscriptNoise(text)
+    || normalizeWhitespace(text)
     .replace(/(^|\s)description(\.|,|\s|$)/gi, ' ')
     .replace(/\b(thanks? for watching|subscribe|link in bio)\b/gi, ' ')
     .replace(/\s+/g, ' ')

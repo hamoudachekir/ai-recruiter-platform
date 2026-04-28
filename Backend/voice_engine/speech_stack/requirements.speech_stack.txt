@@ -1,7 +1,13 @@
 fastapi>=0.115,<1
 uvicorn[standard]>=0.30,<1
 python-multipart>=0.0.9,<1
-transformers>=5,<6
-torch>=2.1
-pyttsx3>=2.90
+transformers==4.41.2
+torch==2.5.1
+torchaudio==2.5.1
+numpy==1.26.4
+pandas==1.5.3
+TTS>=0.22.0
 faster-whisper
+# Cloud TTS / API clients
+httpx>=0.27
+pydub>=0.25.1

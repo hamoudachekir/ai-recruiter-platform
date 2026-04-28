@@ -57,48 +57,150 @@ class EmbeddingBackend:
 NODE_JS_SKILL = "node.js"
 
 CORE_SKILL_WEIGHTS = {
+    # Frontend
     "react": 4.0,
     "javascript": 3.5,
     "typescript": 3.5,
-    "html": 1.4,
-    "css": 1.4,
     "angular": 2.0,
     "vue": 2.0,
+    "next.js": 2.5,
+    "html": 1.4,
+    "css": 1.4,
+    "tailwind css": 1.2,
+    "bootstrap": 1.0,
+    # Backend
     NODE_JS_SKILL: 2.2,
     "express": 2.0,
+    "python": 2.0,
+    "java": 2.0,
+    "php": 1.5,
+    "laravel": 1.8,
+    "django": 1.8,
+    "flask": 1.5,
+    "spring": 1.8,
+    "spring boot": 2.0,
+    "symfony": 1.5,
+    # Databases
     "mongodb": 1.5,
     "sql": 1.0,
-    "postgresql": 1.0,
-    "mysql": 1.0,
-    "docker": 0.9,
+    "postgresql": 1.2,
+    "mysql": 1.2,
+    "sqlite": 0.8,
+    # APIs
+    "rest api": 1.5,
+    "graphql": 1.5,
+    # Cloud / DevOps
+    "docker": 1.5,
+    "kubernetes": 1.5,
+    "aws": 2.0,
+    "azure": 1.8,
+    "gcp": 1.8,
+    "ci/cd": 1.2,
+    "devops": 1.5,
+    "gitlab ci/cd": 1.2,
+    "github actions": 1.2,
+    "jenkins": 1.0,
+    # General
     "git": 0.8,
+    "scrum": 0.8,
+    "agile": 0.8,
+    "microservices": 1.5,
+    "jwt": 0.8,
+    "figma": 1.0,
     "frontend": 1.5,
     "web development": 1.1,
     "full stack": 1.0,
 }
 
 SKILL_SYNONYMS = {
+    # JavaScript / TypeScript
     "js": "javascript",
     "javascript": "javascript",
     "ts": "typescript",
     "typescript": "typescript",
+    # React
     "reactjs": "react",
+    "react.js": "react",
     "react": "react",
+    # Vue
     "vuejs": "vue",
+    "vue.js": "vue",
     "vue": "vue",
+    # Angular
+    "angularjs": "angular",
+    "angular": "angular",
+    # Node
     "node": NODE_JS_SKILL,
     "nodejs": NODE_JS_SKILL,
     "node js": NODE_JS_SKILL,
     "node.js": NODE_JS_SKILL,
+    # Express
     "expressjs": "express",
+    "express.js": "express",
     "express": "express",
+    # Databases
     "mongo": "mongodb",
     "mongodb": "mongodb",
     "postgres": "postgresql",
     "postgresql": "postgresql",
+    "mysql": "mysql",
+    "sqlite": "sqlite",
+    # Git / DevOps
     "git": "git",
+    "github": "git",
+    "gitlab": "git",
+    "gitlab ci": "gitlab ci/cd",
+    "gitlab ci/cd": "gitlab ci/cd",
+    "github actions": "github actions",
+    "docker": "docker",
+    "kubernetes": "kubernetes",
+    "k8s": "kubernetes",
+    # Web
     "html5": "html",
+    "html": "html",
     "css3": "css",
+    "css": "css",
+    "tailwindcss": "tailwind css",
+    "tailwind css": "tailwind css",
+    "tailwind": "tailwind css",
+    "bootstrap": "bootstrap",
+    # APIs
+    "rest api": "rest api",
+    "restapi": "rest api",
+    "rest": "rest api",
+    "restful": "rest api",
+    "restful api": "rest api",
+    "graphql": "graphql",
+    "api": "rest api",
+    # Cloud
+    "aws": "aws",
+    "azure": "azure",
+    "gcp": "gcp",
+    "google cloud": "gcp",
+    # Other common
+    "python": "python",
+    "java": "java",
+    "php": "php",
+    "laravel": "laravel",
+    "symfony": "symfony",
+    "django": "django",
+    "flask": "flask",
+    "spring": "spring",
+    "springboot": "spring boot",
+    "spring boot": "spring boot",
+    "next.js": "next.js",
+    "nextjs": "next.js",
+    "nuxt.js": "nuxt.js",
+    "nuxtjs": "nuxt.js",
+    "jwt": "jwt",
+    "scrum": "scrum",
+    "agile": "agile",
+    "jira": "jira",
+    "figma": "figma",
+    "ci/cd": "ci/cd",
+    "cicd": "ci/cd",
+    "devops": "devops",
+    "microservices": "microservices",
 }
 
 
@@ -364,7 +466,7 @@ class JobRecommender:
             return
 
         try:
-            jobs = list(db.jobs.find())
+            jobs = list(db.jobs.find({"status": {"$ne": "CLOSED"}}))
             print(f"\n[DEBUG] Found {len(jobs)} jobs in database")
 
             if not jobs:

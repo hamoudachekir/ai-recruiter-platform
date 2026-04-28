@@ -1,15 +1,31 @@
 import io
+import json
 import os
+import sys
 import tempfile
 
 from typing import Annotated, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
-from speech_stack import SpeechStack
+try:
+    from .speech_stack import SpeechStack
+except ImportError:
+    # Support direct execution: `python api_server.py`
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+    from speech_stack import SpeechStack
+
+# Load environment variables from repo root (.env) and optional local overrides.
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(_CURRENT_DIR)))
+load_dotenv(os.path.join(_REPO_ROOT, ".env"), override=False)
+load_dotenv(os.path.join(_CURRENT_DIR, ".env"), override=True)
 
 app = FastAPI(title="Voice Engine Speech Stack API", version="1.0.0")
 
@@ -33,6 +49,23 @@ speech_stack: Optional[SpeechStack] = None
 startup_error: Optional[str] = None
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _env_language_default() -> Optional[str]:
+    raw = str(os.getenv("FW_LANGUAGE", "auto") or "").strip().lower()
+    if raw in {"", "auto", "none"}:
+        return None
+    return raw
+
+
+def _env_preload_tts_default() -> bool:
+    raw = str(os.getenv("FW_PRELOAD_TTS", "1") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _safe_upload_suffix(filename: Optional[str]) -> str:
     if not filename:
         return ".webm"
@@ -47,6 +80,33 @@ def _safe_upload_suffix(filename: Optional[str]) -> str:
         return ".webm"
 
     return ext
+
+
+def _parse_custom_terms(raw: Optional[str]) -> list[str]:
+    if not raw:
+        return []
+
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        payload = [item.strip() for item in str(raw).split(",")]
+
+    if not isinstance(payload, list):
+        return []
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for item in payload:
+        term = str(item or "").strip()
+        if not term or len(term) < 2 or len(term) > 64:
+            continue
+        lower = term.lower()
+        if lower in seen:
+            continue
+        seen.add(lower)
+        terms.append(term)
+
+    return terms[:120]
 
 
 def _run_with_temp_audio(payload: bytes, filename: Optional[str], fn) -> dict:
@@ -72,6 +132,7 @@ class TtsRequest(BaseModel):
     rate: int = 175
     volume: float = 1.0
     voice_id: Optional[str] = None
+    language: Optional[str] = None
 
 
 @app.on_event("startup")
@@ -80,15 +141,23 @@ def startup() -> None:
 
     try:
         speech_stack = SpeechStack(
-            model_name=os.getenv("FW_MODEL", "small.en"),
+            model_name=os.getenv("FW_MODEL", "distil-large-v3"),
             device=os.getenv("FW_DEVICE", "cuda"),
-            compute_type=os.getenv("FW_COMPUTE_TYPE", "int8"),
-            language=os.getenv("FW_LANGUAGE", "en"),
-            beam_size=int(os.getenv("FW_BEAM_SIZE", "3")),
+            compute_type=os.getenv("FW_COMPUTE_TYPE", "int8_float16"),
+            language=_env_language_default(),
+            beam_size=int(os.getenv("FW_BEAM_SIZE", "1")),
             neutral_threshold=float(os.getenv("FW_NEUTRAL_THRESHOLD", "0.65")),
             enable_sentiment=True,
+            enable_transcript_correction=_env_bool("FW_ENABLE_TRANSCRIPT_CORRECTION", True),
+            correction_confidence_threshold=float(os.getenv("FW_CORRECTION_CONFIDENCE_THRESHOLD", "0.98")),
+            correction_dictionary_path=os.getenv("FW_CORRECTION_DICTIONARY_PATH", "") or None,
         )
         startup_error = None
+        if _env_preload_tts_default():
+            try:
+                speech_stack.warm_tts()
+            except Exception as exc:
+                startup_error = f"TTS warmup skipped: {exc}"
     except Exception as exc:
         speech_stack = None
         startup_error = str(exc)
@@ -116,10 +185,14 @@ def health() -> dict:
     return {
         "status": "ok",
         "ready": True,
+        "warning": startup_error,
         "model": speech_stack.model_name,
         "device": speech_stack.device,
         "compute_type": speech_stack.active_compute_type,
         "cuda_runtime_path": speech_stack.cuda_runtime_path,
+        "tts_provider": speech_stack.tts_provider,
+        "tts_model": speech_stack.tts_model_name if speech_stack.tts_provider == "xtts_v2" else speech_stack.elevenlabs_model_id,
+        "tts_preloaded": speech_stack._xtts_model is not None or speech_stack.tts_provider == "elevenlabs",
     }
 
 
@@ -266,6 +339,7 @@ def index() -> str:
 async def transcribe(
     audio: Annotated[Optional[UploadFile], File()] = None,
     audio_file: Annotated[Optional[UploadFile], File()] = None,
+    custom_terms: Annotated[Optional[str], Form()] = None,
 ) -> dict:
     try:
         stack = require_stack()
@@ -280,8 +354,14 @@ async def transcribe(
     if not payload:
         raise HTTPException(status_code=400, detail="Audio payload is empty.")
 
+    terms = _parse_custom_terms(custom_terms)
+
     try:
-        return _run_with_temp_audio(payload, upload.filename, stack.transcribe)
+        return _run_with_temp_audio(
+            payload,
+            upload.filename,
+            lambda temp_path: stack.transcribe(temp_path, custom_terms=terms),
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -297,6 +377,7 @@ async def transcribe(
 async def transcribe_sentiment(
     audio: Annotated[Optional[UploadFile], File()] = None,
     audio_file: Annotated[Optional[UploadFile], File()] = None,
+    custom_terms: Annotated[Optional[str], Form()] = None,
 ) -> dict:
     try:
         stack = require_stack()
@@ -311,8 +392,14 @@ async def transcribe_sentiment(
     if not payload:
         raise HTTPException(status_code=400, detail="Audio payload is empty.")
 
+    terms = _parse_custom_terms(custom_terms)
+
     try:
-        return _run_with_temp_audio(payload, upload.filename, stack.transcribe_with_sentiment)
+        return _run_with_temp_audio(
+            payload,
+            upload.filename,
+            lambda temp_path: stack.transcribe_with_sentiment(temp_path, custom_terms=terms),
+        )
     except Exception as exc:
         # Realtime MediaRecorder chunks can intermittently be undecodable;
         # return a safe empty payload so the client can continue streaming.
@@ -391,14 +478,20 @@ def tts(request: TtsRequest):
             rate=request.rate,
             volume=request.volume,
             voice_id=request.voice_id,
+            language=request.language,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    # Detect MP3 content when pydub is not installed and ElevenLabs is used.
+    is_mp3 = wav_bytes[:3] == b"ID3" or wav_bytes[:2] == b"\xff\xfb"
+    media_type = "audio/mpeg" if is_mp3 else "audio/wav"
+    filename = "tts.mp3" if is_mp3 else "tts.wav"
+
     return StreamingResponse(
         io.BytesIO(wav_bytes),
-        media_type="audio/wav",
-        headers={"Content-Disposition": "inline; filename=tts.wav"},
+        media_type=media_type,
+        headers={"Content-Disposition": f"inline; filename={filename}"},
     )
 
 

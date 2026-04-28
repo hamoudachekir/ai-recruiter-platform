@@ -8,11 +8,45 @@ const SCHEDULING_API_BASE = "http://localhost:5004/api/scheduling";
 
 const slotKey = (slot) => `${slot?.start_time || ""}__${slot?.end_time || ""}`;
 
-const formatDateTime = (isoValue) => {
+const formatDateOnly = (isoValue, timezoneName) => {
   if (!isoValue) return "N/A";
   const parsed = new Date(isoValue);
   if (Number.isNaN(parsed.getTime())) return String(isoValue);
-  return parsed.toLocaleString();
+
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "2-digit",
+      year: "numeric",
+      ...(timezoneName ? { timeZone: timezoneName } : {}),
+    }).format(parsed);
+  } catch {
+    return parsed.toLocaleDateString();
+  }
+};
+
+const formatTimeOnly = (isoValue, timezoneName) => {
+  if (!isoValue) return "N/A";
+  const parsed = new Date(isoValue);
+  if (Number.isNaN(parsed.getTime())) return String(isoValue);
+
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      ...(timezoneName ? { timeZone: timezoneName } : {}),
+    }).format(parsed);
+  } catch {
+    return parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+};
+
+const formatDateTime = (isoValue, timezoneName) => {
+  const date = formatDateOnly(isoValue, timezoneName);
+  const time = formatTimeOnly(isoValue, timezoneName);
+  return `${date}, ${time}`;
 };
 
 const CandidateScheduling = () => {
@@ -28,8 +62,10 @@ const CandidateScheduling = () => {
   const [notice, setNotice] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [declining, setDeclining] = useState(false);
+  const [rescheduling, setRescheduling] = useState(false);
   const [loadingAlternatives, setLoadingAlternatives] = useState(false);
   const [selectedSlotKey, setSelectedSlotKey] = useState("");
+  const [showRescheduleOptions, setShowRescheduleOptions] = useState(false);
   const [showDeclineForm, setShowDeclineForm] = useState(false);
   const [declineReason, setDeclineReason] = useState("");
   const [preferredStartTimes, setPreferredStartTimes] = useState(["", "", ""]);
@@ -90,6 +126,7 @@ const CandidateScheduling = () => {
   const isAlreadyConfirmed = ["confirmed", "rescheduled"].includes(
     String(schedule?.status || "").toLowerCase()
   );
+  const displayTimezone = schedule?.candidate_timezone || schedule?.recruiter_timezone || "";
 
   const handleLoadAlternatives = async () => {
     if (!token) return;
@@ -121,6 +158,14 @@ const CandidateScheduling = () => {
     } finally {
       setLoadingAlternatives(false);
     }
+  };
+
+  const handleStartReschedule = async () => {
+    setShowRescheduleOptions(true);
+    if (suggestedSlots.length > 0) {
+      return;
+    }
+    await handleLoadAlternatives();
   };
 
   const handleConfirmAttendance = async () => {
@@ -167,6 +212,54 @@ const CandidateScheduling = () => {
       }
     } finally {
       setConfirming(false);
+    }
+  };
+
+  const handleRescheduleAttendance = async () => {
+    if (!token || !selectedSlot) return;
+
+    setRescheduling(true);
+    setError("");
+    setNotice("");
+
+    try {
+      await axios.post(
+        `${SCHEDULING_API_BASE}/public/${encodeURIComponent(token)}/reschedule`,
+        {
+          new_slot: {
+            start_time: selectedSlot.start_time,
+            end_time: selectedSlot.end_time,
+          },
+          notes: "Rescheduled by candidate from email link.",
+        }
+      );
+
+      setNotice("Reschedule request sent to recruiter. We will email you once it is approved or declined.");
+      setShowRescheduleOptions(false);
+      await fetchPublicSchedule();
+    } catch (requestError) {
+      const responseStatus = requestError?.response?.status;
+      const detail = requestError?.response?.data?.detail;
+
+      if (responseStatus === 409 && detail?.suggested_slots) {
+        setSchedule((previous) =>
+          previous
+            ? { ...previous, suggested_slots: detail.suggested_slots }
+            : { suggested_slots: detail.suggested_slots }
+        );
+        setNotice(detail?.message || "Selected slot is no longer available. Please choose another one.");
+        return;
+      }
+
+      if (typeof detail === "string") {
+        setError(detail);
+      } else if (detail?.message) {
+        setError(detail.message);
+      } else {
+        setError("Failed to reschedule attendance. Please try again.");
+      }
+    } finally {
+      setRescheduling(false);
     }
   };
 
@@ -259,7 +352,7 @@ const CandidateScheduling = () => {
         <div className="candidate-scheduling-card">
           <h1>Confirm Attendance</h1>
           <p className="subtitle">
-            Select your preferred interview slot and confirm your attendance.
+            Select your preferred interview slot, confirm your attendance, or change it later based on recruiter availability.
           </p>
 
           {loading && <p className="state-message">Loading scheduling details...</p>}
@@ -276,7 +369,14 @@ const CandidateScheduling = () => {
               {schedule.candidate_action_expires_at && (
                 <div className="status-row">
                   <span className="label">Link expires</span>
-                  <span className="value">{formatDateTime(schedule.candidate_action_expires_at)}</span>
+                  <span className="value">{formatDateTime(schedule.candidate_action_expires_at, displayTimezone)}</span>
+                </div>
+              )}
+
+              {displayTimezone && (
+                <div className="status-row">
+                  <span className="label">Timezone</span>
+                  <span className="value">{displayTimezone}</span>
                 </div>
               )}
 
@@ -284,18 +384,32 @@ const CandidateScheduling = () => {
                 <div className="confirmed-box">
                   <h2>Attendance already confirmed</h2>
                   <p>
-                    <strong>Start:</strong> {formatDateTime(schedule.confirmed_slot.start_time)}
+                    <strong>Date:</strong> {formatDateOnly(schedule.confirmed_slot.start_time, displayTimezone)}
                   </p>
                   <p>
-                    <strong>End:</strong> {formatDateTime(schedule.confirmed_slot.end_time)}
+                    <strong>Time:</strong> {formatTimeOnly(schedule.confirmed_slot.start_time, displayTimezone)}
                   </p>
+                  <p>
+                    <strong>End:</strong> {formatTimeOnly(schedule.confirmed_slot.end_time, displayTimezone)}
+                  </p>
+
+                  {!showRescheduleOptions && (
+                    <button
+                      type="button"
+                      className="secondary-btn"
+                      onClick={handleStartReschedule}
+                      disabled={loadingAlternatives}
+                    >
+                      {loadingAlternatives ? "Loading..." : "Change date / time"}
+                    </button>
+                  )}
                 </div>
               )}
 
-              {!isAlreadyConfirmed && (
+              {(!isAlreadyConfirmed || showRescheduleOptions) && (
                 <>
                   <div className="slots-header">
-                    <h2>Available slots</h2>
+                    <h2>{isAlreadyConfirmed ? "Choose a new slot" : "Available slots"}</h2>
                     <button
                       type="button"
                       className="secondary-btn"
@@ -314,8 +428,9 @@ const CandidateScheduling = () => {
                     <div className="slots-list">
                       {suggestedSlots.map((slot) => {
                         const key = slotKey(slot);
-                        const slotStart = formatDateTime(slot.start_time);
-                        const slotEnd = formatDateTime(slot.end_time);
+                        const slotStartDate = formatDateOnly(slot.start_time, displayTimezone);
+                        const slotStartTime = formatTimeOnly(slot.start_time, displayTimezone);
+                        const slotEndTime = formatTimeOnly(slot.end_time, displayTimezone);
                         const isSelected = selectedSlotKey === key;
                         return (
                           <button
@@ -327,7 +442,7 @@ const CandidateScheduling = () => {
                           >
                             <div>
                               <p className="slot-time">
-                                {slotStart} - {slotEnd}
+                                {slotStartDate} | {slotStartTime} - {slotEndTime}
                               </p>
                               <p className="slot-meta">Score: {slot.score ?? "N/A"}</p>
                             </div>
@@ -337,22 +452,45 @@ const CandidateScheduling = () => {
                     </div>
                   )}
 
-                  <button
-                    type="button"
-                    className="confirm-btn"
-                    onClick={handleConfirmAttendance}
-                    disabled={confirming || !selectedSlot}
-                  >
-                    {confirming ? "Confirming..." : "Confirm Attendance"}
-                  </button>
+                  {isAlreadyConfirmed ? (
+                    <>
+                      <button
+                        type="button"
+                        className="confirm-btn"
+                        onClick={handleRescheduleAttendance}
+                        disabled={rescheduling || !selectedSlot}
+                      >
+                        {rescheduling ? "Updating..." : "Confirm New Slot"}
+                      </button>
 
-                  <button
-                    type="button"
-                    className="decline-btn"
-                    onClick={() => setShowDeclineForm((previous) => !previous)}
-                  >
-                    Cannot attend this day
-                  </button>
+                      <button
+                        type="button"
+                        className="decline-btn"
+                        onClick={() => setShowRescheduleOptions(false)}
+                      >
+                        Keep current slot
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="confirm-btn"
+                        onClick={handleConfirmAttendance}
+                        disabled={confirming || !selectedSlot}
+                      >
+                        {confirming ? "Confirming..." : "Confirm Attendance"}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="decline-btn"
+                        onClick={() => setShowDeclineForm((previous) => !previous)}
+                      >
+                        Cannot attend this day
+                      </button>
+                    </>
+                  )}
 
                   {showDeclineForm && (
                     <div className="decline-form">

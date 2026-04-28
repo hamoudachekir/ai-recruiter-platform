@@ -13,7 +13,7 @@ const CandidateMessages = () => {
   useEffect(() => {
     const fetchMessages = async () => {
       try {
-        const res = await axios.get(`http://localhost:3001/api/messages/${candidateId}`);
+        const res = await axios.get(`http://localhost:3001/api/messages/user/${candidateId}`);
         if (Array.isArray(res.data.messages)) {
           setMessages(res.data.messages);
         } else {

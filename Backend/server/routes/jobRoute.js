@@ -18,7 +18,7 @@ const refreshRecommendationIndex = async () => {
 // POST /api/jobs/create
 router.post('/jobs/create', async (req, res) => {
   try {
-    const { title, description, location, salary, enterpriseId } = req.body;
+    const { title, description, location, salary, enterpriseId, skills, languages, requiredExperience } = req.body;
 
     // Validate enterprise
     const enterprise = await User.findById(enterpriseId);
@@ -26,13 +26,15 @@ router.post('/jobs/create', async (req, res) => {
       return res.status(400).json({ message: "Invalid enterprise" });
     }
 
-    // Create job
+    // Create job — include skills and languages so the recommendation engine can match
     const job = new JobModel({
       title,
       description,
       location,
       salary,
-      entrepriseId: enterpriseId, // Match your Job model's field name
+      entrepriseId: enterpriseId,
+      skills: Array.isArray(skills) ? skills : [],
+      languages: Array.isArray(languages) ? languages : [],
     });
     await job.save();
 

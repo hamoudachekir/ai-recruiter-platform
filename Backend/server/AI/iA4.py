@@ -331,111 +331,395 @@ def extract_education(text):
             education.append(line)
     return education
 
+# Date patterns used in CV experience sections (English + French)
+_DATE_RE = re.compile(
+    "(?:"
+    "(?:jan(?:uary|vier)?|feb(?:ruary|rier)?|mar(?:ch|s)?|apr(?:il)?|avr(?:il)?"
+    "|may|mai|jun(?:e)?|juin|jul(?:y)?|juil(?:let)?|aug(?:ust)?|ao[u\u00fb]t"
+    "|sep(?:tember|t(?:embre)?)?|oct(?:ober|obre)?|nov(?:ember|embre)?|dec(?:ember|embre)?)"
+    r"[\s.,-]*\d{2,4}"
+    "|(?:present|pr[e\u00e9]sent|aujourd.hui|current|ongoing|maintenant)"
+    r"|\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}"
+    r"|\d{4}\s*[-\u2013]\s*(?:\d{4}|pr[e\u00e9]sent|present|current|aujourd.hui|ongoing)"
+    r"|\d{4}"
+    ")",
+    re.IGNORECASE,
+)
+
+_SECTION_EXPERIENCE_RE = re.compile(
+    (
+        r"^\s*(exp[e\u00e9]riences?\s*professionnelles?|exp[e\u00e9]riences?|"
+        r"parcours\s*professionnel|professional\s+experience|"
+        r"work\s+(?:experience|history)|emplois?|"
+        r"exp[e\u00e9]riences?\s+(?:professionnelles?|de\s+travail)?|"
+        r"stages?\s+(?:professionnels?)?|stages?|internships?|"
+        r"postes?\s+occup[e\u00e9]s?|historique\s+professionnel|"
+        r"activit[e\u00e9]s?\s+professionnelles?)\s*$"
+    ),
+    re.IGNORECASE,
+)
+
+# Matches the second line of split headers like "EXPÉRIENCES" / "PROFESSIONNELLES"
+_SECTION_EXPERIENCE_CONT_RE = re.compile(
+    r"^\s*professionnelles?\s*$", re.IGNORECASE
+)
+
+_SECTION_STOP_RE = re.compile(
+    (
+        r"^\s*(education|formation|[e\u00e9]tudes|parcours\s+acad[e\u00e9]mique|"
+        r"skills?|comp[e\u00e9]tences?|certifications?|projets?\s+acad[e\u00e9]miques?|"
+        r"projets?\s+personnels?|projects?|langues?|languages?|interests?|loisirs|"
+        r"centres?\s+d.int[e\u00e9]r[e\u00ea]ts?|publications?|r[e\u00e9]f[e\u00e9]rences?|"
+        r"distinctions?|r[e\u00e9]compenses?|prix|awards?|volunteering?|b[e\u00e9]n[e\u00e9]volat)\s*$"
+    ),
+    re.IGNORECASE,
+)
+
+_PROJECT_SECTION_RE = re.compile(
+    r"^\s*(projets?\s*(?:acad[e\u00e9]miques?|personnels?)?|academic\s+projects?|projects?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _extract_duration_from_line(line):
+    """Return (duration_str, line_without_duration) from a line."""
+    dates = _DATE_RE.findall(line)
+    if not dates:
+        return "", line
+
+    # Build a duration string from the found date tokens
+    duration = " - ".join(d.strip() for d in dates if d.strip())
+
+    # Remove the date parts from the line to get the rest
+    remainder = _DATE_RE.sub("", line)
+    remainder = re.sub(r"[\s\-\u2013|]+$", "", remainder.strip()).strip(" -\u2013|:")
+    return duration, remainder
+
+
+def _is_title_line(line):
+    """Heuristic: does this line look like a job title or role?"""
+    title_keywords = (
+        "ing[e\u00e9]nieur|engineer|d[e\u00e9]veloppeur|developer|analyste|analyst|"
+        "consultant|manager|chef\\s+de\\s+projet|architecte|architect|"
+        "stagiaire|intern|alternant|apprenti|stage|full.?stack|backend|frontend|"
+        "devops|data\\s+(?:scientist|engineer|analyst)|responsable|designer|"
+        "lead|senior|junior|mid.?level|technicien|technician|scrum\\s+master|"
+        "product\\s+owner|cto|ceo|coo|directeur|director|coordinateur|coordinator"
+    )
+    return bool(re.search(title_keywords, line, re.IGNORECASE))
+
+
+def _clean_exp_line(line):
+    return re.sub(r"^[^\S\n]*[^\w\s]?[^\S\n]*", "", (line or "").lstrip(" \t\r\u2022\u2013\u2014*\u2023\u25b8\u25aa")).strip()
+
+
 def extract_experience(text):
-    experience = []
     lines = split_lines(text)
-    current_exp = {}
-    capture = False
+    experience = []
 
-    section_stop_re = re.compile(
-        r'^(education|formation|skills|comp[ée]tences|certification|projects|projets|languages|langues|interests|centres\s+d[\'’]int[ée]r[êe]t)\b',
-        re.IGNORECASE,
-    )
+    # ── 1. Locate section boundaries ─────────────────────────────────────────
+    # Handles headers split across two lines, e.g. "EXPÉRIENCES" / "PROFESSIONNELLES"
+    exp_start = None
+    exp_end = len(lines)
+    project_start = None
+    project_end = len(lines)
+    prev_was_exp_trigger = False   # True after seeing "EXPÉRIENCES" alone
 
-    def _is_experience_heading(line_text):
-        return bool(re.search(r'^\s*(experience|work history|professional experience|emploi|exp[ée]rience)\b', line_text, re.IGNORECASE))
+    for i, line in enumerate(lines):
+        stripped = line.strip()
 
-    def _clean_experience_line(line_text):
-        cleaned = re.sub(r'^[•\-–*∗\s]+', '', line_text or '').strip()
-        cleaned = re.sub(r'\s{2,}', ' ', cleaned)
-        return cleaned
+        # Two-line header: previous line was "EXPÉRIENCES", this is "PROFESSIONNELLES"
+        if prev_was_exp_trigger and _SECTION_EXPERIENCE_CONT_RE.match(stripped):
+            prev_was_exp_trigger = False
+            continue   # skip the continuation line; exp_start already set
 
-    for line in lines:
-        if _is_experience_heading(line):
-            capture = True
+        prev_was_exp_trigger = False
+
+        if exp_start is None and _SECTION_EXPERIENCE_RE.match(stripped):
+            exp_start = i + 1
+            # If this matched "EXPÉRIENCES" alone, the next line might be "PROFESSIONNELLES"
+            if re.match(r"^\s*exp[e\u00e9]riences?\s*$", stripped, re.IGNORECASE):
+                prev_was_exp_trigger = True
             continue
 
-        if capture:
-            if section_stop_re.search(line.strip()):
-                break
+        if exp_start is not None and exp_end == len(lines) and _SECTION_STOP_RE.match(stripped):
+            exp_end = i
 
-            exp_match = re.search(r'^(.*?)\s*[-–|]\s*(.*?)\s*[-–|]\s*(.*)$', line)
-            if exp_match:
-                if current_exp:
-                    experience.append(current_exp)
-                current_exp = {
-                    'company': exp_match.group(1).strip(),
-                    'title': exp_match.group(2).strip(),
-                    'duration': exp_match.group(3).strip(),
-                    'description': []
-                }
+        if _PROJECT_SECTION_RE.match(stripped):
+            project_start = i + 1
+            project_end = len(lines)
+            continue
 
+        if project_start is not None and project_end == len(lines) and _SECTION_STOP_RE.match(stripped) and i > project_start:
+            project_end = i
+
+    exp_lines   = lines[exp_start:exp_end]     if exp_start   is not None else []
+    proj_lines  = lines[project_start:project_end] if project_start is not None else []
+
+    # ── 2. Parse experience entries ───────────────────────────────────────────
+    def flush(entry, result):
+        if entry.get("title") or entry.get("company"):
+            desc = entry.get("description", [])
+            entry["description"] = " ".join(desc) if isinstance(desc, list) else desc
+            result.append(entry)
+
+    def new_entry(title="", company="", duration=""):
+        return {"title": title, "company": company, "duration": duration, "description": []}
+
+    # Regex: remainder after stripping dates is just a city / short location
+    _LOCATION_RE = re.compile(
+        r"^[A-Z\u00C0-\u017E][a-z\u00C0-\u017E]+(?:[\s\-][A-Z\u00C0-\u017E][a-z\u00C0-\u017E]+)?$"
+    )
+
+    current = {}
+    for line in exp_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        cleaned = stripped.lstrip("-\u2013\u2014\u2022*\u25b8\u25aa ").strip()
+        if not cleaned:
+            continue
+
+        # Skip "Stack : ..." lines (tech stack summary) — move to description
+        # We keep them as description, not a new entry trigger.
+
+        # ── A. Pipe / en-dash separated WITH dates: new entry header ──────────
+        # e.g. "Full-Stack Dev | Talan | Juil 2024 – Présent"
+        parts_pipe = re.split(r"\s*[|\u2013]\s*", cleaned)
+        if len(parts_pipe) >= 2:
+            dates_in_line = _DATE_RE.findall(cleaned)
+            if dates_in_line:
+                flush(current, experience)
+                duration = " - ".join(d.strip() for d in dates_in_line if d.strip())
+                non_date = [p for p in parts_pipe if not _DATE_RE.fullmatch(p.strip())]
+                title   = non_date[0].strip() if non_date else ""
+                company = non_date[1].strip() if len(non_date) > 1 else ""
+                current = new_entry(title, company, duration)
                 continue
-
-            cleaned_line = _clean_experience_line(line)
-            if not cleaned_line:
-                continue
-
-            # Keep free-form experience content exactly, even when the CV does not
-            # follow company-title-duration formatting.
-            if not current_exp:
-                current_exp = {
-                    'company': '',
-                    'title': 'Experience',
-                    'duration': '',
-                    'description': []
-                }
-
-            if current_exp.get('description') and re.match(r'^\s+', line):
-                current_exp['description'][-1] += ' ' + cleaned_line
             else:
-                current_exp.setdefault('description', []).append(cleaned_line)
+                # ── B. Em-dash separated WITHOUT dates: company — sub-dept ──
+                # e.g. "SmartConseil — Dafe Management"
+                if current.get("title") and not current.get("company"):
+                    current["company"] = cleaned
+                    continue
 
-    if current_exp:
-        experience.append(current_exp)
+        # ── C. Pure date range line ───────────────────────────────────────────
+        if _DATE_RE.fullmatch(cleaned) or re.match(
+            r"^\d{4}\s*[-\u2013]\s*(\d{4}|present|pr[e\u00e9]sent|current|ongoing|aujourd.hui)$",
+            cleaned, re.IGNORECASE
+        ):
+            if current and not current.get("duration"):
+                current["duration"] = cleaned
+            continue
 
-    project_lines = extract_section_lines(
-        lines,
-        start_patterns=[r'projects', r'projets', r'projets académiques', r'academic projects'],
-        stop_patterns=[r'education', r'formation', r'skills', r'languages', r'certification', r'interests']
-    )
+        # ── D. Line containing a date ─────────────────────────────────────────
+        date_matches = list(_DATE_RE.finditer(cleaned))
+        if date_matches:
+            duration, remainder = _extract_duration_from_line(cleaned)
+            remainder = remainder.strip()
+
+            # Date + city/location only → belongs to the CURRENT entry
+            is_location = (
+                not remainder
+                or (len(remainder) <= 25 and not _is_title_line(remainder) and _LOCATION_RE.match(remainder))
+            )
+            if is_location:
+                if current and not current.get("duration"):
+                    current["duration"] = duration
+                continue
+
+            # Date + substantial text → new entry header
+            if remainder and len(remainder) >= 3:
+                flush(current, experience)
+                at_split = re.split(r"\s+(?:at|chez|pour|within)\s+", remainder, maxsplit=1, flags=re.IGNORECASE)
+                if len(at_split) == 2:
+                    current = new_entry(at_split[0].strip(), at_split[1].strip(), duration)
+                elif _is_title_line(remainder):
+                    current = new_entry(remainder, "", duration)
+                else:
+                    current = new_entry("", remainder, duration)
+                continue
+            elif current and not current.get("duration"):
+                current["duration"] = duration
+                continue
+
+        # ── E. Title line — starts a new entry ───────────────────────────────
+        if _is_title_line(cleaned):
+            if not current:
+                current = new_entry(cleaned)
+                continue
+            if not current.get("title"):
+                current["title"] = cleaned
+                continue
+            # Already have a complete entry header — flush and start fresh
+            if current.get("title") and current.get("company"):
+                flush(current, experience)
+                current = new_entry(cleaned)
+                continue
+
+        # ── F. Company line ───────────────────────────────────────────────────
+        if current.get("title") and not current.get("company"):
+            # Accept any reasonably short non-title line as company name
+            if len(cleaned.split()) <= 7 and not cleaned.startswith("Stack"):
+                current["company"] = cleaned
+                continue
+
+        # ── G. Description / tech-stack line ─────────────────────────────────
+        if current:
+            current.setdefault("description", []).append(cleaned)
+
+    flush(current, experience)
+
+    # ── 3. Parse projects section ─────────────────────────────────────────────
+    current_proj = None
     project_entries = []
-    current_project = None
-    for raw_line in project_lines:
-        line = raw_line.strip()
-        if re.match(r'^[\-–]', line):
-            if current_project:
-                project_entries.append(current_project)
 
-            header = re.sub(r'^[\-–\s]+', '', line)
-            duration_match = re.search(r'((?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|present|présent|\d{4})[^\n]{0,25}(?:\d{4}|present|présent))$', header, re.IGNORECASE)
-            duration = duration_match.group(1).strip() if duration_match else ''
-            title = header.replace(duration, '').strip(' -|:')
-            title = re.sub(r'\bintitul[ée]\s*:\s*', '', title, flags=re.IGNORECASE).strip('"')
-            current_project = {
-                'company': '',
-                'title': title if title else 'Academic Project',
-                'duration': duration,
-                'description': []
-            }
+    for line in proj_lines:
+        stripped = line.strip()
+        if not stripped:
             continue
 
-        if not current_project:
+        # Project header: starts with bullet/dash OR short line with no date yet
+        is_proj_header = re.match(r"^[-\u2013\u2014\u25b8\u25aa]", stripped) or (
+            len(stripped) < 90
+            and not re.search(r"^(stack|technologies|tech)\s*:", stripped, re.IGNORECASE)
+            and current_proj is None
+        )
+        if is_proj_header:
+            if current_proj:
+                project_entries.append(current_proj)
+            header = stripped.lstrip("-\u2013\u2014\u25b8\u25aa ").strip()
+            duration, remainder = _extract_duration_from_line(header)
+            title = re.sub(r"\bintitul[e\u00e9]\s*:\s*", "", remainder, flags=re.IGNORECASE).strip(" \"")
+            current_proj = new_entry(title or "Project", "", duration)
             continue
-        if re.search(r'^technologies\s+utilis[ée]es?\s*:', line, re.IGNORECASE):
+
+        if not current_proj:
             continue
-        if len(line) >= 20:
-            current_project['description'].append(re.sub(r'^[\*∗\-–\s]+', '', line).strip())
+        if re.search(r"^(stack|technologies)\s*:", stripped, re.IGNORECASE):
+            continue
+        cleaned_p = stripped.lstrip("-\u2013\u2022* ").strip()
+        if len(cleaned_p) >= 15:
+            current_proj["description"].append(cleaned_p)
 
-    if current_project:
-        project_entries.append(current_project)
+    if current_proj:
+        project_entries.append(current_proj)
 
-    for project in project_entries[:6]:
-        if project['description']:
-            project['description'] = project['description'][:3]
-        experience.append(project)
+    for proj in project_entries[:6]:
+        desc = proj.get("description", [])
+        proj["description"] = " ".join(desc[:3]) if isinstance(desc, list) else desc
+        experience.append(proj)
 
-    return experience
+    # ── 4. Deduplicate ────────────────────────────────────────────────────────
+    seen = set()
+    unique = []
+    for e in experience:
+        key = (e.get("title", ""), e.get("company", ""), e.get("duration", ""))
+        if key not in seen:
+            seen.add(key)
+            unique.append(e)
+
+    return unique
+
+NON_SKILL_WORDS = {
+    # Generic French words that leak from CV text
+    'activit', 'activite', 'activites', 'analyses', 'alertes', 'badges', 'bilan',
+    'burndown', 'cardio', 'challenges', 'classements', 'conception', 'courant',
+    'crbrales', 'crud', 'dashboards', 'dons', 'donnes', 'ducatives', 'vnements',
+    'evenements', 'fc', 'forums', 'franais', 'francais', 'gestion', 'issues',
+    'langues', 'lifestyle', 'membre', 'mthodo', 'methodo', 'multi', 'passerelles',
+    'platform', 'profils', 'projet', 'projets', 'ressources', 'revues', 'rles',
+    'roles', 'score', 'screening', 'scurit', 'securite', 'sommeil', 'sprints',
+    'suivi', 'techniques', 'tunis', 'tunisie', 'uml', 'utilisateurs', 'virement',
+    'vnements', 'admin', 'administration', 'introduction', 'stage', 'formation',
+    # Generic English words
+    'platform', 'user', 'users', 'data', 'management', 'system', 'service',
+    'application', 'module', 'interface', 'online', 'basic', 'various', 'advanced',
+    'level', 'design', 'implementation', 'integration', 'development', 'stories',
+    'adventure', 'academic', 'lifestyle', 'other', 'general', 'core', 'custom',
+    'auth', 'authentication',
+}
+
+# Known valid short/uppercase skills that must not be filtered
+KNOWN_SHORT_SKILLS = {
+    'aws', 'gcp', 'sql', 'css', 'html', 'php', 'git', 'api', 'ios', 'c#', 'c++',
+    'r', 'go', 'ui', 'ux', 'jwt', 'ci', 'cd', 'vue', 'xml', 'json', 'rest', 'orm',
+    'jira', 'java', 'seo', 'sem', 'etl', 'bi', 'nlp', 'erp', 'crm', 'sdk', 'ide',
+    't5',
+}
+
+
+def _is_valid_skill_token(token):
+    """Return True if the token looks like a genuine skill name."""
+    # Strip trailing punctuation and whitespace
+    cleaned = re.sub(r'[^\w\+#\.\-\s]', '', token).strip()
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned)
+
+    if not cleaned:
+        return False
+
+    token_lower = cleaned.lower()
+
+    # Reject tokens that start with a digit or year-like pattern
+    if re.match(r'^\d', cleaned):
+        return False
+
+    # Reject tokens that contain a 4-digit year (e.g. "Z 2023 react")
+    if re.search(r'\b(19|20)\d{2}\b', cleaned):
+        return False
+
+    # Reject tokens ending with a period that look like sentences
+    if cleaned.endswith('.') and len(cleaned) > 10:
+        return False
+
+    word_count = len(cleaned.split())
+
+    # Short-known skills are always fine
+    if token_lower in KNOWN_SHORT_SKILLS:
+        return True
+
+    # Single characters that are not known skills → reject
+    if len(cleaned) <= 1:
+        return False
+
+    # Two-char tokens: only accept known acronyms
+    if len(cleaned) == 2 and token_lower not in KNOWN_SHORT_SKILLS:
+        return False
+
+    # Reject from blacklist
+    if token_lower in NON_SKILL_WORDS:
+        return False
+
+    # Reject words that look like broken-encoding French
+    # (consonant-heavy, no proper vowel structure, e.g. "Crbrales", "Mthodo")
+    vowels = set('aeiouáàâäéèêëíìîïóòôöúùûüæœ')
+    letters_only = re.sub(r'[^a-zA-ZÀ-ÿ]', '', cleaned)
+    if len(letters_only) >= 5:
+        vowel_ratio = sum(1 for ch in letters_only.lower() if ch in vowels) / len(letters_only)
+        if vowel_ratio < 0.2:
+            return False
+
+    # Reject phrases longer than 3 words (unless they are known multi-word skills)
+    if word_count > 3:
+        return False
+
+    # Reject generic section/sentence words
+    if re.search(
+        r'\b(langue\s+maternelle|membre|responsable|gestion|tunis|tunisie|fran[cç]ais|anglais|arabe'
+        r'|avanc|courant|bilingue|natif|natale|profil|candidat|projet acadmique'
+        r'|user\s+stories|revues?\s+de\s+sprint|suivi\s+des|analyses?\s+d)\b',
+        token_lower,
+        re.IGNORECASE,
+    ):
+        return False
+
+    # Must be at least 2 chars after cleaning
+    if len(cleaned) < 2:
+        return False
+
+    return True
+
 
 def extract_skills(text):
     skills = set()
@@ -459,15 +743,15 @@ def extract_skills(text):
             line,
             flags=re.IGNORECASE
         )
-        candidates.extend([token.strip() for token in re.split(r'[,/|;]', normalized_line) if token.strip()])
+        candidates.extend([token.strip() for token in re.split(r'[,/|;·•]', normalized_line) if token.strip()])
 
     for token in candidates:
-        cleaned = re.sub(r'[^a-zA-Z0-9\+#\.\- ]', '', token).strip()
-        word_count = len(cleaned.split())
-        if re.search(r'(avanc|langue\s+maternelle|membre|responsable|gestion|tunis|tunisie|fran[cç]ais|anglais|arabe)', cleaned, re.IGNORECASE):
+        cleaned = re.sub(r'[^a-zA-Z0-9\+#\.\-\s]', '', token).strip()
+        if not _is_valid_skill_token(cleaned):
             continue
-        if 2 <= len(cleaned) <= 30 and word_count <= 3 and not re.match(r'^(skills?|compétences?)$', cleaned, re.IGNORECASE):
-            skills.add(normalize_skill_label(cleaned))
+        label = normalize_skill_label(cleaned)
+        if label.lower() not in NON_SKILL_WORDS:
+            skills.add(label)
 
     return sorted(skills)
 
@@ -586,14 +870,80 @@ def looks_like_cv(text, parsed):
         return model_probability >= 0.45
     return False
 
+def _words_to_lines(words, y_tolerance=4):
+    """Reconstruct lines from a list of pdfplumber word dicts sorted by position."""
+    if not words:
+        return []
+    words = sorted(words, key=lambda w: (round(w["top"] / y_tolerance) * y_tolerance, w["x0"]))
+    lines = []
+    cur_line = []
+    cur_top = None
+    for w in words:
+        t = round(w["top"] / y_tolerance) * y_tolerance
+        if cur_top is None or abs(t - cur_top) <= y_tolerance:
+            cur_line.append(w["text"])
+            cur_top = t
+        else:
+            if cur_line:
+                lines.append(" ".join(cur_line))
+            cur_line = [w["text"]]
+            cur_top = t
+    if cur_line:
+        lines.append(" ".join(cur_line))
+    return lines
+
+
+def _extract_page_text_column_aware(page):
+    """
+    Extract page text with column awareness.
+    For two-column CVs, pdfplumber's default reading order mixes columns.
+    This function detects the column split and reconstructs left-then-right order.
+    """
+    try:
+        words = page.extract_words(x_tolerance=3, y_tolerance=3, keep_blank_chars=False)
+    except Exception:
+        return page.extract_text() or ""
+
+    if not words:
+        return page.extract_text() or ""
+
+    page_width = float(page.width)
+
+    # Build a histogram of x0 positions to find the inter-column gap
+    x0_vals = sorted(w["x0"] for w in words)
+    # Find the largest gap between consecutive unique x-buckets (10pt buckets)
+    buckets = sorted(set(round(x / 10) * 10 for x in x0_vals))
+    col_split = page_width / 2  # default: split at centre
+    if len(buckets) > 3:
+        gaps = [(buckets[i + 1] - buckets[i], (buckets[i] + buckets[i + 1]) / 2)
+                for i in range(len(buckets) - 1)]
+        # Only consider gaps in the middle 40-60% range of the page width
+        mid_gaps = [(g, mid) for g, mid in gaps if 0.35 * page_width < mid < 0.65 * page_width]
+        if mid_gaps:
+            col_split = max(mid_gaps, key=lambda x: x[0])[1]
+
+    left_words  = [w for w in words if w["x0"] <  col_split]
+    right_words = [w for w in words if w["x0"] >= col_split]
+
+    # Only treat as two-column if right side has substantial content
+    if len(right_words) < max(5, len(left_words) * 0.15):
+        # Single-column page
+        return "\n".join(_words_to_lines(words))
+
+    left_text  = "\n".join(_words_to_lines(left_words))
+    right_text = "\n".join(_words_to_lines(right_words))
+    # Return left column first, then right column — each section is self-contained
+    return left_text + "\n" + right_text
+
+
 def extract_text_from_pdf(file_path):
-    text_native = ''
+    text_native = ""
     try:
         with pdfplumber.open(file_path) as pdf:
             for page in pdf.pages:
-                page_text = page.extract_text()
+                page_text = _extract_page_text_column_aware(page)
                 if page_text:
-                    text_native += page_text + '\n'
+                    text_native += page_text + "\n"
     except Exception as e:
         print(f"❌ Error reading PDF: {e}")
 
@@ -675,7 +1025,7 @@ def process_resume(file_path):
                 "title": exp.get('title', ''),
                 "company": exp.get('company', ''),
                 "duration": exp.get('duration', ''),
-                "description": ' '.join(exp.get('description', []))
+                "description": exp.get('description', '') if isinstance(exp.get('description'), str) else ' '.join(exp.get('description', []))
             } for exp in extract_experience(text)]
         },
         "education": extract_education(text)
@@ -690,6 +1040,31 @@ def process_resume(file_path):
 @app.route('/', methods=['GET'])
 def home():
     return "✅ Flask server running", 200
+
+# Debug route — returns raw extracted text + experience parse for diagnosis
+@app.route('/debug-cv', methods=['POST'])
+def debug_cv():
+    if 'resume' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    file = request.files['resume']
+    extension = os.path.splitext(file.filename)[1].lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        return jsonify({'error': 'Unsupported file type'}), 400
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(UPLOAD_FOLDER, 'debug_' + filename)
+    file.save(file_path)
+    try:
+        text = extract_text_from_pdf(file_path) if extension == '.pdf' else extract_text_from_image(file_path)
+        lines = split_lines(text)
+        experience = extract_experience(text)
+        return jsonify({
+            'raw_lines': lines[:80],
+            'experience': experience,
+            'char_count': len(text),
+        })
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
 # Upload route
 @app.route('/upload', methods=['POST'])
