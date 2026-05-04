@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import AgentChatPanel from './AgentChatPanel';
-import StreamojiAvatarWrapper from './StreamojiAvatarWrapper';
+import InterviewAvatar from './InterviewAvatar';
+import VisionMonitor from './VisionMonitor';
 import { useParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import useIntegrityEvents from './hooks/useIntegrityEvents';
 import PublicLayout from '../layouts/PublicLayout';
 import './CallRoomActive.css';
 
@@ -31,7 +33,20 @@ const STT_FINALIZE_SILENCE_MS = 220;
 const STT_MIN_FINAL_TEXT_LEN = 2;
 const STT_MIN_FINAL_WORDS = 2;
 const STT_MIN_FINAL_CHARS = 6;
-const AGENT_TTS_FALLBACK_MS = Math.max(0, Number(import.meta.env.VITE_AGENT_TTS_FALLBACK_MS || 45000));
+// faster-whisper avg_logprob is per-token mean log probability. Empirically:
+// real candidate speech sits ~ -0.30 to -0.80; hallucinations from silence/
+// breath cluster around -1.2 and below. -1.0 is the safe drop floor.
+const STT_MIN_AVG_LOGPROB = -1.0;
+// faster-whisper no_speech_prob > 0.6 is a strong "this segment was silence"
+// signal — drop the transcript even if the model produced text from it.
+const STT_MAX_NO_SPEECH_PROB = 0.6;
+// Hold the mic muted for this long after the agent's TTS audio ends. Speakers
+// (especially Bluetooth/laptop) emit a 200–400 ms acoustic tail that the mic
+// would otherwise pick up and the STT would transcribe as the candidate.
+const POST_TTS_MIC_DEAD_ZONE_MS = 400;
+// If backend socket TTS is late/unavailable, trigger client-side TTS quickly
+// so the interviewer still speaks right after text appears.
+const AGENT_TTS_FALLBACK_MS = Math.max(0, Number(import.meta.env.VITE_AGENT_TTS_FALLBACK_MS || 2500));
 
 const FILLER_TOKENS = new Set([
   'uh', 'um', 'hmm', 'huh', 'boom', 'hello', 'please', 'ok', 'okay', 'all', 'right', 'yes', 'no', 'i', 'the',
@@ -72,16 +87,92 @@ const WHISPER_HALLUCINATION_PHRASES = new Set([
   'oh',
   'oh oh',
   'hello hello',
+  'and i was beginning',
+  'from the more than that is',
+  "i'm going to say",
 ]);
 
+// Phrasal hallucination patterns: longer outputs whisper fabricates by
+// repeating modal/auxiliary structures ("be able to be able to ...",
+// "going to be ... going to be ..."). These don't match exactly so we
+// detect them by structural shape.
+const WHISPER_HALLUCINATION_PATTERNS = [
+  // "be able to be able to" repetitions
+  /\b(?:be|to be|going to be)\s+able\s+to\s+(?:be\s+able\s+to\s+){1,}/i,
+  // "going to ... going to ... going to" with no concrete content
+  /\b(?:i'?m|we'?re|you'?re|going)\s+going\s+to\b.*\bgoing\s+to\b.*\bgoing\s+to\b/i,
+  // Pure modal-chain hallucinations that have no nouns/verbs of substance
+  /^\s*(?:i\s+)?think\s+(?:it'?s|it\s+is)\s+been\s+able\s+to\b/i,
+  // "from the more than that is" / "more than that is" filler chains
+  /\b(?:from\s+the\s+)?more\s+than\s+that\s+is\b/i,
+];
+
+const normalizeAgentLanguage = (value, fallback = 'en') => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized.startsWith('fr') || normalized === 'french' || normalized === 'français' || normalized === 'francais') return 'fr';
+  if (normalized.startsWith('en') || normalized === 'english' || normalized === 'anglais') return 'en';
+  return fallback;
+};
+
+const detectRequestedAgentLanguage = (text) => {
+  const normalized = String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return null;
+
+  const frenchSignals = [
+    'speak french',
+    'speak frensh',
+    'ask me in french',
+    'ask me in frensh',
+    'continue in french',
+    'turn this convo in french',
+    'turn this convo in frensh',
+    'turn this conversation in french',
+    'turn this conversation in frensh',
+    'french language',
+    'frensh language',
+    'parle francais',
+    'parlez francais',
+    'en francais',
+    'francais stp',
+    'francais svp',
+  ];
+  if (frenchSignals.some((phrase) => normalized.includes(phrase))) return 'fr';
+
+  const englishSignals = [
+    'speak english',
+    'ask me in english',
+    'continue in english',
+    'parle anglais',
+    'en anglais',
+  ];
+  if (englishSignals.some((phrase) => normalized.includes(phrase))) return 'en';
+
+  return null;
+};
+
 const isWhisperHallucination = (text) => {
-  const cleaned = String(text || '')
+  const raw = String(text || '');
+  const cleaned = raw
     .toLowerCase()
     .replaceAll(/[^a-z0-9\s]/g, ' ')
     .replaceAll(/\s+/g, ' ')
     .trim();
   if (!cleaned) return true;
   if (WHISPER_HALLUCINATION_PHRASES.has(cleaned)) return true;
+
+  // Phrasal hallucination patterns (e.g. "able to be able to", "going to be
+  // able to be"). Test against the original (with apostrophes) so contraction-
+  // sensitive patterns still match.
+  for (const pattern of WHISPER_HALLUCINATION_PATTERNS) {
+    if (pattern.test(raw) || pattern.test(cleaned)) return true;
+  }
 
   // Repeated single token like "thank you thank you thank you" — common
   // hallucination shape.
@@ -226,11 +317,14 @@ const collectSttCustomTerms = (room) => {
 
 const parseTranscriptionPayload = (payload) => {
   // Direct speech-stack payload shape.
-  const directText = String(payload?.transcription?.text || '').trim();
+  const direct = payload?.transcription;
+  const directText = String(direct?.text || '').trim();
   if (directText) {
     return {
       text: directText,
       sentiment: payload?.overall_sentiment || { label: 'NEUTRAL', score: 0 },
+      avgLogprob: typeof direct?.avg_logprob === 'number' ? direct.avg_logprob : null,
+      noSpeechProb: typeof direct?.no_speech_prob === 'number' ? direct.no_speech_prob : null,
     };
   }
 
@@ -242,6 +336,8 @@ const parseTranscriptionPayload = (payload) => {
   return {
     text: apiText,
     sentiment,
+    avgLogprob: typeof payload?.avg_logprob === 'number' ? payload.avg_logprob : null,
+    noSpeechProb: typeof payload?.no_speech_prob === 'number' ? payload.no_speech_prob : null,
   };
 };
 
@@ -265,6 +361,18 @@ const CallRoomActive = () => {
   const [isRH, setIsRH] = useState(false);
   const [loading, setLoading] = useState(true);
   const [socketClient, setSocketClient] = useState(null);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [endingCall, setEndingCall] = useState(false);
+  // Candidate must enable mic before we start the interview.
+  const [micReady, setMicReady] = useState(false);
+  const [interviewStarting, setInterviewStarting] = useState(false);
+  const [visionStatus, setVisionStatus] = useState(null);
+  const [visionReport, setVisionReport] = useState(null);
+  const [elapsed, setElapsed] = useState(0);
+  const webcamVideoRef  = useRef(null);
+  const webcamStreamRef = useRef(null);
+  const elapsedTimerRef = useRef(null);
+  const conversationRef = useRef(null);
   
   const fullRecorderRef = useRef(null);   // single long-running recorder (full call)
   const allAudioChunksRef = useRef([]);   // chunks from the full recorder
@@ -291,6 +399,7 @@ const CallRoomActive = () => {
   const activeAgentAudioUrlRef = useRef('');
   const latestAgentTtsRequestIdRef = useRef(0);
   const lastAgentVoiceKeyRef = useRef('');
+  const agentLanguageRef = useRef('en');
   const agentTtsFallbackTimerRef = useRef(null);
   // When the Streamoji avatar widget reports ready, it stores its imperative
   // actions ({ avatarSpeak, replayAvatarSpeak, ... }) here. While this ref
@@ -303,6 +412,10 @@ const CallRoomActive = () => {
   const lastSttSegmentRef = useRef(null);
   const sttSilenceTimerRef = useRef(null);
   const sttLastSentIdRef = useRef(null); // track sent segments to avoid duplicates
+  // Hold the mic muted briefly after the agent's TTS audio ends so the
+  // speaker's acoustic tail can't be transcribed as the candidate.
+  const postTtsDeadZoneTimerRef = useRef(null);
+  const postTtsDeadZoneActiveRef = useRef(false);
   const sttPendingReplyRef = useRef({
     text: '',
     sentiment: null,
@@ -330,13 +443,13 @@ const CallRoomActive = () => {
   };
 
   const tryStartAgentIntro = ({ force = false, prepare = false } = {}) => {
-    if (isRHRef.current || agentSessionReadyRef.current || !roomDbIdRef.current) return;
+    if (isRHRef.current || agentSessionReadyRef.current) return;
     if (introStartRequestedRef.current) return;
-    if (!force && !prepare && !recordingActiveRef.current) return;
+    if (!recordingActiveRef.current) return;
 
     const socket = socketRef.current;
     if (!socket || !socket.connected) {
-      if (introKickoffAttemptsRef.current >= 6 || (!prepare && !recordingActiveRef.current)) return;
+      if (introKickoffAttemptsRef.current >= 6 || !recordingActiveRef.current) return;
       if (introKickoffTimerRef.current) return;
       introKickoffTimerRef.current = setTimeout(() => {
         introKickoffTimerRef.current = null;
@@ -367,6 +480,16 @@ const CallRoomActive = () => {
 
   const token = localStorage.getItem('token');
   const userId = localStorage.getItem('userId');
+
+  useIntegrityEvents({
+    active: isRecording && cameraOn && !isRH,
+    interviewId: roomDbId,
+    questionId: room?.currentQuestion || '',
+    token,
+    apiBase: API_BASE,
+    visionState: visionStatus,
+    videoRef: webcamVideoRef,
+  });
 
   const emitAgentThinkingState = (thinking) => {
     globalThis.dispatchEvent(
@@ -414,6 +537,10 @@ const CallRoomActive = () => {
   };
 
   const playAgentAudioBlob = async (blob, text, { announceStart = false } = {}) => {
+    if (!recordingActiveRef.current || isRHRef.current) {
+      return false;
+    }
+
     if (!(blob instanceof Blob) || blob.size <= 0) {
       return false;
     }
@@ -423,6 +550,8 @@ const CallRoomActive = () => {
     const objectUrl = URL.createObjectURL(blob);
     const audio = new Audio(objectUrl);
     audio.preload = 'auto';
+    // Expose for RealFaceAvatar's Web Audio analyzer
+    window.__agentAudioEl = audio;
     activeAgentAudioRef.current = audio;
     activeAgentAudioUrlRef.current = objectUrl;
 
@@ -488,9 +617,11 @@ const CallRoomActive = () => {
   };
 
   const fetchAgentTtsAudio = async (text) => {
+    const language = normalizeAgentLanguage(agentLanguageRef.current, detectRequestedAgentLanguage(text) || 'en');
     const body = JSON.stringify({
       text,
-      language: 'en',
+      language,
+      provider: 'edge',
     });
 
     try {
@@ -550,7 +681,9 @@ const CallRoomActive = () => {
         text: normalizedText,
         createdAt: Date.now(),
       };
-      await playAgentAudioBlob(blob, normalizedText, { announceStart: true });
+      if (recordingActiveRef.current) {
+        await playAgentAudioBlob(blob, normalizedText, { announceStart: true });
+      }
     } catch (error) {
       if (requestId !== latestAgentTtsRequestIdRef.current) {
         return;
@@ -564,10 +697,7 @@ const CallRoomActive = () => {
 
   const playPreparedAgentTts = async () => {
     const latest = latestAgentTtsRef.current;
-    if (!latest?.blob || isRHRef.current) return false;
-    // Streamoji owns the voice when its widget is up — don't replay
-    // a stale ElevenLabs blob on top of Streamoji's TTS.
-    if (streamojiActionsRef.current?.avatarSpeak) return false;
+    if (!latest?.blob || isRHRef.current || !recordingActiveRef.current) return false;
     await playAgentAudioBlob(latest.blob, latest.text || room?.currentQuestion || '', { announceStart: true });
     return true;
   };
@@ -575,6 +705,7 @@ const CallRoomActive = () => {
   useEffect(() => {
     latestAgentTtsRequestIdRef.current += 1;
     lastAgentVoiceKeyRef.current = '';
+    agentLanguageRef.current = 'en';
     latestAgentTtsRef.current = null;
     clearAgentTtsFallback();
     stopAgentAudioPlayback({ emitStopped: true });
@@ -584,19 +715,24 @@ const CallRoomActive = () => {
   useEffect(() => {
     const fetchRoom = async () => {
       try {
+        console.log('🔍 Fetching room details for roomId:', roomId);
         const response = await fetch(`${API_BASE}/api/call-rooms/by-room/${encodeURIComponent(roomId)}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
+        console.log('🔍 Room fetch response status:', response.status);
         const data = await response.json();
+        console.log('🔍 Room fetch response data:', data);
         if (data.success && data.room) {
+          console.log('✅ Room loaded successfully:', data.room.roomId);
           setRoom(data.room);
           setRoomDbId(data.room._id);
           setIsRH(data.room.initiator?._id === userId);
+          setVisionReport(data.room.visionMonitoring?.report || null);
         } else {
-          console.warn('Room not found or invalid response:', data);
+          console.warn('❌ Room not found or invalid response:', data);
         }
       } catch (error) {
-        console.error('Failed to fetch room:', error);
+        console.error('❌ Failed to fetch room:', error);
       } finally {
         setLoading(false);
       }
@@ -605,6 +741,7 @@ const CallRoomActive = () => {
     if (roomId && token && userId) {
       fetchRoom();
     } else {
+      console.log('⏭️ Skipping room fetch - missing:', { roomId: !!roomId, token: !!token, userId: !!userId });
       setLoading(false);
     }
   }, [roomId, token, userId]);
@@ -618,15 +755,20 @@ const CallRoomActive = () => {
     isRHRef.current = isRH;
   }, [isRH]);
 
+  // Elapsed call timer
   useEffect(() => {
-    if (isRH || !roomDbId || !socketClient?.connected) return;
-    tryStartAgentIntro({ prepare: true });
-  }, [isRH, roomDbId, socketClient]);
+    elapsedTimerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(elapsedTimerRef.current);
+  }, []);
+
+  // Candidate intro is started by the explicit "Start Call" button
+  // (after mic + camera are enabled). Recruiter auto-start is handled by
+  // AgentChatPanel, so we don't need to force anything here.
 
   // Capture Streamoji's imperative actions when its widget reports ready,
-  // and clear them on teardown. While streamojiActionsRef is non-null,
-  // handleAgentMessage routes NIM-generated text through avatarSpeak()
-  // instead of triggering ElevenLabs playback — Streamoji owns the voice.
+  // and clear them on teardown. ElevenLabs remains the primary voice path
+  // for recruiter/enterprise agent turns; this ref is kept only for legacy
+  // widget compatibility.
   useEffect(() => {
     if (globalThis.__streamojiActions) {
       streamojiActionsRef.current = globalThis.__streamojiActions;
@@ -647,9 +789,11 @@ const CallRoomActive = () => {
 
   useEffect(() => {
     if (!token || isTokenExpired(token)) {
+      console.log('⏭️ Skipping socket setup - missing or expired token');
       return undefined;
     }
 
+    console.log('🔌 Setting up socket.io connection to:', API_BASE);
     socketRef.current = io(API_BASE, {
       auth: { token },
       transports: ['websocket', 'polling'],
@@ -659,25 +803,31 @@ const CallRoomActive = () => {
     });
     setSocketClient(socketRef.current);
 
+    socketRef.current.on('connect', () => {
+      console.log('✅ Socket connected');
+      // Candidate interview intro is started explicitly by the "Start Call" button.
+    });
+
     socketRef.current.on('connect_error', (error) => {
+      console.error('❌ Socket connection error:', error?.message);
       if (error?.message === 'TOKEN_EXPIRED') {
         console.warn('Socket session expired in active room. Please login again.');
         socketRef.current?.disconnect();
       }
     });
-    socketRef.current.on('connect', () => {
-      tryStartAgentIntro({ prepare: true });
-    });
 
     // Join room-specific channel
+    console.log('📍 Emitting join-room with roomId:', roomId);
     socketRef.current.emit('join-room', { roomId });
 
     // Listen for transcription updates — auto-send finalized segments to agent after silence
     const handleTranscriptionUpdate = ({ segment, sentiment }) => {
-      if (!segment?.text) return;
+      if (!segment?.text) {
+        console.log('🔇 Transcription update with empty text, skipping');
+        return;
+      }
 
-      // Drop Whisper hallucinations from the RH dashboard feed too so the
-      // recruiter doesn't see "Thank you." / "That's it." spam from silence.
+      console.log('📝 Transcription update received:', segment.text, { sentiment });
       if (isWhisperHallucination(segment.text)) {
         return;
       }
@@ -719,9 +869,14 @@ const CallRoomActive = () => {
 
       // Drop segments captured while the AI is speaking or mid-generation —
       // otherwise its own TTS voice feeds back through the mic and gets sent
-      // as the "answer", or our in-flight turn collides with a new one.
-      if (agentSpeakingRef.current || agentThinkingRef.current) {
-        console.log('🔇 Dropping STT segment — agent busy (speaking/thinking)');
+      // as the "answer", or our in-flight turn collides with a new one. Also
+      // honour the post-TTS dead zone (speaker tail / reverb).
+      if (
+        agentSpeakingRef.current ||
+        agentThinkingRef.current ||
+        postTtsDeadZoneActiveRef.current
+      ) {
+        console.log('🔇 Dropping STT segment — agent busy or post-TTS dead zone');
         return;
       }
       // Compare against a rolling window of the last 3 agent messages, not
@@ -753,6 +908,7 @@ const CallRoomActive = () => {
 
       // Update the live draft bubble visible in the chat panel — local event
       // for the candidate view, socket broadcast for the RH dashboard.
+      console.log('✏️ Updating draft bubble with STT segment:', normalizedMerged);
       setDraftText(normalizedMerged);
       globalThis.dispatchEvent(
         new CustomEvent('candidate-draft-update', {
@@ -787,25 +943,26 @@ const CallRoomActive = () => {
         const segmentId = finalText.toLowerCase();
         if (sttLastSentIdRef.current === segmentId) return;
 
-        console.log('🎤 Auto-sending STT segment to agent:', finalText);
-        // Clear draft before forwarding finalized candidate text.
-        setDraftText('');
-        globalThis.dispatchEvent(
-          new CustomEvent('candidate-draft-update', { detail: { text: '', sentiment: null } }),
-        );
-        socketRef.current?.emit('candidate:draft', {
-          roomId,
-          roomDbId: roomDbIdRef.current,
-          text: '',
-        });
-        // Always surface the candidate's speech as a real chat bubble — even
-        // if the agent session isn't live yet. This is the proof the STT
-        // pipeline caught what they said.
-        globalThis.dispatchEvent(
-          new CustomEvent('candidate-local-message', {
-            detail: { text: finalText, sentiment: current.sentiment, ts: Date.now() },
-          }),
-        );
+      console.log('🎤 Auto-sending STT segment to agent:', finalText);
+      // Clear draft before forwarding finalized candidate text.
+      setDraftText('');
+      globalThis.dispatchEvent(
+        new CustomEvent('candidate-draft-update', { detail: { text: '', sentiment: null } }),
+      );
+      socketRef.current?.emit('candidate:draft', {
+        roomId,
+        roomDbId: roomDbIdRef.current,
+        text: '',
+      });
+      // Always surface the candidate's speech as a real chat bubble — even
+      // if the agent session isn't live yet. This is the proof the STT
+      // pipeline caught what they said.
+      console.log('📢 Dispatching candidate-local-message event:', finalText);
+      globalThis.dispatchEvent(
+        new CustomEvent('candidate-local-message', {
+          detail: { text: finalText, sentiment: current.sentiment, ts: Date.now() },
+        }),
+      );
         if (!agentSessionReadyRef.current) {
           console.log('⏸ Agent session not ready — bubble shown, not forwarding to LLM yet');
           sttLastSentIdRef.current = segmentId;
@@ -817,13 +974,52 @@ const CallRoomActive = () => {
         setAgentThinking(true);
         emitAgentThinkingState(true);
         setMicEnabled(false);
-        socketRef.current?.emit('agent:candidate-turn', {
+        const requestedLanguage = detectRequestedAgentLanguage(finalText);
+        if (requestedLanguage) {
+          agentLanguageRef.current = requestedLanguage;
+        }
+        const sock = socketRef.current;
+        const turnSentAt = Date.now();
+        console.log('📤 Emitting agent:candidate-turn', {
+          connected: !!sock?.connected,
+          roomId,
+          roomDbId: roomDbIdRef.current,
+          chars: finalText.length,
+        });
+        sock?.emit('agent:candidate-turn', {
           roomId,
           roomDbId: roomDbIdRef.current,
           text: finalText,
           sentiment: current.sentiment,
           source: 'voice',
+          requestedLanguage,
         });
+        // Surface a clear console error if the backend doesn't reply within
+        // 45s. NVIDIA NIM occasionally stalls; without this, the candidate
+        // sees only silence and has no way to know what failed.
+        const stallTimer = setTimeout(() => {
+          if (!agentThinkingRef.current) return;
+          console.error(
+            `🟥 agent:candidate-turn TIMEOUT after ${Math.round(
+              (Date.now() - turnSentAt) / 1000,
+            )}s — no agent:message or agent:error from server. ` +
+              'Check the Node terminal for "agent:candidate-turn failed:" and the ' +
+              'Python agent_server (:8013) terminal for NVIDIA NIM errors.',
+          );
+          agentThinkingRef.current = false;
+          setAgentThinking(false);
+          emitAgentThinkingState(false);
+          if (recordingActiveRef.current && !agentSpeakingRef.current) {
+            setMicEnabled(true);
+          }
+        }, 45000);
+        const clearStallOnce = () => {
+          clearTimeout(stallTimer);
+          sock?.off('agent:message', clearStallOnce);
+          sock?.off('agent:error', clearStallOnce);
+        };
+        sock?.once('agent:message', clearStallOnce);
+        sock?.once('agent:error', clearStallOnce);
         sttLastSentIdRef.current = segmentId;
         sttPendingReplyRef.current = {
           text: '',
@@ -837,8 +1033,9 @@ const CallRoomActive = () => {
     socketRef.current.on('transcription-update', handleTranscriptionUpdate);
 
     // Listen for agent messages — update room state for candidate view
-    const handleAgentMessage = ({ text, skillFocus, difficulty, phase, turnIndex }) => {
+    const handleAgentMessage = ({ text, skillFocus, difficulty, phase, turnIndex, language }) => {
       agentSessionReadyRef.current = true;
+      agentLanguageRef.current = normalizeAgentLanguage(language, agentLanguageRef.current);
       clearIntroKickoffRetry();
       agentThinkingRef.current = false; // agent has replied — unlock on TTS end
       setAgentThinking(false);
@@ -854,7 +1051,7 @@ const CallRoomActive = () => {
         sttSilenceTimerRef.current = null;
       }
       sttPendingReplyRef.current = { text: '', sentiment: null, startedAt: 0, updatedAt: 0 };
-      console.log('🤖 Agent message received:', text);
+      console.log('🤖 Agent message received:', text, { skillFocus, difficulty, phase, turnIndex, language: agentLanguageRef.current });
 
       const normalizedText = String(text || '').trim();
       if (!isRHRef.current && normalizedText) {
@@ -862,27 +1059,10 @@ const CallRoomActive = () => {
         lastAgentVoiceKeyRef.current = voiceKey;
         clearAgentTtsFallback();
 
-        // If Streamoji's avatar widget is mounted + ready, route the agent's
-        // text through avatarSpeak() so the avatar speaks AND lip-syncs the
-        // words. We bypass the ElevenLabs path entirely while Streamoji is
-        // the voice — otherwise both would try to play the same answer.
-        const streamojiSpeak = streamojiActionsRef.current?.avatarSpeak;
-        if (streamojiSpeak) {
-          // Stop any in-flight ElevenLabs playback from a prior turn, just
-          // in case agent:tts arrives between turns.
-          stopAgentAudioPlayback({ emitStopped: false });
-          streamojiSpeakKeyRef.current = voiceKey;
-          emitAgentSpeechState(true, normalizedText);
-          Promise.resolve(streamojiSpeak(normalizedText))
-            .catch((err) => console.warn('Streamoji avatarSpeak failed:', err))
-            .finally(() => {
-              if (streamojiSpeakKeyRef.current === voiceKey) {
-                emitAgentSpeechState(false);
-              }
-            });
-        } else if (AGENT_TTS_FALLBACK_MS > 0) {
-          // No Streamoji — fall back to backend ElevenLabs (via agent:tts)
-          // with a delayed direct-fetch as last resort.
+        // Allow backend agent:tts to arrive first; if it does not, fall back
+        // to a direct ElevenLabs fetch after a short delay.
+        if (AGENT_TTS_FALLBACK_MS > 0) {
+          console.log('🎙️ Setting up ElevenLabs fallback TTS in', AGENT_TTS_FALLBACK_MS, 'ms');
           agentTtsFallbackTimerRef.current = setTimeout(() => {
             if (lastAgentVoiceKeyRef.current === voiceKey) {
               void requestAgentTtsPlayback(normalizedText, voiceKey);
@@ -908,13 +1088,11 @@ const CallRoomActive = () => {
     const handleAgentTts = (payload) => {
       if (payload?.roomId && payload.roomId !== roomId) return;
       if (isRHRef.current) return;
-      // Streamoji owns the voice when its widget is mounted and ready —
-      // ignore the backend's ElevenLabs push so we don't get two voices.
-      if (streamojiActionsRef.current?.avatarSpeak) return;
 
       const spokenText = String(payload?.text || '').trim();
       const sourceText = String(payload?.sourceText || payload?.text || '').trim();
       if (!spokenText || !payload?.audioBase64) return;
+      agentLanguageRef.current = normalizeAgentLanguage(payload?.language, agentLanguageRef.current);
 
       const voiceKey = `${String(roomDbIdRef.current || roomId || '').trim()}::${payload?.turnIndex ?? 'na'}::${sourceText || spokenText}`;
       if (lastAgentVoiceKeyRef.current && lastAgentVoiceKeyRef.current !== voiceKey) {
@@ -937,15 +1115,27 @@ const CallRoomActive = () => {
           sourceText,
           createdAt: Date.now(),
         };
-        if (recordingActiveRef.current) {
-          void playAgentAudioBlob(blob, spokenText, { announceStart: true });
-        }
+        // Play backend-provided TTS immediately regardless of whether the
+        // candidate has started recording. This lets the agent introduce
+        // themselves as soon as the candidate joins the room.
+        void playAgentAudioBlob(blob, spokenText, { announceStart: true });
       } catch (error) {
         console.error('Failed to play backend ElevenLabs audio:', error);
         void requestAgentTtsPlayback(sourceText || spokenText, voiceKey);
       }
     };
     socketRef.current.on('agent:tts', handleAgentTts);
+
+    const handleAgentTtsUnavailable = (payload) => {
+      if (payload?.roomId && payload.roomId !== roomId) return;
+      if (isRHRef.current) return;
+      const fallbackText = String(payload?.text || '').trim();
+      if (!fallbackText) return;
+      agentLanguageRef.current = normalizeAgentLanguage(payload?.language, agentLanguageRef.current);
+      clearAgentTtsFallback();
+      void requestAgentTtsPlayback(fallbackText);
+    };
+    socketRef.current.on('agent:tts-unavailable', handleAgentTtsUnavailable);
 
     // Recover from a failed turn: NIM occasionally returns 502/timeout. When
     // that happens, agentThinkingRef would otherwise stay true forever and
@@ -970,16 +1160,45 @@ const CallRoomActive = () => {
       const speaking = !!ev?.detail?.speaking;
       agentSpeakingRef.current = speaking;
       setAgentSpeaking(speaking);
-      // Physically mute the mic track, not just a flag — prevents the TTS
-      // from being captured and then transcribed as the candidate's answer.
-      setMicEnabled(!speaking && !agentThinkingRef.current);
+
       if (speaking) {
+        // Cancel any pending mic re-enable from a previous speech end.
+        if (postTtsDeadZoneTimerRef.current) {
+          clearTimeout(postTtsDeadZoneTimerRef.current);
+          postTtsDeadZoneTimerRef.current = null;
+        }
+        postTtsDeadZoneActiveRef.current = true;
+        // Physically mute the mic track, not just a flag — prevents the TTS
+        // from being captured and then transcribed as the candidate's answer.
+        setMicEnabled(false);
         if (sttSilenceTimerRef.current) {
           clearTimeout(sttSilenceTimerRef.current);
           sttSilenceTimerRef.current = null;
         }
         sttPendingReplyRef.current = { text: '', sentiment: null, startedAt: 0, updatedAt: 0 };
+        return;
       }
+
+      // Speech just ended. Hold the mic muted for POST_TTS_MIC_DEAD_ZONE_MS
+      // so the speaker tail / room reverb doesn't get captured and
+      // transcribed as the candidate's reply.
+      if (postTtsDeadZoneTimerRef.current) {
+        clearTimeout(postTtsDeadZoneTimerRef.current);
+      }
+      postTtsDeadZoneActiveRef.current = true;
+      setMicEnabled(false);
+      postTtsDeadZoneTimerRef.current = setTimeout(() => {
+        postTtsDeadZoneTimerRef.current = null;
+        postTtsDeadZoneActiveRef.current = false;
+        // Only re-enable if nothing else is gating the mic now.
+        if (
+          recordingActiveRef.current &&
+          !agentSpeakingRef.current &&
+          !agentThinkingRef.current
+        ) {
+          setMicEnabled(true);
+        }
+      }, POST_TTS_MIC_DEAD_ZONE_MS);
     };
     globalThis.addEventListener('agent-speech', handleAgentSpeech);
 
@@ -1000,6 +1219,11 @@ const CallRoomActive = () => {
         clearTimeout(sttSilenceTimerRef.current);
         sttSilenceTimerRef.current = null;
       }
+      if (postTtsDeadZoneTimerRef.current) {
+        clearTimeout(postTtsDeadZoneTimerRef.current);
+        postTtsDeadZoneTimerRef.current = null;
+      }
+      postTtsDeadZoneActiveRef.current = false;
       clearIntroKickoffRetry();
       introStartRequestedRef.current = false;
       sttPendingReplyRef.current = {
@@ -1018,6 +1242,7 @@ const CallRoomActive = () => {
       socketRef.current?.off('transcription-update');
       socketRef.current?.off('agent:message');
       socketRef.current?.off('agent:tts');
+      socketRef.current?.off('agent:tts-unavailable');
       socketRef.current?.off('agent:error');
       socketRef.current?.off('call-room-ended');
       socketRef.current?.off('connect');
@@ -1025,6 +1250,7 @@ const CallRoomActive = () => {
       socketRef.current?.off('connect_error');
       socketRef.current?.off('transcription-update', handleTranscriptionUpdate);
       socketRef.current?.off('agent:tts', handleAgentTts);
+      socketRef.current?.off('agent:tts-unavailable', handleAgentTtsUnavailable);
       socketRef.current?.disconnect();
       setSocketClient(null);
     };
@@ -1035,6 +1261,7 @@ const CallRoomActive = () => {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
+    setMicReady(false);
   };
 
   const getRecorderMimeType = () => {
@@ -1094,8 +1321,12 @@ const CallRoomActive = () => {
     if (!analyser) return;
 
     // Don't arm a new utterance while the AI is speaking or composing — its
-    // TTS would be captured and misread as the candidate's answer.
-    const gated = agentSpeakingRef.current || agentThinkingRef.current;
+    // TTS would be captured and misread as the candidate's answer. The post-
+    // TTS dead zone covers the speaker tail / room reverb after audio ends.
+    const gated =
+      agentSpeakingRef.current ||
+      agentThinkingRef.current ||
+      postTtsDeadZoneActiveRef.current;
 
     const buf = new Float32Array(analyser.fftSize);
     analyser.getFloatTimeDomainData(buf);
@@ -1174,9 +1405,11 @@ const CallRoomActive = () => {
   };
 
   // Start audio recording
-  const startRecording = async () => {
+  const requestMicrophoneStream = async () => {
     try {
-      if (recordingActiveRef.current) {
+      if (micReady || recordingActiveRef.current) return;
+      if (streamRef.current) {
+        setMicReady(true);
         return;
       }
 
@@ -1190,8 +1423,40 @@ const CallRoomActive = () => {
           sampleSize: 16,
         },
       });
+
       streamRef.current = stream;
+      streamRef.current.getAudioTracks().forEach((track) => {
+        track.enabled = true;
+      });
+
+      recordingActiveRef.current = false;
+      setMicReady(true);
+    } catch (error) {
+      console.error('Failed to access microphone:', error);
+      alert('Failed to access microphone. Please check browser permissions.');
+      setMicReady(false);
+    }
+  };
+
+  // Start interview (VAD + STT + agent session)
+  const startRecording = async () => {
+    try {
+      if (recordingActiveRef.current) {
+        return;
+      }
+
+      if (!streamRef.current) {
+        alert('Enable the microphone first.');
+        return;
+      }
+      if (!cameraOn) {
+        alert('Enable the camera first (required to start the call UI).');
+        return;
+      }
+
+      const stream = streamRef.current;
       recordingActiveRef.current = true;
+      setMicEnabled(true);
       lastTranscriptRef.current = '';
 
       // ── Full-call recorder (one continuous session = valid single WebM) ──
@@ -1215,11 +1480,16 @@ const CallRoomActive = () => {
       startVad();
       setIsRecording(true);
 
-      void playPreparedAgentTts();
+      void playPreparedAgentTts().then((played) => {
+        if (!played && lastAgentTextRef.current) {
+          void requestAgentTtsPlayback(lastAgentTextRef.current, lastAgentVoiceKeyRef.current);
+        }
+      });
 
-      // Candidate-initiated fallback: if the interviewer voice was not ready
-      // from preloading, kick it off now and play when it arrives.
-      tryStartAgentIntro({ force: true });
+      // Candidate explicitly started the interview. Always request intro with
+      // TTS preparation so first turn appears as text + speech together.
+      setInterviewStarting(true);
+      tryStartAgentIntro({ force: true, prepare: true });
     } catch (error) {
       console.error('Failed to start recording:', error);
       alert('Failed to access microphone');
@@ -1231,6 +1501,8 @@ const CallRoomActive = () => {
 
     stopVad();
     stopMicrophoneStream();
+    clearAgentTtsFallback();
+    stopAgentAudioPlayback({ emitStopped: true });
 
     // Stop the full-call recorder — triggers ondataavailable then onstop
     if (fullRecorderRef.current?.state === 'recording') {
@@ -1303,6 +1575,28 @@ const CallRoomActive = () => {
       text = parsed.text;
       sentiment = parsed.sentiment;
 
+      // Confidence gate: drop low-confidence transcripts before they reach
+      // the agent. avg_logprob is mean per-token log probability from
+      // faster-whisper; values below STT_MIN_AVG_LOGPROB are typically
+      // hallucinations from silence/noise. no_speech_prob > threshold means
+      // the model itself thinks the audio was silence.
+      if (text && parsed.avgLogprob != null && parsed.avgLogprob < STT_MIN_AVG_LOGPROB) {
+        console.log(
+          '🔇 Dropping low-confidence STT segment:',
+          text,
+          `(avg_logprob=${parsed.avgLogprob.toFixed(2)} < ${STT_MIN_AVG_LOGPROB})`,
+        );
+        return;
+      }
+      if (text && parsed.noSpeechProb != null && parsed.noSpeechProb > STT_MAX_NO_SPEECH_PROB) {
+        console.log(
+          '🔇 Dropping silence-classified STT segment:',
+          text,
+          `(no_speech_prob=${parsed.noSpeechProb.toFixed(2)} > ${STT_MAX_NO_SPEECH_PROB})`,
+        );
+        return;
+      }
+
       if (text && roomDbId) {
         lastTranscriptRef.current = text;
 
@@ -1350,7 +1644,32 @@ const CallRoomActive = () => {
     }
   };
 
+  const toggleCamera = async () => {
+    if (cameraOn) {
+      webcamStreamRef.current?.getTracks().forEach((t) => t.stop());
+      webcamStreamRef.current = null;
+      if (webcamVideoRef.current) webcamVideoRef.current.srcObject = null;
+      setCameraOn(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        webcamStreamRef.current = stream;
+        if (webcamVideoRef.current) webcamVideoRef.current.srcObject = stream;
+        setCameraOn(true);
+      } catch (e) {
+        console.warn('[Camera] access denied or unavailable:', e.message);
+      }
+    }
+  };
+
   const endCall = async () => {
+    if (!roomDbId || endingCall) return;
+    setEndingCall(true);
+    clearAgentTtsFallback();
+    stopAgentAudioPlayback({ emitStopped: true });
+    webcamStreamRef.current?.getTracks().forEach((t) => t.stop());
+    clearInterval(elapsedTimerRef.current);
+
     try {
       // Stop both recorders, then wait until the full-call recorder has
       // flushed its data (ondataavailable + onstop) before we upload.
@@ -1364,16 +1683,23 @@ const CallRoomActive = () => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      const data = await response.json();
-      if (data.success) {
-        // allAudioChunksRef is fully populated now — upload in background
-        uploadRecording(roomDbId);
-        socketRef.current?.emit('end-call-room', { roomId, roomDbId });
-        alert('Call ended');
-        globalThis.history.back();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || `End call failed (${response.status})`);
       }
+
+      if (data.room?.visionMonitoring?.report) {
+        setVisionReport(data.room.visionMonitoring.report);
+      }
+
+      await uploadRecording(roomDbId);
+      socketRef.current?.emit('agent:end-session', { roomId, roomDbId });
+      socketRef.current?.emit('end-call-room', { roomId, roomDbId });
+      globalThis.history.back();
     } catch (error) {
       console.error('Failed to end call:', error);
+      alert(error?.message || 'Failed to end call. Please try again.');
+      setEndingCall(false);
     }
   };
 
@@ -1385,174 +1711,239 @@ const CallRoomActive = () => {
     );
   }
 
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(elapsed % 60).padStart(2, '0');
+
   return (
     <PublicLayout>
-      <div className="call-room-active">
-        <div className="call-header">
-          <h1>Interview Call - {room?.roomId}</h1>
-          <div className="call-info">
-            <span className="badge-recording">🔴 Recording</span>
-            <span className="call-duration">Duration: {room?.recordingStartedAt ? Math.round((new Date() - new Date(room.recordingStartedAt)) / 1000) : 0}s</span>
+      <div className="cr-root">
+
+        {/* ── Header ─────────────────────────────────────────── */}
+        <header className="cr-header">
+          <div className="cr-header__left">
+            <span className="cr-logo">NextHire</span>
+            <span className="cr-room-name">Interview · {room?.roomId}</span>
           </div>
-        </div>
-
-        <div className="call-container">
-          {!isRH && (
-            <div className="streamoji-widget-layer" aria-label="AI interviewer avatar">
-              <StreamojiAvatarWrapper />
-            </div>
-          )}
-
-          {/* Audio Controls — prominent recording button */}
-          <div className="audio-section">
-            <div className="microphone-indicator">
-              <div className={`indicator-dot ${isRecording ? 'recording' : ''}`}></div>
-              {isRecording ? 'Microphone Active' : 'Microphone Off'}
-            </div>
-
-            <div className="control-buttons">
-              {!isRecording ? (
-                <button className="btn-start-recording" onClick={startRecording}>
-                  🎤 Start Recording
-                </button>
-              ) : (
-                <button className="btn-stop-recording" onClick={stopRecording}>
-                  ⏹ Stop Recording
-                </button>
-              )}
-
-              <button className="btn-end-call" onClick={endCall} disabled={!roomDbId}>
-                📞 End Call
-              </button>
-            </div>
+          <div className="cr-header__center">
+            <span className="cr-timer">{mm}:{ss}</span>
           </div>
+          <div className="cr-header__right">
+            {isRecording && <span className="cr-badge-rec">● REC</span>}
+            <button className="cr-btn-end" onClick={endCall} disabled={!roomDbId || endingCall}>
+              {endingCall ? 'Leaving...' : 'Leave'}
+            </button>
+          </div>
+        </header>
 
-          {/* Adaptive AI interviewer panel — visible to both RH and candidate — BELOW RECORDING BUTTON */}
-          {roomDbId && (
-            <div className="agent-panel-wrapper" style={{ margin: '16px 0' }}>
-              <AgentChatPanel
-                socket={socketClient}
-                roomId={roomId}
-                roomDbId={roomDbId}
-                isRH={isRH}
-                candidateDraftText={!isRH ? draftText : null}
-              />
-            </div>
-          )}
+        {/* ── Main grid ──────────────────────────────────────── */}
+        <main className="cr-main">
 
-          {/* RH Dashboard - Transcription View */}
-          {isRH && (
-            <div className="rh-dashboard">
-              <div className="dashboard-header">
-                <h2>Interview Dashboard</h2>
-                <span className="candidate-info">
-                  Candidate: {room?.candidate?.email}
-                </span>
+          {/* Left column — video tiles */}
+          <div className="cr-left">
+
+            {/* AI Interviewer tile — fills left panel, cam is PiP overlay */}
+            <div className="cr-tile cr-tile--ai">
+              <div className="cr-tile__label">
+                <span className="cr-tile__label-dot" /> AI Interviewer
+              </div>
+              {!isRH
+                ? <InterviewAvatar />
+                : <div className="cr-tile__placeholder">RH View</div>}
+              <div className={`cr-tile__status ${agentSpeaking ? 'speaking' : agentThinking ? 'thinking' : 'idle'}`}>
+                {agentSpeaking ? '🗣 Speaking' : agentThinking ? '💭 Thinking…' : '🎧 Listening'}
               </div>
 
-              <div className="transcription-panel">
-                <h3>Live Transcription & Sentiment</h3>
-                <div className="transcription-feed">
+              {/* Picture-in-Picture: candidate cam overlaid on avatar */}
+              {!isRH && (
+                <div className="cr-pip">
+                  <div className="cr-pip__label">You</div>
+                  <video
+                    ref={webcamVideoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className={`cr-cam-video${cameraOn ? '' : ' cr-cam-video--off'}`}
+                  />
+                  {!cameraOn && (
+                    <div className="cr-cam-placeholder">
+                      <span>📷</span>
+                      <span>Camera off</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {!isRH && (
+              <VisionMonitor
+                active={cameraOn}
+                interviewId={roomDbId}
+                questionId={room?.currentQuestion || ''}
+                token={token}
+                apiBase={API_BASE}
+                roomStatus={isRecording ? 'active' : (room?.status || 'waiting')}
+                videoRef={webcamVideoRef}
+                onStatusChange={setVisionStatus}
+              />
+            )}
+
+            {/* Control bar */}
+            {!isRH && (
+              <div className="cr-controls">
+                <button
+                  className={`cr-ctrl cr-ctrl--start${(!isRecording && micReady && cameraOn) ? ' cr-ctrl--active' : ''}`}
+                  onClick={async () => {
+                    await startRecording();
+                    // On small screens, Conversation can be below the fold.
+                    setTimeout(() => {
+                      conversationRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }, 60);
+                  }}
+                  disabled={isRecording || !micReady || !cameraOn}
+                >
+                  <span className="cr-ctrl__icon">▶️</span>
+                  <span className="cr-ctrl__label">Start Call</span>
+                </button>
+                <button
+                  className={`cr-ctrl${isRecording || micReady ? ' cr-ctrl--active' : ''}`}
+                  onClick={isRecording
+                    ? stopRecording
+                    : micReady
+                      ? stopMicrophoneStream
+                      : requestMicrophoneStream
+                  }
+                >
+                  <span className="cr-ctrl__icon">{isRecording ? '🔴' : micReady ? '🎙️' : '🎤'}</span>
+                  <span className="cr-ctrl__label">
+                    {isRecording ? 'Mute' : micReady ? 'Disable Mic' : 'Enable Mic'}
+                  </span>
+                </button>
+                <button
+                  className={`cr-ctrl${cameraOn ? ' cr-ctrl--active' : ''}`}
+                  onClick={toggleCamera}
+                >
+                  <span className="cr-ctrl__icon">{cameraOn ? '📷' : '📷'}</span>
+                  <span className="cr-ctrl__label">{cameraOn ? 'Stop Video' : 'Start Video'}</span>
+                </button>
+                <button className="cr-ctrl cr-ctrl--end" onClick={endCall} disabled={!roomDbId || endingCall}>
+                  <span className="cr-ctrl__icon">📞</span>
+                  <span className="cr-ctrl__label">{endingCall ? 'Ending...' : 'End Call'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Right column — chat + transcript */}
+          <div className="cr-right">
+
+            {/* Status bar */}
+            {!isRH && (
+              <div className={`cr-statusbar${agentSpeaking ? ' cr-statusbar--speaking' : agentThinking ? ' cr-statusbar--thinking' : isRecording ? ' cr-statusbar--listening' : ''}`}>
+                <span className="cr-statusbar__dot" />
+                <span className="cr-statusbar__text">
+                  {agentSpeaking
+                    ? 'AI is speaking — please listen'
+                    : agentThinking
+                    ? 'AI is thinking…'
+                    : isRecording
+                    ? 'Listening — speak naturally, then pause'
+                        : !micReady
+                          ? 'Enable microphone to begin'
+                          : !cameraOn
+                            ? 'Enable camera to begin'
+                            : visionStatus?.message || 'Click Start Call'}
+                </span>
+              </div>
+            )}
+
+            {/* Agent chat panel */}
+            {(socketClient && roomId) && (
+              <div className="cr-chat" ref={conversationRef}>
+                <div className="cr-chat-header">
+                  <span className="cr-chat-header__icon">💬</span>
+                  <div>
+                    <div className="cr-chat-header__title">Conversation</div>
+                    <div className="cr-chat-header__sub">Interview transcript</div>
+                  </div>
+                </div>
+                <AgentChatPanel
+                  socket={socketClient}
+                  roomId={roomId}
+                  roomDbId={roomDbId}
+                  isRH={isRH}
+                  candidateDraftText={!isRH ? draftText : null}
+                  interviewStarting={interviewStarting}
+                />
+              </div>
+            )}
+
+            {/* RH transcript panel */}
+            {isRH && (
+              <div className="cr-transcript">
+                <div className="cr-transcript__header">
+                  <h2>Interview Dashboard</h2>
+                  <span>{room?.candidate?.email}</span>
+                </div>
+                <div className="cr-transcript__feed">
                   {room?.transcription?.segments?.length === 0 ? (
-                    <p className="placeholder">Waiting for audio...</p>
+                    <p className="cr-transcript__empty">Waiting for audio…</p>
                   ) : (
-                    room?.transcription?.segments?.map((segment, idx) => (
-                      <div key={idx} className="transcript-item">
-                        <span className="segment-text">{segment.text}</span>
-                        <span
-                          className="segment-sentiment"
-                          style={{
-                            backgroundColor: segment.sentiment?.label === 'POSITIVE' ? '#4CAF50' :
-                                           segment.sentiment?.label === 'NEGATIVE' ? '#f44336' : '#9E9E9E'
-                          }}
-                        >
-                          {segment.sentiment?.label}
-                        </span>
-                        <span className="segment-time">
-                          {new Date(segment.timestamp).toLocaleTimeString()}
-                        </span>
+                    room?.transcription?.segments?.map((seg, idx) => (
+                      // Per-segment sentiment label intentionally omitted —
+                      // emotion is not used in the recruitment decision.
+                      <div key={idx} className="cr-seg">
+                        <span className="cr-seg__text">{seg.text}</span>
+                        <span className="cr-seg__time">{new Date(seg.timestamp).toLocaleTimeString()}</span>
                       </div>
                     ))
                   )}
                 </div>
 
-                {room?.transcription?.overallSentiment && (
-                  <div className="overall-sentiment">
-                    <p><strong>Overall Sentiment:</strong></p>
-                    <div
-                      className="sentiment-badge"
-                      style={{
-                        backgroundColor: room.transcription.overallSentiment.label === 'POSITIVE' ? '#4CAF50' :
-                                       room.transcription.overallSentiment.label === 'NEGATIVE' ? '#f44336' : '#9E9E9E'
-                      }}
-                    >
-                      {room.transcription.overallSentiment.label} ({(room.transcription.overallSentiment.score || 0).toFixed(2)})
-                    </div>
-                  </div>
-                )}
+                {/* Overall sentiment block intentionally omitted — emotion
+                    classification is not part of the recruitment decision. */}
 
                 {room?.transcription?.text && (
-                  <div className="full-transcript">
+                  <div className="cr-full-transcript">
                     <p><strong>Full Transcript:</strong></p>
                     <textarea readOnly value={room.transcription.text} />
                   </div>
                 )}
-              </div>
-            </div>
-          )}
 
-          {/* Candidate View — messenger-style status bar */}
-          {!isRH && (
-            <div className="candidate-view candidate-view--messenger" style={{ position: 'relative' }}>
-              <div
-                className="messenger-statusbar"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  padding: '10px 14px',
-                  background: agentSpeaking
-                    ? '#eff6ff'
-                    : agentThinking
-                    ? '#fef3c7'
-                    : isRecording
-                    ? '#ecfdf5'
-                    : '#f1f5f9',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 10,
-                  marginTop: 8,
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: '50%',
-                      background: agentSpeaking
-                        ? '#3b82f6'
-                        : agentThinking
-                        ? '#f59e0b'
-                        : isRecording
-                        ? '#10b981'
-                        : '#94a3b8',
-                      boxShadow: isRecording || agentSpeaking ? '0 0 0 4px rgba(59,130,246,0.15)' : 'none',
-                    }}
-                  />
-                  <span style={{ fontSize: 14, fontWeight: 600, color: '#1e293b' }}>
-                    {agentSpeaking
-                      ? '🤖 AI is speaking — please listen'
-                      : isRecording
-                      ? '🎤 Listening — speak naturally, pause ~5s when done'
-                      : '👆 Click "🎤 Start Recording" to begin'}
-                  </span>
-                </div>
+                {room?.visionMonitoring?.report || visionReport ? (
+                  <div className="cr-vision-report">
+                    <div className="cr-vision-report__header">
+                      <h3>Vision Monitoring</h3>
+                      <span>{(visionReport || room?.visionMonitoring?.report)?.cameraQuality || 'Unknown'}</span>
+                    </div>
+                    <div className="cr-vision-report__grid">
+                      <div>
+                        <span>Face visibility</span>
+                        <strong>{(visionReport || room?.visionMonitoring?.report)?.faceVisibilityRate || '0%'}</strong>
+                      </div>
+                      <div>
+                        <span>Absence events</span>
+                        <strong>{(visionReport || room?.visionMonitoring?.report)?.absenceEvents || 0}</strong>
+                      </div>
+                      <div>
+                        <span>Lighting issues</span>
+                        <strong>{(visionReport || room?.visionMonitoring?.report)?.lightingIssues || 0}</strong>
+                      </div>
+                      <div>
+                        <span>Position issues</span>
+                        <strong>{(visionReport || room?.visionMonitoring?.report)?.positionIssues || 0}</strong>
+                      </div>
+                    </div>
+                    <p className="cr-vision-report__recommendation">
+                      {(visionReport || room?.visionMonitoring?.report)?.recommendation}
+                    </p>
+                  </div>
+                ) : null}
               </div>
-            </div>
-          )}
-        </div>
-      </div>
+            )}
+
+          </div>{/* cr-right */}
+        </main>{/* cr-main */}
+      </div>{/* cr-root */}
     </PublicLayout>
   );
 };

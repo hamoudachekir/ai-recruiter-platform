@@ -44,6 +44,7 @@ async function startSession({
   candidateProfile,
   interviewStyle = 'friendly',
   phase = 'intro',
+  preferredLanguage = 'en',
 }) {
   return agentRequest('/session/start', {
     interview_id: interviewId,
@@ -54,14 +55,16 @@ async function startSession({
     candidate_profile: candidateProfile || {},
     interview_style: interviewStyle || 'friendly',
     phase,
+    preferred_language: preferredLanguage || 'en',
   });
 }
 
-async function candidateTurn({ interviewId, text, sentiment }) {
+async function candidateTurn({ interviewId, text, sentiment, preferredLanguage }) {
   return agentRequest('/session/turn', {
     interview_id: interviewId,
     text,
     sentiment: sentiment || null,
+    preferred_language: preferredLanguage || null,
   });
 }
 

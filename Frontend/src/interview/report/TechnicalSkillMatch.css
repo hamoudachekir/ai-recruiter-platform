@@ -1,0 +1,107 @@
+/* TechnicalSkillMatch.css */
+.tsm-root {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.tsm-empty,
+.tsm-no-data p {
+  color: #475569;
+  font-size: 13px;
+  text-align: center;
+  padding: 24px;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+  border-radius: 10px;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.tsm-summary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tsm-stat {
+  flex: 1;
+  min-width: 80px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.tsm-stat-num {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.tsm-stat-num--blue    { color: #60a5fa; }
+.tsm-stat-num--green   { color: #86efac; }
+.tsm-stat-num--red     { color: #fca5a5; }
+.tsm-stat-num--emerald { color: #6ee7b7; }
+.tsm-stat-num--amber   { color: #fcd34d; }
+
+.tsm-stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-align: center;
+}
+
+.tsm-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tsm-group {
+  background: rgba(30, 41, 59, 0.5);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tsm-group--matched  { border: 1px solid rgba(34, 197, 94, 0.18); }
+.tsm-group--missing  { border: 1px solid rgba(239, 68, 68, 0.18); }
+.tsm-group--strong   { border: 1px solid rgba(99, 102, 241, 0.2); }
+.tsm-group--weak     { border: 1px solid rgba(245, 158, 11, 0.18); }
+.tsm-group--detected { border: 1px solid rgba(148, 163, 184, 0.12); }
+
+.tsm-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.tsm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tsm-chip {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+}
+
+.tsm-chip--matched  { background: rgba(34, 197, 94, 0.1);  border: 1px solid rgba(34,197,94,0.25);  color: #86efac; }
+.tsm-chip--missing  { background: rgba(239, 68, 68, 0.1);  border: 1px solid rgba(239,68,68,0.25);  color: #fca5a5; }
+.tsm-chip--strong   { background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; }
+.tsm-chip--weak     { background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245,158,11,0.25); color: #fcd34d; }
+.tsm-chip--detected { background: rgba(148, 163, 184, 0.08); border: 1px solid rgba(148,163,184,0.14); color: #94a3b8; }

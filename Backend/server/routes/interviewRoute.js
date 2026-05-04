@@ -3,9 +3,16 @@ const router = express.Router();
 const { UserModel } = require('../models/user');
 const JobModel = require('../models/job');
 const Interview = require('../models/interview');
+const CallRoom = require('../models/CallRoom');
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 const axios = require('axios');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const { analyzeSnapshot } = require('../services/visionLLMService');
+const { generateIntegrityReport, buildMockIntegrityReport } = require('../services/integrityReportService');
+const yoloVisionService = require('../services/yoloVisionService');
 // Configure email transporter
 const transporter = nodemailer.createTransport({
   service: process.env.EMAIL_SERVICE || 'gmail',
@@ -13,6 +20,101 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   }
+});
+
+const ANALYSIS_SERVICE_URL = process.env.ANALYSIS_SERVICE_URL || 'http://127.0.0.1:8090';
+const interviewVideoDir = path.join(__dirname, '../uploads/interviews');
+if (!fs.existsSync(interviewVideoDir)) {
+  fs.mkdirSync(interviewVideoDir, { recursive: true });
+}
+
+const integritySnapshotDir = path.join(__dirname, '../uploads/integrity-snapshots');
+if (!fs.existsSync(integritySnapshotDir)) {
+  fs.mkdirSync(integritySnapshotDir, { recursive: true });
+}
+
+const INTEGRITY_EVENT_TYPE_MAP = {
+  NO_FACE: 'NO_FACE_DETECTED',
+  MULTIPLE_PEOPLE: 'MULTIPLE_FACES_DETECTED',
+  BAD_LIGHTING: 'POOR_LIGHTING',
+  FACE_TOO_FAR: 'BAD_FACE_DISTANCE',
+  LOOKING_AWAY_LONG: 'LOOKING_AWAY_LONG',
+  CAMERA_BLOCKED: 'CAMERA_BLOCKED',
+  TAB_SWITCH: 'TAB_SWITCH',
+  FULLSCREEN_EXIT: 'FULLSCREEN_EXIT',
+  COPY_PASTE: 'COPY_PASTE',
+};
+
+const SEVERITY_TO_LEGACY = {
+  low: 'info',
+  medium: 'warning',
+  high: 'critical',
+};
+
+const resolveCallRoom = async (id) => {
+  if (!id) return null;
+  if (mongoose.isValidObjectId(id)) {
+    const byId = await CallRoom.findById(id)
+      .populate('candidate', 'email firstName lastName name')
+      .populate('initiator', 'email firstName lastName name enterprise domain')
+      .populate('job', 'title description skills');
+    if (byId) return byId;
+  }
+  return CallRoom.findOne({ roomId: id })
+    .populate('candidate', 'email firstName lastName name')
+    .populate('initiator', 'email firstName lastName name enterprise domain')
+    .populate('job', 'title description skills');
+};
+
+const normalizeSeverity = (value) => {
+  const severity = String(value || '').trim().toLowerCase();
+  if (severity === 'high' || severity === 'medium' || severity === 'low') return severity;
+  return 'low';
+};
+
+const saveSnapshotBase64 = (interviewId, snapshotBase64) => {
+  const raw = String(snapshotBase64 || '').trim();
+  if (!raw) return null;
+
+  const match = raw.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,(.+)$/i);
+  const mime = match?.[1] || 'image/jpeg';
+  const base64 = match?.[2] || raw;
+  if (!base64 || base64.length > 6 * 1024 * 1024) return null;
+
+  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+  const safeId = String(interviewId).replace(/[^a-zA-Z0-9_-]/g, '');
+  const targetDir = path.join(integritySnapshotDir, safeId);
+  if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+
+  const fileName = `snapshot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  fs.writeFileSync(path.join(targetDir, fileName), Buffer.from(base64, 'base64'));
+  return `/uploads/integrity-snapshots/${safeId}/${fileName}`;
+};
+
+const readSnapshotAsDataUrl = (snapshotUrl) => {
+  const relative = String(snapshotUrl || '').replace(/^\/uploads\//, '');
+  if (!relative || relative.includes('..')) return '';
+  const filePath = path.join(__dirname, '../uploads', relative);
+  if (!fs.existsSync(filePath)) return '';
+  const ext = path.extname(filePath).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  return `data:${mime};base64,${fs.readFileSync(filePath).toString('base64')}`;
+};
+
+const interviewVideoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const targetDir = path.join(interviewVideoDir, req.params.interviewId, 'raw');
+    if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+    cb(null, targetDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase() || '.mp4';
+    cb(null, `interview_video${ext}`);
+  },
+});
+const interviewVideoUpload = multer({
+  storage: interviewVideoStorage,
+  limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB
 });
 
 // Generate meeting link with custom format
@@ -394,6 +496,341 @@ router.get('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error fetching interview:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Upload recorded interview video for post-interview multimodal analysis.
+router.post('/:interviewId/video/upload', interviewVideoUpload.single('video'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No video file uploaded' });
+    }
+    return res.json({
+      success: true,
+      interviewId: req.params.interviewId,
+      videoPath: req.file.path,
+    });
+  } catch (error) {
+    console.error('Interview video upload error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/:interviewId/vision-event', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    const room = await resolveCallRoom(interviewId);
+    if (!room) {
+      return res.status(404).json({ success: false, message: 'Interview/call room not found' });
+    }
+
+    const payload = req.body?.event || req.body || {};
+    const type = String(payload.type || '').trim().toUpperCase();
+    if (!type) {
+      return res.status(400).json({ success: false, message: 'Integrity event type is required' });
+    }
+
+    const severity = normalizeSeverity(payload.severity);
+    const shouldStoreSnapshot = (severity === 'medium' || severity === 'high') && payload.snapshotBase64;
+    const snapshotUrl = shouldStoreSnapshot
+      ? saveSnapshotBase64(room._id, payload.snapshotBase64)
+      : undefined;
+    const llmAnalysis = snapshotUrl
+      ? await analyzeSnapshot(payload.snapshotBase64)
+      : undefined;
+
+    const eventDoc = {
+      type,
+      severity,
+      timestamp: payload.timestamp ? new Date(payload.timestamp) : new Date(),
+      questionId: String(payload.questionId || ''),
+      durationSeconds: Number(payload.durationSeconds || 0),
+      confidence: Math.max(0, Math.min(1, Number(payload.confidence ?? 0.7))),
+      evidence: String(payload.evidence || ''),
+      snapshotUrl,
+      llmAnalysis,
+    };
+
+    room.integrityEvents = Array.isArray(room.integrityEvents) ? room.integrityEvents : [];
+    room.integrityEvents.push(eventDoc);
+
+    room.visionMonitoring = room.visionMonitoring || {};
+    room.visionMonitoring.events = Array.isArray(room.visionMonitoring.events) ? room.visionMonitoring.events : [];
+    const legacyType = INTEGRITY_EVENT_TYPE_MAP[type];
+    if (legacyType) {
+      room.visionMonitoring.events.push({
+        timestamp: eventDoc.timestamp,
+        type: legacyType,
+        severity: SEVERITY_TO_LEGACY[severity] || 'info',
+        message: eventDoc.evidence,
+        questionId: eventDoc.questionId,
+        durationMs: eventDoc.durationSeconds * 1000,
+        meta: {},
+      });
+    }
+
+    await room.save();
+    const savedEvent = room.integrityEvents[room.integrityEvents.length - 1];
+    return res.json({ success: true, event: savedEvent });
+  } catch (error) {
+    console.error('Integrity vision event error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/:interviewId/analyze-snapshot', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    const room = await resolveCallRoom(interviewId);
+    if (!room) {
+      return res.status(404).json({ success: false, message: 'Interview/call room not found' });
+    }
+
+    const eventId = String(req.body?.eventId || '');
+    const event = eventId
+      ? room.integrityEvents?.id?.(eventId) || room.integrityEvents?.find((item) => String(item._id) === eventId)
+      : null;
+    const snapshotBase64 = req.body?.snapshotBase64 || readSnapshotAsDataUrl(event?.snapshotUrl);
+
+    if (!snapshotBase64) {
+      return res.status(400).json({ success: false, message: 'No snapshot available for analysis' });
+    }
+
+    const analysis = await analyzeSnapshot(snapshotBase64);
+    if (event) {
+      event.llmAnalysis = analysis;
+      await room.save();
+    }
+
+    return res.json({ success: true, analysis });
+  } catch (error) {
+    console.error('Snapshot analysis error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/:interviewId/final-integrity-report', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    const room = await resolveCallRoom(interviewId);
+    if (!room) {
+      return res.status(404).json({ success: false, message: 'Interview/call room not found' });
+    }
+
+    const report = await generateIntegrityReport({
+      room,
+      events: room.integrityEvents || [],
+    });
+    room.integrityReport = report;
+    await room.save();
+    return res.json({ success: true, report });
+  } catch (error) {
+    console.error('Final integrity report error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.get('/:interviewId/integrity-report', async (req, res) => {
+  try {
+    if (String(req.query?.mock || '').toLowerCase() === 'true') {
+      return res.json({ success: true, report: buildMockIntegrityReport(), mock: true });
+    }
+
+    const { interviewId } = req.params;
+    const room = await resolveCallRoom(interviewId);
+    if (!room) {
+      return res.status(404).json({ success: false, message: 'Interview/call room not found' });
+    }
+
+    if (!room.integrityReport?.generatedAt) {
+      const report = await generateIntegrityReport({
+        room,
+        events: room.integrityEvents || [],
+      });
+      room.integrityReport = report;
+      await room.save();
+    }
+
+    return res.json({
+      success: true,
+      report: room.integrityReport,
+      events: room.integrityEvents || [],
+    });
+  } catch (error) {
+    console.error('Get integrity report error:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.post('/:interviewId/yolo-detect-frame', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    const room = await resolveCallRoom(interviewId);
+    if (!room) {
+      return res.status(404).json({ success: false, message: 'Interview/call room not found' });
+    }
+
+    const { frameBase64, candidateId, questionId } = req.body || {};
+
+    if (!frameBase64) {
+      return res.status(400).json({ success: false, message: 'frameBase64 is required' });
+    }
+
+    // Call YOLO service
+    const yoloResult = await yoloVisionService.detectFrame({
+      interviewId,
+      candidateId,
+      questionId,
+      frameBase64,
+    });
+
+    // Create integrity events from YOLO detections
+    const integrityEvents = yoloVisionService.createIntegrityEvents(yoloResult, {
+      interviewId,
+      questionId,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Store events in room
+    if (integrityEvents.length > 0) {
+      room.integrityEvents = Array.isArray(room.integrityEvents) ? room.integrityEvents : [];
+      room.integrityEvents.push(...integrityEvents);
+      await room.save();
+    }
+
+    // Store YOLO summary in vision monitoring
+    room.visionMonitoring = room.visionMonitoring || {};
+    room.visionMonitoring.yoloSummary = room.visionMonitoring.yoloSummary || {
+      totalFramesProcessed: 0,
+      lastProcessedAt: null,
+      personCountIssues: 0,
+      phoneDetections: 0,
+      bookDetections: 0,
+      screenDetections: 0,
+    };
+    
+    if (yoloResult.success) {
+      room.visionMonitoring.yoloSummary.totalFramesProcessed += 1;
+      room.visionMonitoring.yoloSummary.lastProcessedAt = new Date();
+      
+      if (yoloResult.summary.personCount > 1) {
+        room.visionMonitoring.yoloSummary.personCountIssues += 1;
+      }
+      if (yoloResult.summary.phoneDetected) {
+        room.visionMonitoring.yoloSummary.phoneDetections += 1;
+      }
+      if (yoloResult.summary.bookDetected) {
+        room.visionMonitoring.yoloSummary.bookDetections += 1;
+      }
+      if (yoloResult.summary.laptopDetected || yoloResult.summary.tvDetected) {
+        room.visionMonitoring.yoloSummary.screenDetections += 1;
+      }
+      
+      await room.save();
+    }
+
+    return res.json({
+      success: true,
+      yoloEnabled: yoloVisionService.getConfig().enabled,
+      yoloAvailable: yoloResult.success,
+      summary: yoloResult.summary,
+      eventsCreated: integrityEvents.length,
+      events: integrityEvents.map(e => ({ type: e.type, severity: e.severity, evidence: e.evidence })),
+      processingTimeMs: yoloResult.processingTimeMs,
+      error: yoloResult.error || null,
+    });
+  } catch (error) {
+    console.error('YOLO detect frame error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: error.message,
+      yoloEnabled: yoloVisionService.getConfig().enabled,
+    });
+  }
+});
+
+router.get('/:interviewId/yolo-health', async (req, res) => {
+  try {
+    const health = await yoloVisionService.checkHealth();
+    return res.json({
+      success: true,
+      ...health,
+      config: yoloVisionService.getConfig(),
+    });
+  } catch (error) {
+    console.error('YOLO health check error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+router.post('/:interviewId/analyze-video', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    const response = await axios.post(`${ANALYSIS_SERVICE_URL}/api/interviews/${interviewId}/analyze-video`, {
+      force: Boolean(req.body?.force),
+    });
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    console.error('Analyze interview video error:', error?.response?.data || error.message);
+    return res.status(error?.response?.status || 500).json({
+      success: false,
+      message: error?.response?.data?.detail || error.message,
+    });
+  }
+});
+
+router.get('/:interviewId/analysis-status', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    const response = await axios.get(`${ANALYSIS_SERVICE_URL}/api/interviews/${interviewId}/analysis-status`);
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error?.response?.status;
+    const networkCode = error?.code;
+    if (status === 404 || networkCode === 'ECONNREFUSED' || networkCode === 'ENOTFOUND' || networkCode === 'ETIMEDOUT') {
+      return res.status(200).json({
+        success: true,
+        job: null,
+        available: false,
+        message: status === 404 ? 'No analysis job found for this interview' : 'Analysis service unavailable',
+      });
+    }
+
+    return res.status(error?.response?.status || 500).json({
+      success: false,
+      message: error?.response?.data?.detail || error.message,
+    });
+  }
+});
+
+router.get('/:interviewId/final-report', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    const response = await axios.get(`${ANALYSIS_SERVICE_URL}/api/interviews/${interviewId}/final-report`);
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    return res.status(error?.response?.status || 500).json({
+      success: false,
+      message: error?.response?.data?.detail || error.message,
+    });
+  }
+});
+
+router.post('/:interviewId/final-report', async (req, res) => {
+  try {
+    const { interviewId } = req.params;
+    const response = await axios.post(`${ANALYSIS_SERVICE_URL}/api/interviews/${interviewId}/final-report`, {
+      report: req.body?.report || req.body || {},
+    });
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    return res.status(error?.response?.status || 500).json({
+      success: false,
+      message: error?.response?.data?.detail || error.message,
+    });
   }
 });
 

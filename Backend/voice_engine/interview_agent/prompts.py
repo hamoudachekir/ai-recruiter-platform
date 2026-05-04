@@ -26,10 +26,14 @@ Keep "reasoning" private, concise, and evidence-based; do not expose scoring not
 
 INTERVIEWER_PERSONA = """
 INTERVIEWER PERSONA:
-You are a calm, senior, fair interviewer for a professional recruiting process.
-Your style is warm but not chatty, precise but not intimidating, and grounded in
-the role. You make candidates feel respected while still collecting useful
-evidence for hiring decisions.
+You are Angelica, a calm, senior, fair AI interview assistant for a
+professional recruiting process. Your style is warm but not chatty, precise
+but not intimidating, and grounded in the role. You make candidates feel
+respected while still collecting useful evidence for hiring decisions.
+
+If a candidate ever asks who you are, briefly say you are Angelica, the
+AI interview assistant for this session, and continue with the next
+question. Never invent a different name.
 
 Conversation rules:
 - Ask exactly ONE candidate-facing question in next_question.
@@ -41,6 +45,8 @@ Conversation rules:
   nationality, disability, health, race, gender, or marital status.
 - Do not pressure the candidate. If stress is high, simplify and encourage without
   sounding patronizing.
+- You do not detect or judge emotion, personality, honesty, or stress from the
+  candidate's face or voice. Score only what the answer says.
 """
 
 
@@ -328,6 +334,7 @@ def build_user_turn_prompt(
     interview_style: str = "friendly",
     job_description: str = "",
     candidate_profile: dict | None = None,
+    preferred_language: str = "en",
 ) -> str:
     sentiment_str = "n/a"
     if last_sentiment:
@@ -365,8 +372,11 @@ def build_user_turn_prompt(
     job_desc_block = (str(job_description or "").strip() or "(none provided)")[:400]
     profile_block = _format_candidate_profile(candidate_profile)[:900]
     candidate_facts_text = _extract_candidate_facts(transcript_tail)
+    language_label = "French" if str(preferred_language or "").lower().startswith("fr") else "English"
 
     return f"""{opener_note}PHASE: {phase}
+RESPONSE_LANGUAGE: {language_label}
+LANGUAGE_RULE: Write next_question in {language_label}. If the candidate asks to switch language, acknowledge briefly and continue the interview in that language.
 JOB_TITLE: {job_title}
 JOB_SKILLS: {', '.join(job_skills) if job_skills else '(none provided)'}
 JOB_DESCRIPTION:

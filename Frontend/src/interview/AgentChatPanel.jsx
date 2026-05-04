@@ -19,7 +19,7 @@ const STYLE_OPTIONS = [
   { value: 'fast_screening', label: 'Fast' },
 ];
 
-export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false }) {
+export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false, interviewStarting = false }) {
   const [messages, setMessages] = useState([]); // { role: 'agent'|'candidate', text, meta?, ts }
   const [sessionActive, setSessionActive] = useState(false);
   const [phase, setPhase] = useState('intro');
@@ -48,6 +48,7 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false 
 
     const onMessage = (payload) => {
       if (payload.roomId && roomId && payload.roomId !== roomId) return;
+      console.log('💬 [AgentChatPanel] Received agent message:', payload);
       const wasSessionInactive = !sessionActiveRef.current;
       setSessionActive(true);
       setBusy(false);
@@ -57,24 +58,62 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false 
       if (payload.skillFocus) setLastSkill(payload.skillFocus);
       setMessages((prev) => {
         // The server fans this event out to room + direct user sockets, so
-        // the same turn can arrive twice. Dedupe on turnIndex + text.
+        // the same turn can arrive twice. Dedupe on turnIndex + text or recent duplicate text.
         const incomingText = String(payload.text || '').trim();
+        const now = Date.now();
+
+        // Extended window for intro messages (first agent messages)
+        const isIntroMessage = incomingText.toLowerCase().includes("hello, i'm") &&
+                               incomingText.toLowerCase().includes("interview assistant");
+        const dedupeWindow = isIntroMessage ? 30000 : 5000; // 30s for intro, 5s for others
+
+        // Check if this exact text already exists in recent messages
+        const isRecentDuplicate = prev.some(
+          (m) =>
+            m.role === 'agent' &&
+            String(m.text || '').trim() === incomingText &&
+            Math.abs((m.ts || 0) - now) < dedupeWindow
+        );
+
+        if (isRecentDuplicate) {
+          console.log('💬 [AgentChatPanel] Deduped duplicate message (recent match)');
+          return prev;
+        }
+
+        // For intro messages, also check similarity (first 50 chars) within extended window
+        if (isIntroMessage && prev.length > 0) {
+          const hasSimilarIntro = prev.some(
+            (m) =>
+              m.role === 'agent' &&
+              String(m.text || '').toLowerCase().startsWith("hello, i'm") &&
+              Math.abs((m.ts || 0) - now) < 30000
+          );
+          if (hasSimilarIntro) {
+            console.log('💬 [AgentChatPanel] Deduped similar intro message');
+            return prev;
+          }
+        }
+
+        // Also check last message for turnIndex match
         const last = prev.at(-1);
         if (
           last &&
           last.role === 'agent' &&
           String(last.text || '').trim() === incomingText &&
-          last.meta?.turnIndex === payload.turnIndex
+          (last.meta?.turnIndex === payload.turnIndex || payload.turnIndex == null)
         ) {
+          console.log('💬 [AgentChatPanel] Deduped duplicate message (last match)');
           return prev;
         }
+
+        console.log('💬 [AgentChatPanel] Adding new agent message to feed:', incomingText);
         return [
           ...prev,
           {
             role: 'agent',
             text: payload.text || '',
             meta: { difficulty: payload.difficulty, skillFocus: payload.skillFocus, turnIndex: payload.turnIndex },
-            ts: Date.now(),
+            ts: now,
           },
         ];
       });
@@ -154,7 +193,11 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false 
 
     const onLocalCandidateMessage = (ev) => {
       const text = String(ev?.detail?.text || '').trim();
-      if (!text) return;
+      if (!text) {
+        console.log('💬 [AgentChatPanel] Skipping empty candidate message');
+        return;
+      }
+      console.log('💬 [AgentChatPanel] Local candidate message received:', text, ev?.detail?.sentiment);
       setDraftBubble('');
       setMessages((prev) => {
         const lastCandidate = [...prev].reverse().find((m) => m.role === 'candidate');
@@ -163,8 +206,10 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false 
           lastCandidate.text.trim() === text &&
           Math.abs((lastCandidate.ts || 0) - Date.now()) < 5000
         ) {
+          console.log('💬 [AgentChatPanel] Deduped local candidate message');
           return prev;
         }   
+        console.log('💬 [AgentChatPanel] Adding local candidate message:', text);
         return [
           ...prev,
           {
@@ -447,31 +492,18 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false 
               : 'Waiting for the interviewer to start the session…'}
           </div>
         ) : (
-          messages.map((m, idx) => {
-            const sentimentLabel = m.role === 'candidate' ? (m.meta?.sentiment?.label || '').toUpperCase() : '';
-            const sentimentClass = sentimentLabel.includes('POSITIVE')
-              ? 'positive'
-              : sentimentLabel.includes('NEGATIVE')
-              ? 'negative'
-              : sentimentLabel
-              ? 'neutral'
-              : '';
-            return (
-              <div key={idx} className={`agent-msg agent-msg--${m.role}`}>
-                {m.role === 'agent' && m.meta?.difficulty != null && (
-                  <span className="agent-msg__badge" title={m.meta.skillFocus || ''}>
-                    D{m.meta.difficulty}
-                  </span>
-                )}
-                <span className="agent-msg__text">{m.text}</span>
-                {sentimentClass && (
-                  <span className={`agent-msg__sentiment agent-msg__sentiment--${sentimentClass}`}>
-                    {sentimentLabel}
-                  </span>
-                )}
-              </div>
-            );
-          })
+          messages.map((m, idx) => (
+            // Sentiment/emotion labels are intentionally not rendered for
+            // candidate turns: emotion is not used in the recruitment decision.
+            <div key={idx} className={`agent-msg agent-msg--${m.role}`}>
+              {m.role === 'agent' && m.meta?.difficulty != null && (
+                <span className="agent-msg__badge" title={m.meta.skillFocus || ''}>
+                  D{m.meta.difficulty}
+                </span>
+              )}
+              <span className="agent-msg__text">{m.text}</span>
+            </div>
+          ))
         )}
         {busy && messages.length > 0 && (
           <div className="agent-msg agent-msg--agent agent-msg--thinking">

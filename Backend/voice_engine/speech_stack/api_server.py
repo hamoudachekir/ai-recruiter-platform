@@ -4,7 +4,13 @@ import os
 import sys
 import tempfile
 
-from typing import Annotated, Optional
+from typing import Annotated, AsyncGenerator, Optional
+
+try:
+    import edge_tts as _edge_tts
+    _EDGE_TTS_OK = True
+except ImportError:
+    _EDGE_TTS_OK = False
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -133,6 +139,7 @@ class TtsRequest(BaseModel):
     volume: float = 1.0
     voice_id: Optional[str] = None
     language: Optional[str] = None
+    provider: Optional[str] = None
 
 
 @app.on_event("startup")
@@ -191,8 +198,8 @@ def health() -> dict:
         "compute_type": speech_stack.active_compute_type,
         "cuda_runtime_path": speech_stack.cuda_runtime_path,
         "tts_provider": speech_stack.tts_provider,
-        "tts_model": speech_stack.tts_model_name if speech_stack.tts_provider == "xtts_v2" else speech_stack.elevenlabs_model_id,
-        "tts_preloaded": speech_stack._xtts_model is not None or speech_stack.tts_provider == "elevenlabs",
+        "tts_model": speech_stack.elevenlabs_model_id,
+        "tts_preloaded": True,
     }
 
 
@@ -459,6 +466,16 @@ def tts_voices() -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+async def _edge_tts_stream(text: str) -> AsyncGenerator[bytes, None]:
+    """Stream MP3 audio chunks from Microsoft Edge TTS."""
+    voice = os.getenv("EDGE_TTS_VOICE", "en-US-EmmaNeural")
+    rate  = os.getenv("EDGE_TTS_RATE",  "+5%")
+    comm = _edge_tts.Communicate(text, voice, rate=rate)
+    async for chunk in comm.stream():
+        if chunk["type"] == "audio":
+            yield chunk["data"]
+
+
 @app.post(
     "/api/tts",
     responses={
@@ -466,7 +483,29 @@ def tts_voices() -> dict:
         503: {"description": "Speech stack is not initialized."},
     },
 )
-def tts(request: TtsRequest):
+async def tts(request: TtsRequest):
+    provider = str(request.provider or "").strip().lower()
+    force_edge = provider in {"edge", "edge_tts", "microsoft_edge"}
+
+    # Default to ElevenLabs. Edge TTS is only used when the client explicitly
+    # asks for it, so installed optional packages cannot silently override the
+    # configured voice provider.
+    if force_edge:
+        if not _EDGE_TTS_OK:
+            raise HTTPException(
+                status_code=503,
+                detail="Edge TTS provider requested but edge-tts package is not installed on speech stack server.",
+            )
+        try:
+            return StreamingResponse(
+                _edge_tts_stream(request.text),
+                media_type="audio/mpeg",
+                headers={"Content-Disposition": "inline; filename=tts.mp3"},
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Edge TTS failed: {exc}") from exc
+
+    # ── ElevenLabs fallback ───────────────────────────────────────────────
     try:
         stack = require_stack()
     except RuntimeError as exc:
@@ -483,15 +522,12 @@ def tts(request: TtsRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    # Detect MP3 content when pydub is not installed and ElevenLabs is used.
     is_mp3 = wav_bytes[:3] == b"ID3" or wav_bytes[:2] == b"\xff\xfb"
     media_type = "audio/mpeg" if is_mp3 else "audio/wav"
-    filename = "tts.mp3" if is_mp3 else "tts.wav"
-
     return StreamingResponse(
         io.BytesIO(wav_bytes),
         media_type=media_type,
-        headers={"Content-Disposition": f"inline; filename={filename}"},
+        headers={"Content-Disposition": f"inline; filename={'tts.mp3' if is_mp3 else 'tts.wav'}"},
     )
 
 
