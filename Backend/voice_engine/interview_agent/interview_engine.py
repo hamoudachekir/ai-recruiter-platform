@@ -10,6 +10,7 @@ import os
 import re
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -86,6 +87,7 @@ class InterviewState:
     same_answer_streak: int = 0  # repeated candidate short answer detector
     last_candidate_answer_norm: str = ""
     candidate_facts: dict[str, Any] = field(default_factory=dict)
+    preferred_language: str = "en"
     intro_question_count: int = 0  # number of HR intro questions already asked
     last_comfort_turn: int = -999  # track when last comfort intervention happened
     created_at: float = field(default_factory=time.time)
@@ -100,6 +102,7 @@ class InterviewState:
             "turn_index": self.turn_index,
             "intro_question_count": self.intro_question_count,
             "interview_style": self.interview_style,
+            "preferred_language": self.preferred_language,
             "ended": self.ended,
             "transcript_len": len(self.transcript),
             "evaluations_count": len(self.evaluations),
@@ -396,6 +399,168 @@ def _is_question_repetitive(state: InterviewState, question: str) -> bool:
 def _answer_key(text: str) -> str:
     lowered = re.sub(r"[^a-z0-9\s]", " ", str(text or "").lower())
     return " ".join(tok for tok in lowered.split() if len(tok) > 1)
+
+
+def _language_key(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or "").lower())
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    ascii_text = re.sub(r"[^a-z0-9\s]", " ", ascii_text)
+    return " ".join(ascii_text.split())
+
+
+def _normalize_preferred_language(value: str | None) -> str:
+    key = _language_key(value)
+    if key in {"fr", "fra", "fre", "french", "francais", "francaise"}:
+        return "fr"
+    if key in {"en", "eng", "english", "anglais"}:
+        return "en"
+    return "en"
+
+
+def _detect_language_request(text: str) -> str | None:
+    key = _language_key(text)
+    if not key:
+        return None
+
+    wants_french = [
+        "speak french",
+        "speak frensh",
+        "talk french",
+        "talk frensh",
+        "ask me in french",
+        "ask me in frensh",
+        "in french",
+        "in frensh",
+        "turn this convo in french",
+        "turn this convo in frensh",
+        "turn this conversation in french",
+        "turn this conversation in frensh",
+        "french language",
+        "frensh language",
+        "continue in french",
+        "continue in frensh",
+        "parle francais",
+        "parlez francais",
+        "en francais",
+        "reponds en francais",
+        "francais stp",
+        "francais svp",
+    ]
+    if any(phrase in key for phrase in wants_french):
+        return "fr"
+
+    wants_english = [
+        "speak english",
+        "talk english",
+        "ask me in english",
+        "in english",
+        "continue in english",
+        "parle anglais",
+        "en anglais",
+    ]
+    if any(phrase in key for phrase in wants_english):
+        return "en"
+
+    return None
+
+
+def _is_french_question(text: str) -> bool:
+    key = _language_key(text)
+    return any(
+        phrase in key
+        for phrase in {
+            "bien sur",
+            "pouvez vous",
+            "peux tu",
+            "votre experience",
+            "votre parcours",
+            "developpeur",
+            "francais",
+            "quel est",
+            "qu est ce",
+        }
+    )
+
+
+def _topic_fr(topic: str) -> str:
+    key = _question_key(topic)
+    mapping = {
+        "background": "votre parcours",
+        "motivation": "votre motivation",
+        "communication": "la communication",
+        "collaboration": "la collaboration",
+        "team": "le travail en equipe",
+        "learning": "votre apprentissage",
+        "career": "vos objectifs professionnels",
+        "career goals": "vos objectifs professionnels",
+        "clarification": "votre experience",
+        "general": "votre experience",
+    }
+    return mapping.get(key, str(topic or "votre experience").strip() or "votre experience")
+
+
+def _french_question_for(state: InterviewState, question: str, skill_focus: str) -> str:
+    if _is_french_question(question):
+        return question
+
+    topic = _topic_fr(skill_focus)
+    topic_key = _question_key(skill_focus)
+
+    if state.turn_index == 0 and state.phase == "intro":
+        return (
+            "Bonjour, je suis Angelica, votre assistante d'entretien IA pour aujourd'hui. "
+            "Je vais vous poser quelques questions liees a votre profil et a ce poste. "
+            "Pour commencer, pouvez-vous vous presenter brievement et parler de votre parcours ?"
+        )
+
+    if state.phase == "technical":
+        skill = str(skill_focus or "").strip() or next(
+            (str(s).strip() for s in state.job_skills if str(s or "").strip()),
+            "une technologie importante",
+        )
+        return (
+            f"Pouvez-vous decrire un projet concret ou vous avez utilise {skill}, "
+            "votre role exact et le resultat obtenu ?"
+        )
+
+    if topic_key in {"background", "general", "clarification"}:
+        return "Pouvez-vous me parler brievement de votre parcours et de votre experience professionnelle ?"
+    if topic_key == "motivation":
+        return "Qu'est-ce qui vous motive pour ce poste, et quel lien faites-vous avec votre experience actuelle ?"
+    if topic_key in {"communication", "collaboration", "team"}:
+        return "Pouvez-vous partager un exemple concret qui montre votre facon de travailler avec une equipe ?"
+    if topic_key in {"career", "career goals"}:
+        return "Quels sont vos objectifs professionnels, et comment ce poste s'inscrit-il dans cette direction ?"
+
+    return f"Pouvez-vous partager un exemple concret lie a {topic} ?"
+
+
+def _localize_question(state: InterviewState, question: str, skill_focus: str) -> str:
+    if _normalize_preferred_language(state.preferred_language) == "fr":
+        return _french_question_for(state, question, skill_focus)
+    return question
+
+
+def _build_language_switch_question(state: InterviewState, language: str) -> tuple[str, int, str]:
+    last_skill = str(state.last_question_meta.get("skill_focus", "background") or "background")
+    difficulty = int(state.last_question_meta.get("difficulty", 1) or 1)
+
+    if language == "fr":
+        topic = _topic_fr(last_skill)
+        if state.phase == "technical":
+            question = (
+                "Bien sur, je vais continuer en francais. "
+                f"Pouvez-vous donner un exemple concret lie a {topic}, avec votre role et le resultat ?"
+            )
+        else:
+            question = (
+                "Bien sur, je vais continuer en francais. "
+                f"Pouvez-vous partager un exemple concret lie a {topic} ?"
+            )
+        return question, max(1, min(difficulty, 2)), last_skill
+
+    question = "Of course, I will continue in English. Could you briefly answer the previous question?"
+    return question, max(1, min(difficulty, 2)), last_skill
 
 
 def _sanitize_candidate_answer(text: str) -> str:
@@ -1013,6 +1178,7 @@ class InterviewEngine:
         candidate_profile: dict | None = None,
         interview_style: str = "friendly",
         phase: Phase = "intro",
+        preferred_language: str = "en",
     ) -> dict[str, Any]:
         with self._lock:
             existing = self._states.get(interview_id)
@@ -1028,6 +1194,7 @@ class InterviewEngine:
                 candidate_profile=candidate_profile or {},
                 interview_style=normalize_interview_style(interview_style),
                 phase=phase,
+                preferred_language=_normalize_preferred_language(preferred_language),
             )
             self._states[interview_id] = state
 
@@ -1040,16 +1207,23 @@ class InterviewEngine:
         )
         if last_agent_question is None:
             category_scores = build_category_scores(state.evaluations)
+            fallback_text = _localize_question(
+                state,
+                "Welcome. Could you briefly introduce yourself and your background?",
+                "background",
+            )
             return {
                 "interview_id": state.interview_id,
                 "phase": state.phase,
                 "interview_style": state.interview_style,
+                "language": state.preferred_language,
                 "turn_index": state.turn_index,
                 "agent_message": {
-                    "text": "Welcome. Could you briefly introduce yourself and your background?",
+                    "text": fallback_text,
                     "difficulty": 1,
                     "skill_focus": "background",
                     "agent_mode": "normal",
+                    "language": state.preferred_language,
                 },
                 "scoring": {
                     "score": 0.5,
@@ -1074,12 +1248,14 @@ class InterviewEngine:
             "interview_id": state.interview_id,
             "phase": state.phase,
             "interview_style": state.interview_style,
+            "language": state.preferred_language,
             "turn_index": int(meta.get("turn_index") or state.turn_index),
             "agent_message": {
                 "text": last_agent_question.text,
                 "difficulty": max(1, min(difficulty, 5)),
                 "skill_focus": skill_focus,
                 "agent_mode": agent_mode,
+                "language": state.preferred_language,
             },
             "scoring": {
                 "score": round(float(state.last_question_meta.get("score", 0.5) or 0.5), 3),
@@ -1122,6 +1298,7 @@ class InterviewEngine:
         *,
         text: str,
         sentiment: dict | None = None,
+        preferred_language: str | None = None,
     ) -> dict[str, Any]:
         state = self._require(interview_id)
         if state.ended:
@@ -1130,8 +1307,13 @@ class InterviewEngine:
         clean_text = _sanitize_candidate_answer(text)
         if not clean_text:
             clean_text = str(text or "").strip()
+        requested_language = _detect_language_request(clean_text) or (
+            _normalize_preferred_language(preferred_language) if preferred_language else None
+        )
 
         with self._lock:
+            if requested_language:
+                state.preferred_language = requested_language
             state.transcript.append(
                 TranscriptEntry(
                     role="candidate",
@@ -1141,6 +1323,7 @@ class InterviewEngine:
                         "raw_text": text,
                         "phase": state.phase,
                         "interview_style": state.interview_style,
+                        "language_request": requested_language,
                     },
                 )
             )
@@ -1189,6 +1372,7 @@ class InterviewEngine:
         if not question:
             question = "Could you share one concrete project example, including your role, what you built, and the result?"
         skill_focus = str(skill_focus or "general").strip() or "general"
+        question = _localize_question(state, question, skill_focus)
         score = _clamp(float(score), 0.0, 1.0)
         confidence = _clamp(float(confidence), 0.0, 1.0)
         difficulty = int(_clamp(int(difficulty or 1), 1, 5))
@@ -1213,6 +1397,7 @@ class InterviewEngine:
                 "agent_mode": agent_mode,
                 "stress_level": round(state.stress_level, 3),
                 "interview_style": state.interview_style,
+                "preferred_language": state.preferred_language,
             }
             state.transcript.append(
                 TranscriptEntry(
@@ -1224,6 +1409,7 @@ class InterviewEngine:
                         "phase": state.phase,
                         "turn_index": turn_index,
                         "interview_style": state.interview_style,
+                        "language": state.preferred_language,
                     },
                 )
             )
@@ -1252,17 +1438,20 @@ class InterviewEngine:
             theta = state.theta
             stress_level = state.stress_level
             interview_style = state.interview_style
+            preferred_language = state.preferred_language
 
         return {
             "interview_id": state.interview_id,
             "phase": phase,
             "interview_style": interview_style,
+            "language": preferred_language,
             "turn_index": turn_index,
             "agent_message": {
                 "text": question,
                 "difficulty": difficulty,
                 "skill_focus": skill_focus,
                 "agent_mode": agent_mode,
+                "language": preferred_language,
             },
             "scoring": {
                 "score": round(score, 3),
@@ -1289,46 +1478,17 @@ class InterviewEngine:
 
         # Opening turn is generated locally so "Start Intro" responds instantly.
         if state.turn_index == 0:
-            raw_name = str(state.candidate_name or "").strip()
-            short_name = raw_name.split()[0] if raw_name else "there"
-            if "@" in short_name:
-                short_name = short_name.split("@")[0]
-
             if state.phase == "intro":
-                normalized_title = str(state.job_title or "").strip()
-                job_suffix = f" for the {normalized_title} role" if normalized_title else ""
-                skills_preview = [str(s).strip() for s in state.job_skills if str(s or "").strip()][:2]
-                skill_suffix = (
-                    f", especially around {', '.join(skills_preview)}"
-                    if skills_preview
-                    else ""
+                # Fixed Angelica introduction. The opener must be deterministic so
+                # the candidate always hears the same greeting first — no LLM
+                # variance, no style branching. The "background" follow-up that
+                # this line ends with becomes the first scored question.
+                question = (
+                    "Hello, I'm Angelica, your AI interview assistant for today. "
+                    "I'll ask you a few questions related to your profile and this job position. "
+                    "Please answer naturally. "
+                    "Let's begin with a short introduction about your background."
                 )
-                style = normalize_interview_style(state.interview_style)
-                if style == "strict":
-                    question = (
-                        f"Hello {short_name}. Please briefly summarize your background and how it fits"
-                        f" this opportunity{job_suffix}{skill_suffix}."
-                    )
-                elif style == "senior":
-                    question = (
-                        f"Hi {short_name}, welcome. Could you summarize the highest-impact work in your background"
-                        f" and how it maps to this opportunity{job_suffix}{skill_suffix}?"
-                    )
-                elif style == "junior":
-                    question = (
-                        f"Hi {short_name}, welcome. Could you briefly introduce yourself and share what you have"
-                        f" learned so far that connects to this opportunity{job_suffix}{skill_suffix}?"
-                    )
-                elif style == "fast_screening":
-                    question = (
-                        f"Hi {short_name}. In one minute, what background makes you a fit"
-                        f" for this opportunity{job_suffix}{skill_suffix}?"
-                    )
-                else:
-                    question = (
-                        f"Hi {short_name}, welcome. To start, can you briefly introduce yourself and share"
-                        f" how your background fits this opportunity{job_suffix}{skill_suffix}?"
-                    )
                 difficulty = 1
                 skill_focus = "background"
             else:
@@ -1378,6 +1538,27 @@ class InterviewEngine:
             )
 
         normalized_answer = _answer_key(last_answer)
+        requested_language = _detect_language_request(last_answer)
+        if requested_language:
+            with self._lock:
+                state.preferred_language = requested_language
+            question, difficulty, skill_focus = _build_language_switch_question(state, requested_language)
+            return self._finish_turn(
+                state,
+                question=question,
+                difficulty=difficulty,
+                skill_focus=skill_focus,
+                score=0.5,
+                confidence=0.8,
+                agent_mode=get_agent_mode(state.stress_level),
+                reasoning="Candidate requested a language change, so the interviewer switched language without scoring it as an answer.",
+                done=False,
+                last_answer=last_answer,
+                last_sentiment=last_sentiment,
+                auto_switched=auto_switched,
+                record_evaluation=False,
+            )
+
         with self._lock:
             if normalized_answer and normalized_answer == state.last_candidate_answer_norm:
                 state.same_answer_streak += 1
@@ -1599,6 +1780,7 @@ class InterviewEngine:
             turn_index=state.turn_index,
             agent_mode=agent_mode,
             interview_style=state.interview_style,
+            preferred_language=state.preferred_language,
         )
 
         system_with_comfort = system + comfort_addendum

@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pymongo
+pydantic
+mediapipe
+opencv-python
+numpy
+faster-whisper
+ultralytics

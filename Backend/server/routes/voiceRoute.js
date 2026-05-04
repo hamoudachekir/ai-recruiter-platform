@@ -98,6 +98,7 @@ router.post('/tts', async (req, res) => {
       volume: parseMaybeNumber(req.body?.volume),
       voiceId: req.body?.voiceId || req.body?.voice_id || null,
       language: req.body?.language || null,
+      provider: req.body?.provider || 'edge',
     });
 
     res.setHeader('Content-Type', result.contentType);

@@ -1,16 +1,11 @@
 import io
 import json
 import os
-import tempfile
-import threading
 import re
-import wave
-import contextlib
 
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
-
-import httpx
 import numpy as np
+import httpx
 
 from faster_whisper import WhisperModel
 from faster_whisper.audio import decode_audio
@@ -96,22 +91,8 @@ class SpeechStack:
         if self.enable_sentiment:
             self.sentiment_pipeline = self._load_sentiment_model()
 
-        self._tts_lock = threading.Lock()
-        self._xtts_model = None
-        self._xtts_speaker_cache: Dict[str, Tuple[Any, Any]] = {}
-        self.tts_provider = str(os.getenv("FW_TTS_PROVIDER", "xtts_v2") or "xtts_v2").strip().lower()
-        self.tts_model_name = str(
-            os.getenv(
-                "FW_TTS_MODEL",
-                "tts_models/multilingual/multi-dataset/xtts_v2",
-            )
-            or "tts_models/multilingual/multi-dataset/xtts_v2"
-        ).strip()
+        self.tts_provider = "elevenlabs"
         self.tts_default_language = str(os.getenv("FW_TTS_LANGUAGE", "en") or "en").strip().lower() or "en"
-        self.tts_default_speaker_wav = str(os.getenv("FW_TTS_SPEAKER_WAV", "") or "").strip() or None
-        self.tts_speaker_dir = str(os.getenv("FW_TTS_SPEAKER_DIR", "") or "").strip() or None
-        self.tts_use_gpu = str(os.getenv("FW_TTS_USE_GPU", "auto") or "auto").strip().lower()
-        self.tts_speed = max(0.85, min(float(os.getenv("FW_TTS_SPEED", "1.12") or "1.12"), 1.35))
 
         # ── ElevenLabs settings (used when tts_provider == "elevenlabs") ──────
         self.elevenlabs_api_key = str(os.getenv("ELEVENLABS_API_KEY", "") or "").strip()
@@ -130,81 +111,7 @@ class SpeechStack:
         self.elevenlabs_similarity_boost = max(
             0.0, min(float(os.getenv("ELEVENLABS_SIMILARITY_BOOST", "0.75") or "0.75"), 1.0)
         )
-        self.elevenlabs_fallback_to_xtts = str(
-            os.getenv("ELEVENLABS_FALLBACK_TO_XTTS", "1") or "1"
-        ).strip().lower() in {"1", "true", "yes", "on"}
         # ─────────────────────────────────────────────────────────────────────
-
-        if not self.tts_default_speaker_wav:
-            self.tts_default_speaker_wav = self._discover_default_speaker_wav()
-
-    @staticmethod
-    def _is_usable_speaker_audio(file_path: str) -> bool:
-        if not file_path or not os.path.isfile(file_path):
-            return False
-
-        try:
-            if os.path.getsize(file_path) < 2048:
-                return False
-        except Exception:
-            return False
-
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext != ".wav":
-            return True
-
-        try:
-            with contextlib.closing(wave.open(file_path, "rb")) as wav_file:
-                frames = int(wav_file.getnframes())
-                sample_rate = int(wav_file.getframerate())
-                if frames <= 0 or sample_rate <= 0:
-                    return False
-                duration = frames / float(sample_rate)
-                return duration >= 0.8
-        except Exception:
-            return False
-
-    @staticmethod
-    def _select_latest_audio_file(directory: Optional[str]) -> Optional[str]:
-        if not directory or not os.path.isdir(directory):
-            return None
-
-        candidates = []
-        for entry in os.listdir(directory):
-            full_path = os.path.join(directory, entry)
-            if not os.path.isfile(full_path):
-                continue
-            ext = os.path.splitext(entry)[1].lower()
-            if ext not in {".wav", ".mp3", ".flac", ".m4a", ".ogg"}:
-                continue
-            if not SpeechStack._is_usable_speaker_audio(full_path):
-                continue
-            candidates.append(full_path)
-
-        if not candidates:
-            return None
-
-        return max(candidates, key=lambda path: os.path.getmtime(path))
-
-    def _discover_default_speaker_wav(self) -> Optional[str]:
-        candidates = []
-        if self.tts_speaker_dir:
-            candidates.append(self.tts_speaker_dir)
-
-        backend_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        candidates.extend(
-            [
-                os.path.join(backend_root, "server", "voice-recordings"),
-                os.path.join(backend_root, "voice_engine", "_runtime_logs"),
-            ]
-        )
-
-        for directory in candidates:
-            selected = self._select_latest_audio_file(directory)
-            if selected:
-                return selected
-
-        return None
 
     @staticmethod
     def _normalize_term(term: str) -> str:
@@ -494,6 +401,8 @@ class SpeechStack:
         segment_items: List[Dict] = []
         texts: List[str] = []
         all_applied_rules: List[Dict[str, Any]] = []
+        avg_logprob_values: List[float] = []
+        no_speech_prob_values: List[float] = []
         for segment in segments:
             raw_text = segment.text.strip()
             corrected_text, applied_rules = self._apply_transcript_corrections(
@@ -502,12 +411,24 @@ class SpeechStack:
                 float(info.language_probability),
                 custom_terms=custom_terms,
             )
+            # faster-whisper segments expose decoder confidence signals we use
+            # to drop hallucinations on the client. avg_logprob is per-token
+            # mean log probability (higher = more confident); no_speech_prob
+            # is the model's confidence the segment is silence/noise.
+            seg_avg_logprob = float(getattr(segment, "avg_logprob", 0.0) or 0.0)
+            seg_no_speech_prob = float(getattr(segment, "no_speech_prob", 0.0) or 0.0)
+            seg_compression_ratio = float(getattr(segment, "compression_ratio", 0.0) or 0.0)
+            avg_logprob_values.append(seg_avg_logprob)
+            no_speech_prob_values.append(seg_no_speech_prob)
             segment_items.append(
                 {
                     "start": float(segment.start),
                     "end": float(segment.end),
                     "text": corrected_text,
                     "raw_text": raw_text,
+                    "avg_logprob": seg_avg_logprob,
+                    "no_speech_prob": seg_no_speech_prob,
+                    "compression_ratio": seg_compression_ratio,
                 }
             )
             if corrected_text:
@@ -525,11 +446,24 @@ class SpeechStack:
         if full_text_rules:
             all_applied_rules.extend(full_text_rules)
 
+        avg_logprob_overall = (
+            sum(avg_logprob_values) / len(avg_logprob_values)
+            if avg_logprob_values
+            else 0.0
+        )
+        no_speech_prob_overall = (
+            sum(no_speech_prob_values) / len(no_speech_prob_values)
+            if no_speech_prob_values
+            else 0.0
+        )
+
         return {
             "text": full_text_corrected,
             "language": info.language,
             "language_probability": float(info.language_probability),
             "segments": segment_items,
+            "avg_logprob": avg_logprob_overall,
+            "no_speech_prob": no_speech_prob_overall,
             "model": self.model_name,
             "device": self.device,
             "compute_type": self.active_compute_type,
@@ -639,52 +573,7 @@ class SpeechStack:
         }
 
     def list_tts_voices(self) -> List[Dict]:
-        if self.tts_provider == "elevenlabs":
-            return self._list_elevenlabs_voices()
-        if self.tts_provider != "xtts_v2":
-            raise RuntimeError(f"Unsupported TTS provider '{self.tts_provider}'.")
-
-        voices: List[Dict[str, Any]] = []
-
-        if self.tts_default_speaker_wav and os.path.isfile(self.tts_default_speaker_wav):
-            voices.append(
-                {
-                    "id": "default",
-                    "name": f"default ({os.path.basename(self.tts_default_speaker_wav)})",
-                    "languages": [self.tts_default_language],
-                    "speaker_wav": self.tts_default_speaker_wav,
-                }
-            )
-
-        if self.tts_speaker_dir and os.path.isdir(self.tts_speaker_dir):
-            for entry in sorted(os.listdir(self.tts_speaker_dir)):
-                full_path = os.path.join(self.tts_speaker_dir, entry)
-                if not os.path.isfile(full_path):
-                    continue
-                ext = os.path.splitext(entry)[1].lower()
-                if ext not in {".wav", ".mp3", ".flac", ".m4a", ".ogg"}:
-                    continue
-
-                voice_id = os.path.splitext(entry)[0]
-                voices.append(
-                    {
-                        "id": voice_id,
-                        "name": voice_id,
-                        "languages": [self.tts_default_language],
-                        "speaker_wav": full_path,
-                    }
-                )
-
-        if not voices:
-            voices.append(
-                {
-                    "id": "xtts_v2",
-                    "name": "XTTS v2 (set FW_TTS_SPEAKER_WAV or FW_TTS_SPEAKER_DIR for voice cloning)",
-                    "languages": [self.tts_default_language],
-                }
-            )
-
-        return voices
+        return self._list_elevenlabs_voices()
 
     # ── ElevenLabs helpers ────────────────────────────────────────────────────
 
@@ -786,176 +675,17 @@ class SpeechStack:
 
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _load_xtts_model(self):
-        try:
-            from TTS.api import TTS
-        except ImportError as exc:
-            raise RuntimeError(
-                "XTTS-v2 requires the 'TTS' package. Install it in your app environment."
-            ) from exc
-
-        use_gpu = self.device == "cuda"
-        if self.tts_use_gpu in {"0", "false", "no", "off", "cpu"}:
-            use_gpu = False
-        elif self.tts_use_gpu in {"1", "true", "yes", "on", "cuda", "gpu"}:
-            use_gpu = True
-
-        try:
-            return TTS(self.tts_model_name, gpu=use_gpu)
-        except Exception as first_exc:
-            if use_gpu:
-                try:
-                    return TTS(self.tts_model_name, gpu=False)
-                except Exception as second_exc:
-                    raise RuntimeError(
-                        "Failed to load XTTS-v2 on GPU and CPU fallback. "
-                        f"GPU error: {first_exc}; CPU error: {second_exc}"
-                    ) from second_exc
-            raise RuntimeError(f"Failed to load XTTS-v2 model: {first_exc}") from first_exc
-
-    def _ensure_tts_model(self) -> None:
-        if self._xtts_model is not None:
-            return
-
-        self._xtts_model = self._load_xtts_model()
-
     def warm_tts(self) -> None:
-        """Preload the configured TTS provider so first playback is low-latency."""
-        if self.tts_provider == "elevenlabs":
-            # ElevenLabs is a cloud API; validate the key with a short voice-list call.
-            if not self.elevenlabs_api_key:
-                raise RuntimeError(
-                    "ELEVENLABS_API_KEY is not configured. "
-                    "Set it in your .env to use ElevenLabs TTS."
-                )
-            try:
-                self._list_elevenlabs_voices()
-            except Exception as exc:
-                raise RuntimeError(f"ElevenLabs TTS warm-up check failed: {exc}") from exc
-            return
-        if self.tts_provider != "xtts_v2":
-            raise RuntimeError(f"Unsupported TTS provider '{self.tts_provider}'.")
-        with self._tts_lock:
-            self._ensure_tts_model()
-            if self.tts_default_speaker_wav and self._is_usable_speaker_audio(self.tts_default_speaker_wav):
-                try:
-                    self._get_xtts_conditioning(self.tts_default_speaker_wav)
-                    self._prime_xtts_locked(self.tts_default_speaker_wav)
-                except Exception:
-                    # Keep startup resilient; synthesis can still retry with another voice/source.
-                    self.tts_default_speaker_wav = None
-
-    def _resolve_speaker_wav(self, voice_id: Optional[str]) -> str:
-        if voice_id:
-            voice_id = str(voice_id).strip()
-            if not voice_id:
-                voice_id = None
-
-        if voice_id and self._is_usable_speaker_audio(voice_id):
-            return voice_id
-
-        if voice_id and self.tts_speaker_dir:
-            for ext in (".wav", ".mp3", ".flac", ".m4a", ".ogg"):
-                candidate = os.path.join(self.tts_speaker_dir, f"{voice_id}{ext}")
-                if self._is_usable_speaker_audio(candidate):
-                    return candidate
-
-        if self.tts_default_speaker_wav and self._is_usable_speaker_audio(self.tts_default_speaker_wav):
-            return self.tts_default_speaker_wav
-
-        discovered = self._discover_default_speaker_wav()
-        if discovered:
-            self.tts_default_speaker_wav = discovered
-            return discovered
-
-        raise RuntimeError(
-            "XTTS-v2 requires a reference speaker audio file. "
-            "Set FW_TTS_SPEAKER_WAV to a valid file path or provide voice_id mapped under FW_TTS_SPEAKER_DIR."
-        )
-
-    def _get_xtts_conditioning(self, speaker_wav: str) -> Tuple[Any, Any]:
-        cache_key = os.path.normcase(os.path.abspath(speaker_wav))
-        cached = self._xtts_speaker_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        xtts_api = self._xtts_model
-        synthesizer = getattr(xtts_api, "synthesizer", None)
-        xtts_model = getattr(synthesizer, "tts_model", None)
-        if xtts_model is None or not hasattr(xtts_model, "get_conditioning_latents"):
-            raise RuntimeError("XTTS-v2 conditioning cache is unavailable on this runtime.")
-
-        gpt_cond_latent, speaker_embedding = xtts_model.get_conditioning_latents(audio_path=speaker_wav)
-        self._xtts_speaker_cache[cache_key] = (gpt_cond_latent, speaker_embedding)
-        return gpt_cond_latent, speaker_embedding
-
-    def _prime_xtts_locked(self, speaker_wav: str) -> None:
-        prime_text = str(os.getenv("FW_TTS_PRIME_TEXT", "Ready.") or "").strip()
-        if not prime_text or prime_text.lower() in {"0", "false", "no", "off", "none"}:
-            return
-
-        xtts_api = self._xtts_model
-        synthesizer = getattr(xtts_api, "synthesizer", None)
-        xtts_model = getattr(synthesizer, "tts_model", None)
-        if xtts_model is None or not hasattr(xtts_model, "inference"):
-            return
-
-        try:
-            gpt_cond_latent, speaker_embedding = self._get_xtts_conditioning(speaker_wav)
-            xtts_model.inference(
-                text=prime_text,
-                language=self.tts_default_language or "en",
-                gpt_cond_latent=gpt_cond_latent,
-                speaker_embedding=speaker_embedding,
-                speed=self.tts_speed,
-                enable_text_splitting=False,
+        """Validate ElevenLabs API key with a quick voice-list call."""
+        if not self.elevenlabs_api_key:
+            raise RuntimeError(
+                "ELEVENLABS_API_KEY is not configured. "
+                "Set it in your .env to use ElevenLabs TTS."
             )
-        except Exception:
-            # Priming is best-effort only; real synthesis still has its own fallback path.
-            return
-
-    @staticmethod
-    def _float_audio_to_wav_bytes(audio: Any, sample_rate: int) -> bytes:
-        wav = np.asarray(audio, dtype=np.float32)
-        if wav.ndim > 1:
-            wav = wav.reshape(-1)
-
-        np.clip(wav, -1.0, 1.0, out=wav)
-        pcm = (wav * 32767.0).astype(np.int16)
-
-        with io.BytesIO() as output_io:
-            with contextlib.closing(wave.open(output_io, "wb")) as out_wav:
-                out_wav.setnchannels(1)
-                out_wav.setsampwidth(2)
-                out_wav.setframerate(int(sample_rate))
-                out_wav.writeframes(pcm.tobytes())
-            return output_io.getvalue()
-
-    @staticmethod
-    def _apply_wav_volume(wav_bytes: bytes, volume: float) -> bytes:
-        factor = max(0.0, min(float(volume), 2.0))
-        if abs(factor - 1.0) < 1e-3:
-            return wav_bytes
-
-        with io.BytesIO(wav_bytes) as source_io:
-            with wave.open(source_io, "rb") as source_wav:
-                params = source_wav.getparams()
-                frames = source_wav.readframes(params.nframes)
-
-        # Keep processing conservative for PCM 16-bit and return untouched bytes otherwise.
-        if params.sampwidth != 2:
-            return wav_bytes
-
-        audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32)
-        audio *= factor
-        np.clip(audio, -32768, 32767, out=audio)
-        out_frames = audio.astype(np.int16).tobytes()
-
-        with io.BytesIO() as output_io:
-            with wave.open(output_io, "wb") as out_wav:
-                out_wav.setparams(params)
-                out_wav.writeframes(out_frames)
-            return output_io.getvalue()
+        try:
+            self._list_elevenlabs_voices()
+        except Exception as exc:
+            raise RuntimeError(f"ElevenLabs TTS warm-up check failed: {exc}") from exc
 
     def synthesize_tts(
         self,
@@ -968,90 +698,13 @@ class SpeechStack:
         if not text or not text.strip():
             raise ValueError("TTS text is empty.")
 
-        force_xtts_fallback = False
-
-        # ── ElevenLabs path ───────────────────────────────────────────────────
-        if self.tts_provider == "elevenlabs":
-            try:
-                mp3_bytes = self._synthesize_elevenlabs(text, voice_id=voice_id)
-                # Convert MP3 → WAV so the rest of the pipeline (volume adjustment,
-                # StreamingResponse with audio/wav) stays unchanged.
-                try:
-                    import audioop  # noqa: F401 – quick existence check
-                except ImportError:
-                    pass  # audioop is optional; pydub fallback below handles it
-                try:
-                    from pydub import AudioSegment  # type: ignore[import-untyped]
-                    seg = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
-                    seg = seg.set_channels(1).set_frame_rate(24000).set_sample_width(2)
-                    wav_io = io.BytesIO()
-                    seg.export(wav_io, format="wav")
-                    wav_bytes = wav_io.getvalue()
-                except ImportError:
-                    # pydub not installed – return raw MP3 directly.
-                    wav_bytes = mp3_bytes
-                return self._apply_wav_volume(wav_bytes, volume) if not wav_bytes[:4] == b"ID3\x03" else wav_bytes
-            except RuntimeError as exc:
-                reason = str(exc).lower()
-                paid_plan_restricted = (
-                    "paid_plan_required" in reason
-                    or "payment_required" in reason
-                    or "http 402" in reason
-                )
-                if self.elevenlabs_fallback_to_xtts and (paid_plan_restricted or "elevenlabs tts failed" in reason):
-                    force_xtts_fallback = True
-                else:
-                    raise
-
-        # ── XTTS-v2 path ─────────────────────────────────────────────────────
-        if self.tts_provider != "xtts_v2" and not force_xtts_fallback:
-            raise RuntimeError(f"Unsupported TTS provider '{self.tts_provider}'.")
-
-        tts_language = (language or self.tts_default_language or "en").strip().lower()
-        speaker_wav = self._resolve_speaker_wav(voice_id)
-
-        with self._tts_lock:
-            self._ensure_tts_model()
-            assert self._xtts_model is not None
-
-            xtts_api = self._xtts_model
-            synthesizer = getattr(xtts_api, "synthesizer", None)
-            xtts_model = getattr(synthesizer, "tts_model", None)
-            if synthesizer is not None and xtts_model is not None and hasattr(xtts_model, "inference"):
-                try:
-                    gpt_cond_latent, speaker_embedding = self._get_xtts_conditioning(speaker_wav)
-                    inference = xtts_model.inference(
-                        text=text,
-                        language=tts_language,
-                        gpt_cond_latent=gpt_cond_latent,
-                        speaker_embedding=speaker_embedding,
-                        speed=self.tts_speed,
-                        enable_text_splitting=False,
-                    )
-                    sample_rate = int(getattr(synthesizer, "output_sample_rate", 24000) or 24000)
-                    wav_bytes = self._float_audio_to_wav_bytes(inference.get("wav", []), sample_rate)
-                    return self._apply_wav_volume(wav_bytes, volume)
-                except Exception:
-                    # Fall back to the higher-level Coqui API path if direct XTTS inference fails.
-                    pass
-
-            temp_path = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                    temp_path = tmp.name
-
-                # XTTS controls speed differently from pyttsx3; keep legacy rate for API compatibility.
-                _ = int(rate)
-                self._xtts_model.tts_to_file(
-                    text=text,
-                    file_path=temp_path,
-                    speaker_wav=speaker_wav,
-                    language=tts_language,
-                )
-
-                with open(temp_path, "rb") as file_obj:
-                    wav_bytes = file_obj.read()
-                    return self._apply_wav_volume(wav_bytes, volume)
-            finally:
-                if temp_path and os.path.exists(temp_path):
-                    os.remove(temp_path)
+        mp3_bytes = self._synthesize_elevenlabs(text, voice_id=voice_id)
+        try:
+            from pydub import AudioSegment  # type: ignore[import-untyped]
+            seg = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
+            seg = seg.set_channels(1).set_frame_rate(24000).set_sample_width(2)
+            wav_io = io.BytesIO()
+            seg.export(wav_io, format="wav")
+            return wav_io.getvalue()
+        except ImportError:
+            return mp3_bytes

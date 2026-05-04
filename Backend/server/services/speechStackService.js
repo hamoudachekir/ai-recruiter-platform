@@ -1,6 +1,7 @@
 const fetch = require('node-fetch');
+const { synthesizeEdgeTts } = require('./edgeTtsService');
 
-const SPEECH_STACK_TIMEOUT_MS = Number(process.env.SPEECH_STACK_TIMEOUT_MS || 180000);
+const SPEECH_STACK_TIMEOUT_MS = Number(process.env.SPEECH_STACK_TIMEOUT_MS || 8000);
 
 const getSpeechStackBaseUrl = () => (
   process.env.SPEECH_STACK_URL
@@ -43,6 +44,7 @@ async function requestSpeechStackTts({
   volume = 1.0,
   voiceId = null,
   language = null,
+  provider = null,
 }) {
   const normalizedText = String(text || '').trim();
   if (!normalizedText) {
@@ -62,6 +64,7 @@ async function requestSpeechStackTts({
         volume: Number.isFinite(Number(volume)) ? Number(volume) : 1.0,
         voice_id: voiceId || undefined,
         language: language || undefined,
+        provider: provider || undefined,
       }),
       signal: controller.signal,
     });
@@ -81,8 +84,23 @@ async function requestSpeechStackTts({
       speechStackUrl: buildSpeechStackUrl('/api/tts'),
     };
   } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw new Error(`Speech Stack TTS timed out after ${SPEECH_STACK_TIMEOUT_MS}ms`);
+    clearTimeout(timer);
+    /* Python speech stack unreachable — fall back to Edge TTS directly */
+    const isUnreachable = error?.code === 'ECONNREFUSED'
+      || error?.code === 'ENOTFOUND'
+      || error?.name === 'AbortError'
+      || (error?.message || '').includes('ECONNREFUSED');
+
+    if (isUnreachable) {
+      console.warn('[speechStack] fallback → Edge TTS (python stack unreachable)');
+      const buffer = await synthesizeEdgeTts(normalizedText, voiceId, undefined, language);
+      return {
+        buffer,
+        bytes: buffer.length,
+        contentType: 'audio/mpeg',
+        contentDisposition: 'inline; filename=tts.mp3',
+        speechStackUrl: 'edge-tts-direct',
+      };
     }
     throw error;
   } finally {

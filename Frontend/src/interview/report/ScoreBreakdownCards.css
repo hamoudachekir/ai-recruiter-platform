@@ -1,0 +1,124 @@
+/* ScoreBreakdownCards.css */
+.sbc-root {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.sbc-empty {
+  color: #475569;
+  font-size: 13px;
+  padding: 24px;
+  text-align: center;
+}
+
+.sbc-total {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  background: rgba(91, 134, 229, 0.08);
+  border: 1px solid rgba(91, 134, 229, 0.22);
+  border-radius: 12px;
+  padding: 16px 22px;
+}
+
+.sbc-total-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.sbc-total-value {
+  font-size: 40px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #5b86e5, #36d1dc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+
+.sbc-total-denom {
+  font-size: 18px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.sbc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.sbc-card {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.sbc-card:hover {
+  border-color: rgba(91, 134, 229, 0.25);
+  transform: translateY(-2px);
+}
+
+.sbc-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sbc-icon { font-size: 18px; }
+
+.sbc-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sbc-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.sbc-value {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.sbc-max {
+  font-size: 13px;
+  color: #475569;
+  font-weight: 500;
+}
+
+.sbc-bar-track {
+  height: 5px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.sbc-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 1s ease;
+}
+
+.sbc-pct {
+  font-size: 11px;
+  color: #475569;
+  font-weight: 500;
+  text-align: right;
+}

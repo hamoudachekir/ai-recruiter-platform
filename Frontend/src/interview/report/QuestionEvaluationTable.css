@@ -1,0 +1,204 @@
+/* QuestionEvaluationTable.css */
+.qet-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qet-empty {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+  border-radius: 10px;
+  padding: 24px;
+  color: #64748b;
+  font-size: 13px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.qet-row {
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.qet-row--open {
+  border-color: rgba(91, 134, 229, 0.3);
+}
+
+.qet-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 14px 18px;
+  cursor: pointer;
+  gap: 12px;
+  text-align: left;
+  font-family: 'Poppins', sans-serif;
+}
+
+.qet-row-header:hover {
+  background: rgba(91, 134, 229, 0.05);
+}
+
+.qet-row-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.qet-qid {
+  font-size: 11px;
+  font-weight: 700;
+  color: #5b86e5;
+  background: rgba(91, 134, 229, 0.12);
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+.qet-category {
+  font-size: 11px;
+  font-weight: 500;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.qet-quality {
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 3px 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+
+.qet-quality--good {
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.qet-quality--average {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.qet-quality--weak {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.qet-row-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.qet-dots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.qet-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  display: inline-block;
+}
+
+.qet-dot--filled {
+  background: #5b86e5;
+}
+
+.qet-score-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #e2e8f0;
+  min-width: 30px;
+}
+
+.qet-chevron {
+  font-size: 10px;
+  color: #475569;
+}
+
+/* ── Detail section ─ */
+.qet-detail {
+  border-top: 1px solid rgba(148, 163, 184, 0.08);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: qet-expand 0.2s ease;
+}
+
+@keyframes qet-expand {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.qet-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qet-block-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.qet-block-text {
+  margin: 0;
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.6;
+}
+
+.qet-answer {
+  background: rgba(15, 23, 42, 0.45);
+  border-left: 3px solid #5b86e5;
+  border-radius: 0 8px 8px 0;
+  padding: 10px 14px;
+}
+
+.qet-feedback {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* ── Skill chips ─ */
+.qet-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.qet-chip {
+  background: rgba(91, 134, 229, 0.1);
+  border: 1px solid rgba(91, 134, 229, 0.22);
+  border-radius: 999px;
+  color: #93c5fd;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+}

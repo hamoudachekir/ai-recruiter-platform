@@ -72,12 +72,14 @@ class StartRequest(BaseModel):
     candidate_profile: dict = Field(default_factory=dict)
     interview_style: str = Field("friendly", max_length=40)
     phase: Literal["intro", "technical"] = "intro"
+    preferred_language: str = Field("en", max_length=20)
 
 
 class TurnRequest(BaseModel):
     interview_id: str
     text: str = Field(..., min_length=1, max_length=5000)
     sentiment: dict | None = None
+    preferred_language: str | None = Field(None, max_length=20)
 
 
 class SwitchRequest(BaseModel):
@@ -116,6 +118,7 @@ def session_start(req: StartRequest) -> dict:
             candidate_profile=req.candidate_profile,
             interview_style=req.interview_style,
             phase=req.phase,
+            preferred_language=req.preferred_language,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -126,7 +129,10 @@ def session_turn(req: TurnRequest) -> dict:
     eng = _require_engine()
     try:
         return eng.candidate_turn(
-            req.interview_id, text=req.text, sentiment=req.sentiment
+            req.interview_id,
+            text=req.text,
+            sentiment=req.sentiment,
+            preferred_language=req.preferred_language,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

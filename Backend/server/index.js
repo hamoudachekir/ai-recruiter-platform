@@ -60,6 +60,7 @@ const {
   maybeCorrectTranscriptionText,
   maybeSummarizeTranscriptionText,
 } = require('./services/voiceTextCorrectionService');
+const { getVisionLLMConfig } = require('./services/visionLLMService');
 // Create Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
@@ -406,15 +407,71 @@ io.on("connection", (socket) => {
     text: result.agent_message?.text,
     difficulty: result.agent_message?.difficulty,
     skillFocus: result.agent_message?.skill_focus,
+    language: result.agent_message?.language || result.language || 'en',
   });
 
   const callRoomInterviewStyle = String(process.env.CALL_ROOM_INTERVIEW_STYLE || 'fast_screening').trim() || 'fast_screening';
   const AGENT_TTS_MAX_CHARS = Math.max(80, Number(process.env.AGENT_TTS_MAX_CHARS || 220));
 
-  const broadcastAgentMessage = (roomId, payload) => {
+  const normalizeAgentLanguage = (value, fallback = 'en') => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized.startsWith('fr') || normalized === 'french' || normalized === 'francais' || normalized === 'français') return 'fr';
+    if (normalized.startsWith('en') || normalized === 'english' || normalized === 'anglais') return 'en';
+    return fallback;
+  };
+
+  const detectRequestedAgentLanguage = (text) => {
+    const normalized = String(text || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return null;
+
+    const frenchSignals = [
+      'speak french',
+      'speak frensh',
+      'ask me in french',
+      'ask me in frensh',
+      'continue in french',
+      'turn this convo in french',
+      'turn this convo in frensh',
+      'turn this conversation in french',
+      'turn this conversation in frensh',
+      'french language',
+      'frensh language',
+      'parle francais',
+      'parlez francais',
+      'en francais',
+      'francais stp',
+      'francais svp',
+    ];
+    if (frenchSignals.some((phrase) => normalized.includes(phrase))) return 'fr';
+
+    const englishSignals = ['speak english', 'ask me in english', 'continue in english', 'parle anglais', 'en anglais'];
+    if (englishSignals.some((phrase) => normalized.includes(phrase))) return 'en';
+
+    return null;
+  };
+
+  const broadcastAgentMessage = (roomId, payload, roomDbId) => {
     if (!roomId) return;
     const channel = callRoomChannelName(roomId);
     if (channel) io.to(channel).emit('agent:message', payload);
+
+    if (roomDbId && payload.text) {
+      CallRoom.findByIdAndUpdate(roomDbId, {
+        $push: {
+          messages: {
+            role: 'agent',
+            text: payload.text,
+            timestamp: new Date()
+          }
+        }
+      }).catch(err => console.error('Failed to save agent message', err));
+    }
   };
 
   const broadcastAgentEnded = (roomId, payload) => {
@@ -423,15 +480,24 @@ io.on("connection", (socket) => {
     if (channel) io.to(channel).emit('agent:ended', payload);
   };
 
-  // Echo a candidate utterance (typed or voice) to every participant in the
-  // call-room channel so the RH chat panel sees what the candidate said,
-  // not just the agent's reply.
   const broadcastCandidateMessage = (room, payload) => {
     const channel = callRoomChannelName(room?.roomId);
     if (channel) io.to(channel).emit('candidate:message', payload);
 
     const initiatorId = resolveDocumentId(room?.initiator);
     if (initiatorId) io.to(initiatorId).emit('candidate:message', payload);
+
+    // Save candidate message to DB
+    CallRoom.findByIdAndUpdate(room._id, {
+      $push: {
+        messages: {
+          role: 'candidate',
+          text: payload.text,
+          sentiment: payload.sentiment,
+          timestamp: new Date(payload.ts || Date.now())
+        }
+      }
+    }).catch(err => console.error('Failed to save candidate message', err));
   };
 
   const sendAgentScore = async (roomDbId, roomId, payload) => {
@@ -487,16 +553,18 @@ io.on("connection", (socket) => {
   };
 
   const sendAgentTtsToCandidate = async (room, payload) => {
+    const candidateId = resolveDocumentId(room?.candidate);
+    const normalizedText = String(payload?.text || '').trim();
     try {
-      const candidateId = resolveDocumentId(room?.candidate);
-      const normalizedText = String(payload?.text || '').trim();
       if (!candidateId || !normalizedText) return;
       const ttsText = buildFastTtsText(normalizedText);
       if (!ttsText) return;
+      const ttsLanguage = normalizeAgentLanguage(payload?.language, detectRequestedAgentLanguage(ttsText) || 'en');
 
       const result = await requestSpeechStackTts({
         text: ttsText,
-        language: process.env.FW_TTS_LANGUAGE || 'en',
+        language: ttsLanguage,
+        provider: 'edge',
       });
 
       io.to(candidateId).emit('agent:tts', {
@@ -506,12 +574,26 @@ io.on("connection", (socket) => {
         turnIndex: payload.turnIndex,
         text: ttsText,
         sourceText: normalizedText,
+        language: ttsLanguage,
         contentType: result.contentType,
         audioBase64: result.buffer.toString('base64'),
-        provider: 'xtts_v2',
+        provider: 'elevenlabs',
       });
     } catch (error) {
       console.error('agent:tts routing failed:', error?.message || error);
+      // Let the candidate client fall back to direct /api/tts fetch
+      // immediately instead of waiting for the long timer.
+      if (candidateId) {
+        io.to(candidateId).emit('agent:tts-unavailable', {
+          interviewId: payload?.interviewId,
+          roomId: payload?.roomId,
+          phase: payload?.phase,
+          turnIndex: payload?.turnIndex,
+          text: normalizedText,
+          language: normalizeAgentLanguage(payload?.language, detectRequestedAgentLanguage(normalizedText) || 'en'),
+          message: error?.message || 'agent tts unavailable',
+        });
+      }
     }
   };
 
@@ -625,17 +707,19 @@ io.on("connection", (socket) => {
         },
         interviewStyle: callRoomInterviewStyle,
         phase,
+        preferredLanguage: normalizeAgentLanguage(process.env.CALL_ROOM_AGENT_LANGUAGE || 'en'),
       });
 
       const resolvedRoomId = room.roomId;
       const agentMessagePayload = buildAgentMessagePayload(interviewId, resolvedRoomId, result);
       if (result.resumed) {
-        socket.emit('agent:message', agentMessagePayload);
-        if (prepareTts) {
-          void sendAgentTtsToCandidate(room, agentMessagePayload);
-        }
+        // Resumed sessions are common when the candidate clicks Start/Unmute
+        // after a reconnect. Broadcast the current turn and send TTS so the
+        // call room always gets text + speech together on start.
+        broadcastAgentMessage(resolvedRoomId, agentMessagePayload, room._id);
+        void sendAgentTtsToCandidate(room, agentMessagePayload);
       } else {
-        broadcastAgentMessage(resolvedRoomId, agentMessagePayload);
+        broadcastAgentMessage(resolvedRoomId, agentMessagePayload, room._id);
         void sendAgentTtsToCandidate(room, agentMessagePayload);
       }
 
@@ -655,7 +739,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on('agent:candidate-turn', async ({ roomId, roomDbId, text, sentiment, source }) => {
+  socket.on('agent:candidate-turn', async ({ roomId, roomDbId, text, sentiment, source, requestedLanguage }) => {
     try {
       if (!text || !String(text).trim()) return;
 
@@ -684,10 +768,11 @@ io.on("connection", (socket) => {
         interviewId,
         text,
         sentiment: normalizedSentiment,
+        preferredLanguage: normalizeAgentLanguage(requestedLanguage, detectRequestedAgentLanguage(candidateText) || ''),
       });
 
       const agentMessagePayload = buildAgentMessagePayload(interviewId, resolvedRoomId, result);
-      broadcastAgentMessage(resolvedRoomId, agentMessagePayload);
+      broadcastAgentMessage(resolvedRoomId, agentMessagePayload, room._id);
       void sendAgentTtsToCandidate(room, agentMessagePayload);
 
       await sendAgentScore(interviewId, resolvedRoomId, {
@@ -717,7 +802,7 @@ io.on("connection", (socket) => {
       const result = await interviewAgent.switchPhase({ interviewId, phase });
 
       const agentMessagePayload = buildAgentMessagePayload(interviewId, resolvedRoomId, result);
-      broadcastAgentMessage(resolvedRoomId, agentMessagePayload);
+      broadcastAgentMessage(resolvedRoomId, agentMessagePayload, room._id);
       void sendAgentTtsToCandidate(room, agentMessagePayload);
 
       await sendAgentScore(interviewId, resolvedRoomId, {
@@ -744,6 +829,10 @@ io.on("connection", (socket) => {
       const interviewId = room._id.toString();
       const resolvedRoomId = room.roomId;
       const snapshot = await interviewAgent.endSession({ interviewId });
+
+      await CallRoom.findByIdAndUpdate(roomDbId, {
+        $set: { agentSnapshot: snapshot }
+      });
 
       broadcastAgentEnded(resolvedRoomId, {
         interviewId,
@@ -5467,6 +5556,10 @@ app.delete('/api/voice-recordings/:filename', async (req, res) => {
 // Start the server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
+    const visionConfig = getVisionLLMConfig();
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`✅ Socket.IO available at ws://localhost:${PORT}/socket.io/`);
+    console.log(`Vision LLM provider: ${visionConfig.provider}`);
+    console.log(`Vision LLM model: ${visionConfig.model}`);
+    console.log(`Vision LLM API key loaded: ${visionConfig.apiKeyLoaded ? 'yes' : 'no'}`);
 });
