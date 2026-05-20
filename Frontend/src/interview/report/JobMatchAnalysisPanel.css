@@ -1,0 +1,218 @@
+/* JobMatchAnalysisPanel.css */
+
+.jma-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.jma-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.jma-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.jma-fit-badge {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 20px;
+}
+
+.jma-fit-badge--strong {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.jma-fit-badge--moderate {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.jma-fit-badge--weak {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.jma-fit-badge--unknown {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.jma-breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.jma-metric {
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.jma-metric-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.jma-metric-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jma-score {
+  font-size: 16px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.jma-score--high {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.jma-score--medium {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.jma-score--low {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.jma-grade {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.jma-section {
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.jma-section--positive {
+  background: #f0fdf4;
+  border-left: 4px solid #22c55e;
+}
+
+.jma-section--attention {
+  background: #fef2f2;
+  border-left: 4px solid #ef4444;
+}
+
+.jma-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 12px 0;
+}
+
+.jma-section--positive .jma-section-title {
+  color: #15803d;
+}
+
+.jma-section--attention .jma-section-title {
+  color: #b91c1c;
+}
+
+.jma-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.jma-list-item {
+  font-size: 14px;
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jma-list-item--positive::before {
+  content: "✓";
+  color: #22c55e;
+  font-weight: 700;
+}
+
+.jma-list-item--attention::before {
+  content: "⚠";
+  color: #ef4444;
+}
+
+.jma-hint {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 12px;
+}
+
+.jma-followup {
+  background: #f0f9ff;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.jma-followup-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 12px 0;
+}
+
+.jma-suggestions {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.jma-suggestion {
+  font-size: 13px;
+  color: #374151;
+  padding: 8px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-bottom: 1px solid #e0f2fe;
+}
+
+.jma-suggestion:last-child {
+  border-bottom: none;
+}
+
+.jma-suggestion-number {
+  width: 20px;
+  height: 20px;
+  background: #0ea5e9;
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}

@@ -1,0 +1,132 @@
+/* SkillsEvidencePanel.css */
+
+.sep-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.sep-header {
+  margin-bottom: 20px;
+}
+
+.sep-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 6px 0;
+}
+
+.sep-subtitle {
+  font-size: 14px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.sep-empty {
+  padding: 24px;
+  background: #f9fafb;
+  border-radius: 8px;
+  text-align: center;
+  color: #6b7280;
+}
+
+.sep-hint {
+  font-size: 13px;
+  color: #9ca3af;
+  margin-top: 8px;
+}
+
+.sep-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.sep-category {
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.sep-category-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sep-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.sep-icon--demonstrated {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.sep-icon--matched {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.sep-icon--mentioned {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.sep-icon--missing {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.sep-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sep-skill {
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-weight: 500;
+}
+
+.sep-skill--demonstrated {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.sep-skill--matched {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.sep-skill--mentioned {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.sep-skill--missing {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.sep-note {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 12px;
+}

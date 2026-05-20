@@ -13,7 +13,7 @@ services:
       - SERVICE_PORT=5004
       - SERVICE_HOST=0.0.0.0
       - MONGODB_URL=mongodb://mongo:27017
-      - MONGODB_DATABASE=ai_recruiter_db
+      - MONGODB_DATABASE=ai_recruiter
       - NODE_BACKEND_URL=http://node-backend:3001
       - WORKING_HOURS_START=9
       - WORKING_HOURS_END=17
@@ -37,7 +37,7 @@ services:
     ports:
       - "27017:27017"
     environment:
-      MONGO_INITDB_DATABASE: ai_recruiter_db
+      MONGO_INITDB_DATABASE: ai_recruiter
     volumes:
       - mongo_data:/data/db
     networks:

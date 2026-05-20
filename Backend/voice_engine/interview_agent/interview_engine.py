@@ -11,11 +11,12 @@ import re
 import threading
 import time
 import unicodedata
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .llm_client import LLMClient, LLMError
-from .prompts import HR_SYSTEM, TECHNICAL_SYSTEM, build_user_turn_prompt
+from .prompts import COMPACT_SYSTEM, HR_SYSTEM, TECHNICAL_SYSTEM, build_compact_user_turn_prompt, build_user_turn_prompt
 
 Phase = Literal["intro", "technical"]
 InterviewStyle = Literal["friendly", "strict", "senior", "junior", "fast_screening"]
@@ -24,7 +25,8 @@ INTERVIEW_STYLE_VALUES = {"friendly", "strict", "senior", "junior", "fast_screen
 AGENT_TRANSCRIPT_TAIL_TURNS = max(4, min(int(os.getenv("AGENT_TRANSCRIPT_TAIL_TURNS", "8") or "8"), 20))
 AGENT_SHORT_TERM_MEMORY_TURNS = max(3, min(int(os.getenv("AGENT_SHORT_TERM_MEMORY_TURNS", "6") or "6"), 16))
 AGENT_TEMPERATURE = max(0.0, min(float(os.getenv("AGENT_TEMPERATURE", "0.18") or "0.18"), 1.0))
-AGENT_MAX_TOKENS = max(180, min(int(os.getenv("AGENT_MAX_TOKENS", "320") or "320"), 800))
+AGENT_MAX_TOKENS = max(80, min(int(os.getenv("AGENT_MAX_TOKENS", "200") or "200"), 800))
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -354,7 +356,14 @@ def pick_system_prompt(phase: Phase) -> str:
 
 def _question_key(text: str) -> str:
     """Normalize a question so near-duplicates can be detected reliably."""
-    lowered = re.sub(r"[^a-z0-9\s]", " ", str(text or "").lower())
+    raw = str(text or "")
+    raw = re.sub(
+        r"^\s*of\s+course\.?\s*let\s+me\s+(?:rephrase|restate):?\s*",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    lowered = re.sub(r"[^a-z0-9\s]", " ", raw.lower())
     tokens = [tok for tok in lowered.split() if tok not in {
         "can", "you", "tell", "me", "about", "your", "why", "are", "is", "the", "a", "an", "to"
     }]
@@ -366,19 +375,25 @@ def _token_set(text: str) -> set[str]:
 
 
 def _is_question_repetitive(state: InterviewState, question: str) -> bool:
+    """Return True if `question` is too similar to any question already asked.
+
+    Checks the FULL transcript (not just recent turns) so a question asked
+    early in the interview cannot reappear later. Threshold lowered from
+    0.75 → 0.65 to catch more near-duplicates.
+    """
     candidate_key = _question_key(question)
     if not candidate_key:
         return True
 
-    recent_agent_questions = [
+    all_agent_questions = [
         entry.text
         for entry in state.transcript
         if entry.role == "agent"
-    ][-7:]
+    ]
 
     candidate_tokens = set(candidate_key.split())
 
-    for prev in recent_agent_questions:
+    for prev in all_agent_questions:
         prev_key = _question_key(prev)
         if not prev_key:
             continue
@@ -390,7 +405,7 @@ def _is_question_repetitive(state: InterviewState, question: str) -> bool:
         prev_tokens = set(prev_key.split())
         if candidate_tokens and prev_tokens:
             overlap = len(candidate_tokens & prev_tokens) / max(1, len(candidate_tokens | prev_tokens))
-            if overlap >= 0.75:
+            if overlap >= 0.65:
                 return True
 
     return False
@@ -799,16 +814,31 @@ def _build_intro_project_followup(state: InterviewState, last_answer: str) -> tu
 
 
 def _is_repeat_request(text: str) -> bool:
-    normalized = _answer_key(text)
+    """True only when the whole message is a clear repeat/rephrase request.
+
+    Guard: any answer longer than 12 words is a real answer — never a repeat
+    request. This prevents technical phrases like "the STT captured repeated
+    words" or "I added validation to avoid repeated transcripts" from
+    triggering a question repeat.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    # Real answers are longer — never treat them as repeat requests.
+    if len(raw.split()) > 12:
+        return False
+
+    normalized = _answer_key(raw)
     if not normalized:
         return False
 
-    repeat_phrases = [
-        "repeat",
+    exact_phrases = [
         "say again",
         "again please",
         "can you repeat",
         "can you say that again",
+        "could you repeat",
+        "please repeat",
         "i did not understand",
         "i didnt understand",
         "did not catch",
@@ -819,12 +849,26 @@ def _is_repeat_request(text: str) -> bool:
         "hello can you hear",
         "pardon",
         "come again",
+        "what was the question",
+        "i didnt hear",
+        "i did not hear",
     ]
-    return any(phrase in normalized for phrase in repeat_phrases)
+    if any(phrase in normalized for phrase in exact_phrases):
+        return True
+
+    # Word-boundary match: bare "repeat" triggers, "repeated"/"repeating" do NOT.
+    return bool(re.search(r"\brepeat\b", normalized))
 
 
 def _is_confusion_request(text: str) -> bool:
-    normalized = _answer_key(text)
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    # A detailed answer is never a confusion request.
+    if len(raw.split()) > 15:
+        return False
+
+    normalized = _answer_key(raw)
     if not normalized:
         return False
 
@@ -1110,7 +1154,12 @@ def _build_rotated_technical_question(skill: str, difficulty: int) -> str:
 
 
 def _fallback_question(state: InterviewState) -> tuple[str, int, str]:
-    """Produce a deterministic non-repetitive fallback question."""
+    """Produce a deterministic non-repetitive fallback question.
+
+    Iterates through a large bank and returns the first entry that has not
+    already been asked. Never returns a question that is already in the
+    transcript — the previous `return intro_bank[0]` bug is gone.
+    """
     asked_skill_keys = {
         _question_key(str(entry.meta.get("skill_focus", "")))
         for entry in state.transcript
@@ -1119,11 +1168,17 @@ def _fallback_question(state: InterviewState) -> tuple[str, int, str]:
     asked_skill_keys.discard("")
 
     if state.phase == "intro":
-        intro_bank: list[tuple[str, int, str]] = [
+        bank: list[tuple[str, int, str]] = [
             ("What motivated you to apply for this role, and what stood out to you about it?", 1, "motivation"),
             ("Can you share an example of working with a team under pressure and what your role was?", 2, "teamwork"),
-            ("Tell me about a challenge you faced recently and how you handled it.", 2, "behavioral"),
-            ("What kind of work environment helps you perform at your best?", 1, "work style"),
+            ("Tell me about a recent challenge you faced and how you handled it.", 2, "behavioral"),
+            ("What kind of work environment helps you do your best work?", 1, "work style"),
+            ("How do you approach learning a new technology you've never used before?", 2, "learning agility"),
+            ("Describe a time you disagreed with a teammate. How did you resolve it?", 2, "conflict resolution"),
+            ("What does ownership of a project mean to you in practice?", 2, "ownership"),
+            ("What's one area you're actively trying to improve right now?", 1, "self-awareness"),
+            ("Walk me through how you prioritize tasks when working on multiple things at once.", 2, "time management"),
+            ("How do you make sure knowledge is shared with the rest of your team?", 2, "collaboration"),
         ]
     else:
         available_skills = [
@@ -1137,24 +1192,25 @@ def _fallback_question(state: InterviewState) -> tuple[str, int, str]:
             ),
             available_skills[0] if available_skills else "problem-solving",
         )
-        intro_bank = [
-            (
-                f"Could you walk me through a practical task where you used {target_skill}, and explain your approach step by step?",
-                2,
-                target_skill,
-            ),
-            (
-                f"What common mistakes do teams make with {target_skill}, and how would you avoid them?",
-                3,
-                target_skill,
-            ),
+        bank = [
+            (f"What was the most important technical decision you made in that project, and why?", 3, "technical decision"),
+            (f"How did you test your solution to make sure it was reliable?", 2, "testing"),
+            (f"What would you improve in that project if you had more time?", 2, "reflection"),
+            (f"How did you communicate progress or blockers to your team during that work?", 2, "collaboration"),
+            (f"What common mistakes do teams make with {target_skill}, and how would you avoid them?", 3, target_skill),
+            (f"Describe one performance or reliability challenge you've faced and how you resolved it.", 3, "problem-solving"),
+            (f"How do you ensure code you write is easy to maintain for the next developer?", 2, "code quality"),
+            (f"Walk me through how you would debug a hard-to-reproduce issue in a {target_skill} system.", 3, target_skill),
+            (f"What did you learn from that work that you would apply differently next time?", 2, "learning"),
+            (f"How did you validate that your solution actually solved the original problem?", 3, "validation"),
         ]
 
-    for item in intro_bank:
+    for item in bank:
         if not _is_question_repetitive(state, item[0]):
             return item
 
-    return intro_bank[0]
+    # Absolute last resort: generic wrap-up that is unlikely to have been asked.
+    return ("Is there anything about your experience or skills you'd like to add before we continue?", 1, "general")
 
 
 class InterviewEngine:
@@ -1737,7 +1793,8 @@ class InterviewEngine:
                 record_evaluation=True,
             )
 
-        system = pick_system_prompt(state.phase)
+        use_compact_prompt = bool(getattr(self._llm, "use_compact_interview_prompt", False))
+        system = COMPACT_SYSTEM if use_compact_prompt else pick_system_prompt(state.phase)
 
         # Compute stress from confidence + sentiment + struggle streak
         # (only after turn 0, when we have a real answer to grade)
@@ -1760,28 +1817,53 @@ class InterviewEngine:
             {"role": e.role, "text": e.text}
             for e in state.transcript[-(AGENT_SHORT_TERM_MEMORY_TURNS * 2):]
         ]
+        asked_questions = [
+            e.text
+            for e in state.transcript
+            if e.role == "agent" and str(e.text or "").strip()
+        ]
+        answered_topics = [
+            item.skill_focus
+            for item in state.evaluations
+            if str(item.skill_focus or "").strip()
+        ]
         facts_summary = _serialize_candidate_facts(state)
         if facts_summary != "(none)":
             transcript_tail.append({"role": "assistant", "text": f"candidate_facts: {facts_summary}"})
             short_term_memory.append({"role": "assistant", "text": f"candidate_facts: {facts_summary}"})
 
-        user = build_user_turn_prompt(
-            phase=state.phase,
-            job_title=state.job_title,
-            job_skills=state.job_skills,
-            job_description=state.job_description,
-            candidate_name=state.candidate_name,
-            candidate_profile=state.candidate_profile,
-            theta=state.theta,
-            last_candidate_answer=last_answer,
-            last_sentiment=last_sentiment,
-            transcript_tail=transcript_tail,
-            short_term_memory=short_term_memory,
-            turn_index=state.turn_index,
-            agent_mode=agent_mode,
-            interview_style=state.interview_style,
-            preferred_language=state.preferred_language,
-        )
+        if use_compact_prompt:
+            user = build_compact_user_turn_prompt(
+                phase=state.phase,
+                job_title=state.job_title,
+                job_skills=state.job_skills,
+                candidate_name=state.candidate_name,
+                candidate_profile=state.candidate_profile,
+                last_candidate_answer=last_answer,
+                transcript_tail=transcript_tail,
+                asked_questions=asked_questions,
+                answered_topics=answered_topics,
+            )
+        else:
+            user = build_user_turn_prompt(
+                phase=state.phase,
+                job_title=state.job_title,
+                job_skills=state.job_skills,
+                job_description=state.job_description,
+                candidate_name=state.candidate_name,
+                candidate_profile=state.candidate_profile,
+                theta=state.theta,
+                last_candidate_answer=last_answer,
+                last_sentiment=last_sentiment,
+                transcript_tail=transcript_tail,
+                short_term_memory=short_term_memory,
+                turn_index=state.turn_index,
+                agent_mode=agent_mode,
+                interview_style=state.interview_style,
+                preferred_language=state.preferred_language,
+                asked_questions=asked_questions,
+                answered_topics=answered_topics,
+            )
 
         system_with_comfort = system + comfort_addendum
 
@@ -1793,7 +1875,25 @@ class InterviewEngine:
                 max_tokens=AGENT_MAX_TOKENS,
             )
         except LLMError as exc:
-            raise RuntimeError(f"LLM turn failed: {exc}") from exc
+            # Keep the interview live even if the external LLM times out.
+            logger.warning("[interview-agent] LLM provider failed; using fallback question: %s", exc)
+            fallback_question, fallback_difficulty, fallback_skill = _fallback_question(state)
+            return self._finish_turn(
+                state,
+                question=fallback_question,
+                difficulty=fallback_difficulty,
+                skill_focus=fallback_skill,
+                score=0.45,
+                confidence=0.35,
+                agent_mode=agent_mode,
+                reasoning=f"LLM fallback due to provider error: {exc}",
+                done=False,
+                last_answer=last_answer,
+                last_sentiment=last_sentiment,
+                auto_switched=auto_switched,
+                update_ability=True,
+                record_evaluation=True,
+            )
 
         score = float(payload.get("score", 0.5))
         confidence = float(payload.get("confidence", 0.5))

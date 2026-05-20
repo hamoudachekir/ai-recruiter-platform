@@ -1,0 +1,291 @@
+/**
+ * RecommendationPanel.css
+ *
+ * Styles for the final recommendation panel.
+ */
+
+.recommendation-panel {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.recommendation-panel__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0 0 20px 0;
+}
+
+/* Recommendation card */
+.recommendation-card {
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+.recommendation-card--positive {
+  background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
+  border: 2px solid #22c55e;
+}
+
+.recommendation-card--negative {
+  background: linear-gradient(135deg, #fef2f2 0%, #ffffff 100%);
+  border: 2px solid #ef4444;
+}
+
+.recommendation-card--neutral {
+  background: linear-gradient(135deg, #fef3c7 0%, #ffffff 100%);
+  border: 2px solid #f59e0b;
+}
+
+.recommendation-card__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+}
+
+.recommendation-card--positive .recommendation-card__header {
+  background: #dcfce7;
+}
+
+.recommendation-card--negative .recommendation-card__header {
+  background: #fee2e2;
+}
+
+.recommendation-card--neutral .recommendation-card__header {
+  background: #fef3c7;
+}
+
+.recommendation-card__icon {
+  font-size: 24px;
+  font-weight: 700;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.recommendation-card--positive .recommendation-card__icon {
+  background: #22c55e;
+  color: white;
+}
+
+.recommendation-card--negative .recommendation-card__icon {
+  background: #ef4444;
+  color: white;
+}
+
+.recommendation-card--neutral .recommendation-card__icon {
+  background: #f59e0b;
+  color: white;
+}
+
+.recommendation-card__title {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.recommendation-card--positive .recommendation-card__title {
+  color: #166534;
+}
+
+.recommendation-card--negative .recommendation-card__title {
+  color: #991b1b;
+}
+
+.recommendation-card--neutral .recommendation-card__title {
+  color: #92400e;
+}
+
+.recommendation-card__content {
+  padding: 20px;
+}
+
+.recommendation__text {
+  font-size: 15px;
+  line-height: 1.7;
+  color: #334155;
+  margin: 0;
+}
+
+.recommendation__empty {
+  font-size: 14px;
+  color: #64748b;
+  font-style: italic;
+  text-align: center;
+  padding: 16px;
+  margin: 0;
+}
+
+/* Next step */
+.recommendation__next-step {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.next-step__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 8px 0;
+}
+
+.next-step__text {
+  font-size: 14px;
+  color: #334155;
+  margin: 0;
+}
+
+/* Status */
+.recommendation__status {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-label {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.status-value {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.status-value--accept,
+.status-value--pass,
+.status-value--proceed,
+.status-value--recommended {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.status-value--reject,
+.status-value--fail,
+.status-value--declined {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.status-value--review,
+.status-value--needs-review {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+/* Human review warning */
+.human-review-warning {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.human-review-warning__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.human-review-warning__icon {
+  font-size: 20px;
+}
+
+.human-review-warning__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #92400e;
+  margin: 0;
+}
+
+.human-review-warning__text {
+  font-size: 13px;
+  color: #78350f;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Ethics note */
+.ethics-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  background: #f0f4ff;
+  border-radius: 8px;
+  border-left: 4px solid #5b86e5;
+  margin-bottom: 20px;
+}
+
+.ethics-note__icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.ethics-note__text {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Source note */
+.recommendation-source-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.recommendation-source-note .source-note__icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.recommendation-source-note .source-note__text {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .recommendation-panel {
+    padding: 16px;
+  }
+
+  .recommendation-card__header {
+    padding: 12px 16px;
+  }
+
+  .recommendation-card__content {
+    padding: 16px;
+  }
+
+  .recommendation__next-step {
+    margin-top: 16px;
+    padding-top: 16px;
+  }
+}

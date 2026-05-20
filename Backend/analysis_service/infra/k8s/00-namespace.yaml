@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-recruiter
+  labels:
+    app.kubernetes.io/name: ai-recruiter
+    phase: "5"
+    monitoring: prometheus

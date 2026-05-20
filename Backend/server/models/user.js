@@ -21,6 +21,30 @@ const ProfileSchema = new Schema({
     experience: [ExperienceSchema],
 }, { _id: false });
 
+const FaceProfileSchema = new Schema({
+    enrolled: { type: Boolean, default: false },
+    embedding: {
+        type: [Number],
+        default: undefined,
+        select: false,
+    },
+    model: { type: String },
+    status: { type: String },
+    reason: { type: String },
+    photoUrl: { type: String },
+    sourcePhotoUrl: { type: String },
+    quality: {
+        faceDetected: { type: Boolean, default: false },
+        multipleFaces: { type: Boolean, default: false },
+        brightness: { type: Number },
+        blurScore: { type: Number },
+        faceCount: { type: Number },
+        faceRatio: { type: Number },
+        issues: [{ type: String }],
+    },
+    updatedAt: { type: Date },
+}, { _id: false });
+
 const MeetingSchema = new Schema({
     type: { type: String, enum: ['In-person', 'Virtual', 'TBD'] },
     link: { type: String },
@@ -157,6 +181,7 @@ const UserSchema = new Schema({
     verificationStatus: VerificationSchema,
     profile: ProfileSchema,
     picture: { type: String },
+    faceProfile: FaceProfileSchema,
     verificationCode: { type: Number },
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },

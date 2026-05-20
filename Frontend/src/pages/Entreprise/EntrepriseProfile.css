@@ -758,7 +758,7 @@
     overflow: hidden;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(91, 134, 229, 0.22);
-    min-height: 500px;
+    min-height: 520px;
     position: relative;
     transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
     backdrop-filter: blur(5px);
@@ -910,22 +910,25 @@
     flex-direction: column;
     gap: 12px;
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(54, 209, 220, 0.55) rgba(255, 255, 255, 0.06);
+    min-height: 0;
 }
 
 .job-card .card-body::-webkit-scrollbar {
-    width: 8px;
+    width: 5px;
 }
 
 .job-card .card-body::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.06);
-    border-radius: 8px;
+    background: rgba(11, 12, 42, 0.4);
+    border-radius: 4px;
 }
 
 .job-card .card-body::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, rgba(91, 134, 229, 0.9), rgba(54, 209, 220, 0.9));
-    border-radius: 8px;
+    background: rgba(54, 209, 220, 0.4);
+    border-radius: 4px;
+}
+
+.job-card .card-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(54, 209, 220, 0.7);
 }
 
 .job-detail {
@@ -966,20 +969,21 @@
 }
 
 .job-detail.job-description {
-    padding: 14px 16px;
-    background: rgba(15, 23, 42, 0.72);
-    border: 1px solid rgba(125, 211, 252, 0.45);
+    padding: 18px 20px 20px;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.88), rgba(11, 17, 33, 0.95));
+    border: 1px solid rgba(103, 232, 249, 0.32);
     border-left: 4px solid #67e8f9;
-    box-shadow: 0 6px 14px rgba(2, 6, 23, 0.24);
-    flex: 1;
+    box-shadow: 0 6px 18px rgba(2, 6, 23, 0.4);
     display: flex;
     flex-direction: column;
-    min-height: 120px;
+    gap: 12px;
+    min-height: 320px;
 }
 
 .job-detail.job-description:hover {
     transform: none;
-    border-color: rgba(186, 230, 253, 0.85);
+    border-color: rgba(125, 211, 252, 0.6);
+    box-shadow: 0 10px 26px rgba(2, 6, 23, 0.5);
 }
 
 .job-description::before {
@@ -987,39 +991,52 @@
 }
 
 .job-description-label {
-    display: block;
-    margin-bottom: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
     color: #99f6e4 !important;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     font-weight: 700;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
     text-transform: uppercase;
 }
 
+.job-description-label::before {
+    content: "";
+    width: 18px;
+    height: 2px;
+    background: linear-gradient(90deg, #67e8f9, transparent);
+    border-radius: 2px;
+}
+
+/* Description content expands to fit the full text — no inner scroll, no
+   max-height clip. The card grows with it; the page is what scrolls. */
 .job-description-content {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(191, 219, 254, 0.35);
-    border-radius: 8px;
-    padding: 12px 14px;
-    flex: 1;
-    display: flex;
-    align-items: center;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    display: block;
+    min-height: 260px;
 }
 
 .job-description-text {
     margin: 0;
-    color: #f8fafc;
+    color: #eaf2ff;
     line-height: 1.7;
     font-size: 0.95rem;
+    font-weight: 400;
+    letter-spacing: 0.1px;
     white-space: pre-wrap;
     word-break: break-word;
     overflow-wrap: break-word;
-    flex: 1;
 }
 
 .job-description-text.is-empty {
-    color: #dbeafe;
+    color: #9fb4d6;
     font-style: italic;
+    font-size: 0.9rem;
 }
 
 .tag-container {
@@ -1788,6 +1805,55 @@
     text-decoration: underline;
 }
 
+.agent-workflow-room-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.agent-workflow-room-link-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.agent-workflow-room-url {
+    font-size: 0.75rem;
+    color: #a8b8d0;
+    word-break: break-all;
+    font-family: monospace;
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+
+.agent-workflow-resend-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(54, 209, 220, 0.45);
+    background: rgba(54, 209, 220, 0.1);
+    color: #36d1dc;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    align-self: flex-start;
+}
+
+.agent-workflow-resend-btn:hover:not(:disabled) {
+    background: rgba(54, 209, 220, 0.2);
+}
+
+.agent-workflow-resend-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .agent-workflow-error {
     margin-top: 8px;
     font-size: 0.78rem;
@@ -1953,7 +2019,8 @@
     }
 
     .job-card {
-        min-height: auto;
+        height: auto;
+        min-height: 480px;
     }
 
     .job-card .card-header {
@@ -2267,4 +2334,41 @@
 
 .prediction-text.low {
   color: #dc3545;
+}
+
+/* ── Compare AI button on job cards ─────────────────────────────────── */
+.job-compare-btn {
+  background: linear-gradient(135deg, rgba(99,102,241,0.18) 0%, rgba(54,209,220,0.12) 100%);
+  border: 1px solid rgba(99,102,241,0.45);
+  color: #a5b4fc;
+  font-weight: 600;
+  font-size: 0.78rem;
+  border-radius: 8px;
+  padding: 4px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-decoration: none;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+.job-compare-btn:hover {
+  background: linear-gradient(135deg, rgba(99,102,241,0.35) 0%, rgba(54,209,220,0.25) 100%);
+  border-color: rgba(99,102,241,0.75);
+  color: #e0e7ff;
+  text-decoration: none;
+}
+.job-compare-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: rgba(54,209,220,0.25);
+  border: 1px solid rgba(54,209,220,0.4);
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #67e8f9;
+  margin-left: 2px;
 }

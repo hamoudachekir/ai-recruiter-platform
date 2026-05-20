@@ -1,0 +1,1095 @@
+{
+  "session_id": "test-convo-30da4f34ca",
+  "health": {
+    "status": "ok",
+    "ready": true,
+    "provider": "groq",
+    "interview_styles": [
+      "friendly",
+      "strict",
+      "senior",
+      "junior",
+      "fast_screening"
+    ],
+    "error": null
+  },
+  "transcript": [
+    {
+      "role": "agent",
+      "text": "Hello, I'm Angelica, your AI interview assistant for today. I'll ask you a few questions related to your profile and this job position. Please answer naturally. Let's begin with a short introduction about your background",
+      "elapsed_ms": 2033,
+      "response": {
+        "interview_id": "test-convo-30da4f34ca",
+        "phase": "intro",
+        "interview_style": "friendly",
+        "language": "en",
+        "turn_index": 1,
+        "agent_message": {
+          "text": "Hello, I'm Angelica, your AI interview assistant for today. I'll ask you a few questions related to your profile and this job position. Please answer naturally. Let's begin with a short introduction about your background",
+          "difficulty": 1,
+          "skill_focus": "background",
+          "agent_mode": "normal",
+          "language": "en"
+        },
+        "scoring": {
+          "score": 0.5,
+          "confidence": 1.0,
+          "theta": 0.0,
+          "stress_level": 0.0,
+          "agent_mode": "normal",
+          "reasoning": "Opening turn generated locally for fast UX.",
+          "category_scores": {
+            "overall": {
+              "score": 0.0,
+              "confidence": 0.0,
+              "answers": 0,
+              "average_difficulty": 0.0
+            },
+            "hr": {
+              "score": 0.0,
+              "confidence": 0.0,
+              "answers": 0,
+              "average_difficulty": 0.0
+            },
+            "technical": {
+              "score": 0.0,
+              "confidence": 0.0,
+              "answers": 0,
+              "average_difficulty": 0.0
+            }
+          }
+        },
+        "done": false
+      }
+    },
+    {
+      "role": "candidate",
+      "text": "Hi, I am Alex, a full-stack developer with three years of experience. I have mostly worked with React, Node.js, Python, and PostgreSQL, and my recent work was an AI recruiter platform with live interview automation.",
+      "label": "Background intro"
+    },
+    {
+      "role": "agent",
+      "text": "For that React, Node.js, Python work, what was your exact contribution and what result did it produce?",
+      "elapsed_ms": 2044,
+      "response": {
+        "interview_id": "test-convo-30da4f34ca",
+        "phase": "intro",
+        "interview_style": "friendly",
+        "language": "en",
+        "turn_index": 2,
+        "agent_message": {
+          "text": "For that React, Node.js, Python work, what was your exact contribution and what result did it produce?",
+          "difficulty": 2,
+          "skill_focus": "React",
+          "agent_mode": "normal",
+          "language": "en"
+        },
+        "scoring": {
+          "score": 0.6,
+          "confidence": 0.6,
+          "theta": 0.0,
+          "stress_level": 0.0,
+          "agent_mode": "normal",
+          "reasoning": "Candidate mentioned concrete stack or project work, so interviewer followed that evidence before rotating topics.",
+          "category_scores": {
+            "overall": {
+              "score": 0.6,
+              "confidence": 0.6,
+              "answers": 1,
+              "average_difficulty": 2.0
+            },
+            "hr": {
+              "score": 0.6,
+              "confidence": 0.6,
+              "answers": 1,
+              "average_difficulty": 2.0
+            },
+            "technical": {
+              "score": 0.0,
+              "confidence": 0.0,
+              "answers": 0,
+              "average_difficulty": 0.0
+            }
+          }
+        },
+        "done": false
+      }
+    },
+    {
+      "role": "candidate",
+      "text": "I applied because the role is focused on owning features end to end. In my last project I handled backend APIs, frontend integration, and the AI report pipeline, so this position matches how I like to work.",
+      "label": "Motivation"
+    },
+    {
+      "role": "agent",
+      "text": "Can you describe a specific feature you built using React and Node.js, the challenges you faced, and the impact it had?",
+      "elapsed_ms": 2707,
+      "response": {
+        "interview_id": "test-convo-30da4f34ca",
+        "phase": "intro",
+        "interview_style": "friendly",
+        "language": "en",
+        "turn_index": 3,
+        "agent_message": {
+          "text": "Can you describe a specific feature you built using React and Node.js, the challenges you faced, and the impact it had?",
+          "difficulty": 2,
+          "skill_focus": "Full Stack Development",
+          "agent_mode": "normal",
+          "language": "en"
+        },
+        "scoring": {
+          "score": 0.2,
+          "confidence": 0.81,
+          "theta": -0.089,
+          "stress_level": 0.14,
+          "agent_mode": "normal",
+          "reasoning": "Candidate answered why they applied, not the specific contribution/result for React/Node/Python work",
+          "category_scores": {
+            "overall": {
+              "score": 0.4,
+              "confidence": 0.705,
+              "answers": 2,
+              "average_difficulty": 2.0
+            },
+            "hr": {
+              "score": 0.4,
+              "confidence": 0.705,
+              "answers": 2,
+              "average_difficulty": 2.0
+            },
+            "technical": {
+              "score": 0.0,
+              "confidence": 0.0,
+              "answers": 0,
+              "average_difficulty": 0.0
+            }
+          }
+        },
+        "done": false
+      }
+    },
+    {
+      "role": "candidate",
+      "text": "A challenge I handled was in the speech-to-text pipeline. The engine sometimes captured wrong or repeated words, which made the interview agent misunderstand answers. I added normalization and deduplication before sending transcripts to the LLM.",
+      "label": "Repeated-words bug trigger"
+    },
+    {
+      "role": "agent",
+      "text": "How did you test the reliability of your normalization and deduplication changes in the speech-to-text pipeline?",
+      "elapsed_ms": 2915,
+      "response": {
+        "interview_id": "test-convo-30da4f34ca",
+        "phase": "intro",
+        "interview_style": "friendly",
+        "language": "en",
+        "turn_index": 4,
+        "agent_message": {
+          "text": "How did you test the reliability of your normalization and deduplication changes in the speech-to-text pipeline?",
+          "difficulty": 2,
+          "skill_focus": "problem solving",
+          "agent_mode": "normal",
+          "language": "en"
+        },
+        "scoring": {
+          "score": 0.7,
+          "confidence": 0.81,
+          "theta": 0.022,
+          "stress_level": 0.18,
+          "agent_mode": "normal",
+          "reasoning": "The answer details a specific fix to the speech-to-text pipeline, showing relevance and some detail but lacks testing info.",
+          "category_scores": {
+            "overall": {
+              "score": 0.5,
+              "confidence": 0.74,
+              "answers": 3,
+              "average_difficulty": 2.0
+            },
+            "hr": {
+              "score": 0.5,
+              "confidence": 0.74,
+              "answers": 3,
+              "average_difficulty": 2.0
+            },
+            "technical": {
+              "score": 0.0,
+              "confidence": 0.0,
+              "answers": 0,
+              "average_difficulty": 0.0
+            }
+          }
+        },
+        "done": false
+      }
+    },
+    {
+      "role": "candidate",
+      "text": "Sorry, can you repeat the question?",
+      "label": "Explicit repeat request"
+    },
+    {
+      "role": "agent",
+      "text": "Of course. Let me rephrase: How did you test the reliability of your normalization and deduplication changes in the speech-to-text pipeline?",
+      "elapsed_ms": 2036,
+      "response": {
+        "interview_id": "test-convo-30da4f34ca",
+        "phase": "intro",
+        "interview_style": "friendly",
+        "language": "en",
+        "turn_index": 5,
+        "agent_message": {
+          "text": "Of course. Let me rephrase: How did you test the reliability of your normalization and deduplication changes in the speech-to-text pipeline?",
+          "difficulty": 2,
+          "skill_focus": "problem solving",
+          "agent_mode": "normal",
+          "language": "en"
+        },
+        "scoring": {
+          "score": 0.5,
+          "confidence": 0.5,
+          "theta": 0.022,
+          "stress_level": 0.18,
+          "agent_mode": "normal",
+          "reasoning": "Candidate requested a repeat, so the question was rephrased.",
+          "category_scores": {
+            "overall": {
+              "score": 0.5,
+              "confidence": 0.74,
+              "answers": 3,
+              "average_difficulty": 2.0
+            },
+            "hr": {
+              "score": 0.5,
+              "confidence": 0.74,
+              "answers": 3,
+              "average_difficulty": 2.0
+            },
+            "technical": {
+              "score": 0.0,
+              "confidence": 0.0,
+              "answers": 0,
+              "average_difficulty": 0.0
+            }
+          }
+        },
+        "done": false
+      }
+    },
+    {
+      "role": "candidate",
+      "text": "I worked in a small team of four. I usually owned backend and AI tasks, but I shared early API contracts with the frontend developer and used short sync calls whenever integration got blocked.",
+      "label": "Teamwork answer"
+    },
+    {
+      "role": "agent",
+      "text": "What methods or metrics did you use to verify that your normalization and deduplication improvements were reliable in production?",
+      "elapsed_ms": 2941,
+      "response": {
+        "interview_id": "test-convo-30da4f34ca",
+        "phase": "technical",
+        "interview_style": "friendly",
+        "language": "en",
+        "turn_index": 6,
+        "agent_message": {
+          "text": "What methods or metrics did you use to verify that your normalization and deduplication improvements were reliable in production?",
+          "difficulty": 2,
+          "skill_focus": "testing and reliability",
+          "agent_mode": "normal",
+          "language": "en"
+        },
+        "scoring": {
+          "score": 0.2,
+          "confidence": 0.81,
+          "theta": -0.067,
+          "stress_level": 0.14,
+          "agent_mode": "normal",
+          "reasoning": "Answer did not address testing reliability, off-topic",
+          "category_scores": {
+            "overall": {
+              "score": 0.425,
+              "confidence": 0.758,
+              "answers": 4,
+              "average_difficulty": 2.0
+            },
+            "hr": {
+              "score": 0.425,
+              "confidence": 0.758,
+              "answers": 4,
+              "average_difficulty": 2.0
+            },
+            "technical": {
+              "score": 0.0,
+              "confidence": 0.0,
+              "answers": 0,
+              "average_difficulty": 0.0
+            }
+          }
+        },
+        "done": true
+      }
+    },
+    {
+      "role": "agent",
+      "text": "Great, let's start the technical phase. Can you walk me through a recent project where you used React?",
+      "elapsed_ms": 2038,
+      "response": {
+        "interview_id": "test-convo-30da4f34ca",
+        "phase": "technical",
+        "interview_style": "friendly",
+        "language": "en",
+        "turn_index": 1,
+        "agent_message": {
+          "text": "Great, let's start the technical phase. Can you walk me through a recent project where you used React?",
+          "difficulty": 2,
+          "skill_focus": "React",
+          "agent_mode": "normal",
+          "language": "en"
+        },
+        "scoring": {
+          "score": 0.5,
+          "confidence": 1.0,
+          "theta": -0.067,
+          "stress_level": 0.14,
+          "agent_mode": "normal",
+          "reasoning": "Opening turn generated locally for fast UX.",
+          "category_scores": {
+            "overall": {
+              "score": 0.425,
+              "confidence": 0.758,
+              "answers": 4,
+              "average_difficulty": 2.0
+            },
+            "hr": {
+              "score": 0.425,
+              "confidence": 0.758,
+              "answers": 4,
+              "average_difficulty": 2.0
+            },
+            "technical": {
+              "score": 0.0,
+              "confidence": 0.0,
+              "answers": 0,
+              "average_difficulty": 0.0
+            }
+          }
+        },
+        "done": false
+      },
+      "event": "switch_to_technical"
+    },
+    {
+      "role": "candidate",
+      "text": "In React, I avoid unnecessary re-renders by keeping state close to where it is used, splitting large components, and memoizing expensive computations with useMemo. I only use React.memo or useCallback when profiling shows the component actually needs it.",
+      "label": "React performance"
+    },
+    {
+      "role": "agent",
+      "text": "Can you describe a concrete performance problem you encountered and how you resolved it using memoization or component splitting?",
+      "elapsed_ms": 2660,
+      "response": {
+        "interview_id": "test-convo-30da4f34ca",
+        "phase": "technical",
+        "interview_style": "friendly",
+        "language": "en",
+        "turn_index": 2,
+        "agent_message": {
+          "text": "Can you describe a concrete performance problem you encountered and how you resolved it using memoization or component splitting?",
+          "difficulty": 2,
+          "skill_focus": "React performance optimization",
+          "agent_mode": "normal",
+          "language": "en"
+        },
+        "scoring": {
+          "score": 0.7,
+          "confidence": 0.81,
+          "theta": 0.044,
+          "stress_level": 0.18,
+          "agent_mode": "normal",
+          "reasoning": "Candidate gave relevant details on React re\u2011render optimization techniques.",
+          "category_scores": {
+            "overall": {
+              "score": 0.48,
+              "confidence": 0.768,
+              "answers": 5,
+              "average_difficulty": 2.0
+            },
+            "hr": {
+              "score": 0.425,
+              "confidence": 0.758,
+              "answers": 4,
+              "average_difficulty": 2.0
+            },
+            "technical": {
+              "score": 0.7,
+              "confidence": 0.81,
+              "answers": 1,
+              "average_difficulty": 2.0
+            }
+          }
+        },
+        "done": false
+      }
+    },
+    {
+      "role": "candidate",
+      "text": "For slow PostgreSQL queries I start with EXPLAIN ANALYZE. In one case, a missing composite index on a join and filter path caused an 800 ms query. Adding the index brought it down to around 12 ms.",
+      "label": "PostgreSQL optimization"
+    },
+    {
+      "role": "agent",
+      "text": "Can you explain how you containerized your application with Docker and what challenges you faced during deployment?",
+      "elapsed_ms": 2761,
+      "response": {
+        "interview_id": "test-convo-30da4f34ca",
+        "phase": "technical",
+        "interview_style": "friendly",
+        "language": "en",
+        "turn_index": 3,
+        "agent_message": {
+          "text": "Can you explain how you containerized your application with Docker and what challenges you faced during deployment?",
+          "difficulty": 2,
+          "skill_focus": "Docker",
+          "agent_mode": "normal",
+          "language": "en"
+        },
+        "scoring": {
+          "score": 0.85,
+          "confidence": 0.82,
+          "theta": 0.216,
+          "stress_level": 0.14,
+          "agent_mode": "normal",
+          "reasoning": "Answer detailed DB optimization with metrics, strong relevance",
+          "category_scores": {
+            "overall": {
+              "score": 0.542,
+              "confidence": 0.777,
+              "answers": 6,
+              "average_difficulty": 2.0
+            },
+            "hr": {
+              "score": 0.425,
+              "confidence": 0.758,
+              "answers": 4,
+              "average_difficulty": 2.0
+            },
+            "technical": {
+              "score": 0.775,
+              "confidence": 0.815,
+              "answers": 2,
+              "average_difficulty": 2.0
+            }
+          }
+        },
+        "done": false
+      }
+    },
+    {
+      "role": "candidate",
+      "text": "For JWT authentication in Node.js, I use short-lived access tokens and store refresh tokens in httpOnly cookies. Protected routes validate signature and expiry, and logout revokes refresh tokens server-side.",
+      "label": "JWT security"
+    },
+    {
+      "role": "agent",
+      "text": "How do you handle token revocation and refresh token rotation to maintain security in your JWT implementation?",
+      "elapsed_ms": 2540,
+      "response": {
+        "interview_id": "test-convo-30da4f34ca",
+        "phase": "technical",
+        "interview_style": "friendly",
+        "language": "en",
+        "turn_index": 4,
+        "agent_message": {
+          "text": "How do you handle token revocation and refresh token rotation to maintain security in your JWT implementation?",
+          "difficulty": 2,
+          "skill_focus": "security",
+          "agent_mode": "normal",
+          "language": "en"
+        },
+        "scoring": {
+          "score": 0.7,
+          "confidence": 0.82,
+          "theta": 0.328,
+          "stress_level": 0.14,
+          "agent_mode": "normal",
+          "reasoning": "Relevant detail on JWT strategy, shows understanding but lacks depth on edge cases",
+          "category_scores": {
+            "overall": {
+              "score": 0.564,
+              "confidence": 0.783,
+              "answers": 7,
+              "average_difficulty": 2.0
+            },
+            "hr": {
+              "score": 0.425,
+              "confidence": 0.758,
+              "answers": 4,
+              "average_difficulty": 2.0
+            },
+            "technical": {
+              "score": 0.75,
+              "confidence": 0.817,
+              "answers": 3,
+              "average_difficulty": 2.0
+            }
+          }
+        },
+        "done": false
+      }
+    }
+  ],
+  "end_response": {
+    "interview_id": "test-convo-30da4f34ca",
+    "phase": "technical",
+    "theta": 0.328,
+    "stress_level": 0.14,
+    "turn_index": 4,
+    "intro_question_count": 5,
+    "interview_style": "friendly",
+    "preferred_language": "en",
+    "ended": true,
+    "transcript_len": 18,
+    "evaluations_count": 7,
+    "category_scores": {
+      "overall": {
+        "score": 0.564,
+        "confidence": 0.783,
+        "answers": 7,
+        "average_difficulty": 2.0
+      },
+      "hr": {
+        "score": 0.425,
+        "confidence": 0.758,
+        "answers": 4,
+        "average_difficulty": 2.0
+      },
+      "technical": {
+        "score": 0.75,
+        "confidence": 0.817,
+        "answers": 3,
+        "average_difficulty": 2.0
+      }
+    },
+    "last_question_meta": {
+      "difficulty": 2,
+      "skill_focus": "security",
+      "score": 0.7,
+      "confidence": 0.82,
+      "agent_mode": "normal",
+      "stress_level": 0.14,
+      "interview_style": "friendly",
+      "preferred_language": "en",
+      "category_scores": {
+        "overall": {
+          "score": 0.564,
+          "confidence": 0.783,
+          "answers": 7,
+          "average_difficulty": 2.0
+        },
+        "hr": {
+          "score": 0.425,
+          "confidence": 0.758,
+          "answers": 4,
+          "average_difficulty": 2.0
+        },
+        "technical": {
+          "score": 0.75,
+          "confidence": 0.817,
+          "answers": 3,
+          "average_difficulty": 2.0
+        }
+      }
+    },
+    "report": {
+      "interview_id": "test-convo-30da4f34ca",
+      "candidate_name": "Alex",
+      "job_title": "Full Stack Developer",
+      "job_skills": [
+        "React",
+        "Node.js",
+        "Python",
+        "PostgreSQL",
+        "REST APIs",
+        "Docker"
+      ],
+      "interview_style": "friendly",
+      "ended": true,
+      "created_at": 1777999287.7485187,
+      "ended_at": 1777999312.4360924,
+      "duration_seconds": 24.7,
+      "turns": 4,
+      "evaluated_answers": 7,
+      "theta": 0.328,
+      "stress_level": 0.14,
+      "category_scores": {
+        "overall": {
+          "score": 0.564,
+          "confidence": 0.783,
+          "answers": 7,
+          "average_difficulty": 2.0
+        },
+        "hr": {
+          "score": 0.425,
+          "confidence": 0.758,
+          "answers": 4,
+          "average_difficulty": 2.0
+        },
+        "technical": {
+          "score": 0.75,
+          "confidence": 0.817,
+          "answers": 3,
+          "average_difficulty": 2.0
+        }
+      },
+      "skill_breakdown": [
+        {
+          "skill": "Docker",
+          "score": 0.85,
+          "answers": 1,
+          "phase_mix": {
+            "hr": 0,
+            "technical": 1
+          }
+        },
+        {
+          "skill": "Full Stack Development",
+          "score": 0.2,
+          "answers": 1,
+          "phase_mix": {
+            "hr": 1,
+            "technical": 0
+          }
+        },
+        {
+          "skill": "problem solving",
+          "score": 0.7,
+          "answers": 1,
+          "phase_mix": {
+            "hr": 1,
+            "technical": 0
+          }
+        },
+        {
+          "skill": "React",
+          "score": 0.6,
+          "answers": 1,
+          "phase_mix": {
+            "hr": 1,
+            "technical": 0
+          }
+        },
+        {
+          "skill": "React performance optimization",
+          "score": 0.7,
+          "answers": 1,
+          "phase_mix": {
+            "hr": 0,
+            "technical": 1
+          }
+        },
+        {
+          "skill": "security",
+          "score": 0.7,
+          "answers": 1,
+          "phase_mix": {
+            "hr": 0,
+            "technical": 1
+          }
+        },
+        {
+          "skill": "testing and reliability",
+          "score": 0.2,
+          "answers": 1,
+          "phase_mix": {
+            "hr": 1,
+            "technical": 0
+          }
+        }
+      ],
+      "recommendation": {
+        "label": "mixed_signal",
+        "summary": "Mixed signal; review weak areas before deciding on the next step."
+      },
+      "strengths": [
+        "Strong answer on Docker: Answer detailed DB optimization with metrics, strong relevance"
+      ],
+      "concerns": [
+        "Weak signal on Full Stack Development: Candidate answered why they applied, not the specific contribution/result for React/Node/Python work",
+        "Weak signal on testing and reliability: Answer did not address testing reliability, off-topic"
+      ],
+      "evaluations": [
+        {
+          "phase": "intro",
+          "turn_index": 2,
+          "candidate_text": "Hi, I am Alex, a full-stack developer with three years of experience. I have mostly worked with React, Node.js, Python, and PostgreSQL, and my recent work was an AI recruiter platform with live interview automation.",
+          "score": 0.6,
+          "confidence": 0.6,
+          "difficulty": 2,
+          "skill_focus": "React",
+          "reasoning": "Candidate mentioned concrete stack or project work, so interviewer followed that evidence before rotating topics.",
+          "sentiment": {
+            "label": "POSITIVE",
+            "score": 0.72
+          },
+          "stress_level": 0.0,
+          "agent_mode": "normal",
+          "ts": 1777999289.793563
+        },
+        {
+          "phase": "intro",
+          "turn_index": 3,
+          "candidate_text": "I applied because the role is focused on owning features end to end. In my last project I handled backend APIs, frontend integration, and the AI report pipeline, so this position matches how I like to work.",
+          "score": 0.2,
+          "confidence": 0.81,
+          "difficulty": 2,
+          "skill_focus": "Full Stack Development",
+          "reasoning": "Candidate answered why they applied, not the specific contribution/result for React/Node/Python work",
+          "sentiment": {
+            "label": "POSITIVE",
+            "score": 0.72
+          },
+          "stress_level": 0.14,
+          "agent_mode": "normal",
+          "ts": 1777999292.5025501
+        },
+        {
+          "phase": "intro",
+          "turn_index": 4,
+          "candidate_text": "A challenge I handled was in the speech-to-text pipeline. The engine sometimes captured wrong or repeated words, which made the interview agent misunderstand answers. I added normalization and deduplication before sending transcripts to the LLM.",
+          "score": 0.7,
+          "confidence": 0.81,
+          "difficulty": 2,
+          "skill_focus": "problem solving",
+          "reasoning": "The answer details a specific fix to the speech-to-text pipeline, showing relevance and some detail but lacks testing info.",
+          "sentiment": {
+            "label": "POSITIVE",
+            "score": 0.72
+          },
+          "stress_level": 0.18,
+          "agent_mode": "normal",
+          "ts": 1777999295.4178457
+        },
+        {
+          "phase": "intro",
+          "turn_index": 6,
+          "candidate_text": "I worked in a small team of four. I usually owned backend and AI tasks, but I shared early API contracts with the frontend developer and used short sync calls whenever integration got blocked.",
+          "score": 0.2,
+          "confidence": 0.81,
+          "difficulty": 2,
+          "skill_focus": "testing and reliability",
+          "reasoning": "Answer did not address testing reliability, off-topic",
+          "sentiment": {
+            "label": "POSITIVE",
+            "score": 0.72
+          },
+          "stress_level": 0.14,
+          "agent_mode": "normal",
+          "ts": 1777999300.39548
+        },
+        {
+          "phase": "technical",
+          "turn_index": 2,
+          "candidate_text": "In React, I avoid unnecessary re-renders by keeping state close to where it is used, splitting large components, and memoizing expensive computations with useMemo. I only use React.memo or useCallback when profiling shows the component actually needs it.",
+          "score": 0.7,
+          "confidence": 0.81,
+          "difficulty": 2,
+          "skill_focus": "React performance optimization",
+          "reasoning": "Candidate gave relevant details on React re\u2011render optimization techniques.",
+          "sentiment": {
+            "label": "POSITIVE",
+            "score": 0.72
+          },
+          "stress_level": 0.18,
+          "agent_mode": "normal",
+          "ts": 1777999305.0952313
+        },
+        {
+          "phase": "technical",
+          "turn_index": 3,
+          "candidate_text": "For slow PostgreSQL queries I start with EXPLAIN ANALYZE. In one case, a missing composite index on a join and filter path caused an 800 ms query. Adding the index brought it down to around 12 ms.",
+          "score": 0.85,
+          "confidence": 0.82,
+          "difficulty": 2,
+          "skill_focus": "Docker",
+          "reasoning": "Answer detailed DB optimization with metrics, strong relevance",
+          "sentiment": {
+            "label": "POSITIVE",
+            "score": 0.72
+          },
+          "stress_level": 0.14,
+          "agent_mode": "normal",
+          "ts": 1777999307.8568683
+        },
+        {
+          "phase": "technical",
+          "turn_index": 4,
+          "candidate_text": "For JWT authentication in Node.js, I use short-lived access tokens and store refresh tokens in httpOnly cookies. Protected routes validate signature and expiry, and logout revokes refresh tokens server-side.",
+          "score": 0.7,
+          "confidence": 0.82,
+          "difficulty": 2,
+          "skill_focus": "security",
+          "reasoning": "Relevant detail on JWT strategy, shows understanding but lacks depth on edge cases",
+          "sentiment": {
+            "label": "POSITIVE",
+            "score": 0.72
+          },
+          "stress_level": 0.14,
+          "agent_mode": "normal",
+          "ts": 1777999310.3975444
+        }
+      ],
+      "transcript": [
+        {
+          "role": "agent",
+          "text": "Hello, I'm Angelica, your AI interview assistant for today. I'll ask you a few questions related to your profile and this job position. Please answer naturally. Let's begin with a short introduction about your background",
+          "ts": 1777999287.7485187,
+          "meta": {
+            "difficulty": 1,
+            "skill_focus": "background",
+            "phase": "intro",
+            "turn_index": 1,
+            "interview_style": "friendly",
+            "language": "en"
+          }
+        },
+        {
+          "role": "candidate",
+          "text": "Hi, I am Alex, a full-stack developer with three years of experience. I have mostly worked with React, Node.js, Python, and PostgreSQL, and my recent work was an AI recruiter platform with live interview automation.",
+          "ts": 1777999289.793563,
+          "meta": {
+            "sentiment": {
+              "label": "POSITIVE",
+              "score": 0.72
+            },
+            "raw_text": "Hi, I am Alex, a full-stack developer with three years of experience. I have mostly worked with React, Node.js, Python, and PostgreSQL, and my recent work was an AI recruiter platform with live interview automation.",
+            "phase": "intro",
+            "interview_style": "friendly",
+            "language_request": "en"
+          }
+        },
+        {
+          "role": "agent",
+          "text": "For that React, Node.js, Python work, what was your exact contribution and what result did it produce?",
+          "ts": 1777999289.793563,
+          "meta": {
+            "difficulty": 2,
+            "skill_focus": "React",
+            "phase": "intro",
+            "turn_index": 2,
+            "interview_style": "friendly",
+            "language": "en"
+          }
+        },
+        {
+          "role": "candidate",
+          "text": "I applied because the role is focused on owning features end to end. In my last project I handled backend APIs, frontend integration, and the AI report pipeline, so this position matches how I like to work.",
+          "ts": 1777999291.8258462,
+          "meta": {
+            "sentiment": {
+              "label": "POSITIVE",
+              "score": 0.72
+            },
+            "raw_text": "I applied because the role is focused on owning features end to end. In my last project I handled backend APIs, frontend integration, and the AI report pipeline, so this position matches how I like to work.",
+            "phase": "intro",
+            "interview_style": "friendly",
+            "language_request": "en"
+          }
+        },
+        {
+          "role": "agent",
+          "text": "Can you describe a specific feature you built using React and Node.js, the challenges you faced, and the impact it had?",
+          "ts": 1777999292.5025501,
+          "meta": {
+            "difficulty": 2,
+            "skill_focus": "Full Stack Development",
+            "phase": "intro",
+            "turn_index": 3,
+            "interview_style": "friendly",
+            "language": "en"
+          }
+        },
+        {
+          "role": "candidate",
+          "text": "A challenge I handled was in the speech-to-text pipeline. The engine sometimes captured wrong or repeated words, which made the interview agent misunderstand answers. I added normalization and deduplication before sending transcripts to the LLM.",
+          "ts": 1777999294.5462532,
+          "meta": {
+            "sentiment": {
+              "label": "POSITIVE",
+              "score": 0.72
+            },
+            "raw_text": "A challenge I handled was in the speech-to-text pipeline. The engine sometimes captured wrong or repeated words, which made the interview agent misunderstand answers. I added normalization and deduplication before sending transcripts to the LLM.",
+            "phase": "intro",
+            "interview_style": "friendly",
+            "language_request": "en"
+          }
+        },
+        {
+          "role": "agent",
+          "text": "How did you test the reliability of your normalization and deduplication changes in the speech-to-text pipeline?",
+          "ts": 1777999295.4178457,
+          "meta": {
+            "difficulty": 2,
+            "skill_focus": "problem solving",
+            "phase": "intro",
+            "turn_index": 4,
+            "interview_style": "friendly",
+            "language": "en"
+          }
+        },
+        {
+          "role": "candidate",
+          "text": "Sorry, can you repeat the question?",
+          "ts": 1777999297.4546196,
+          "meta": {
+            "sentiment": {
+              "label": "POSITIVE",
+              "score": 0.72
+            },
+            "raw_text": "Sorry, can you repeat the question?",
+            "phase": "intro",
+            "interview_style": "friendly",
+            "language_request": "en"
+          }
+        },
+        {
+          "role": "agent",
+          "text": "Of course. Let me rephrase: How did you test the reliability of your normalization and deduplication changes in the speech-to-text pipeline?",
+          "ts": 1777999297.4546196,
+          "meta": {
+            "difficulty": 2,
+            "skill_focus": "problem solving",
+            "phase": "intro",
+            "turn_index": 5,
+            "interview_style": "friendly",
+            "language": "en"
+          }
+        },
+        {
+          "role": "candidate",
+          "text": "I worked in a small team of four. I usually owned backend and AI tasks, but I shared early API contracts with the frontend developer and used short sync calls whenever integration got blocked.",
+          "ts": 1777999299.4842079,
+          "meta": {
+            "sentiment": {
+              "label": "POSITIVE",
+              "score": 0.72
+            },
+            "raw_text": "I worked in a small team of four. I usually owned backend and AI tasks, but I shared early API contracts with the frontend developer and used short sync calls whenever integration got blocked.",
+            "phase": "intro",
+            "interview_style": "friendly",
+            "language_request": "en"
+          }
+        },
+        {
+          "role": "agent",
+          "text": "What methods or metrics did you use to verify that your normalization and deduplication improvements were reliable in production?",
+          "ts": 1777999300.39548,
+          "meta": {
+            "difficulty": 2,
+            "skill_focus": "testing and reliability",
+            "phase": "technical",
+            "turn_index": 6,
+            "interview_style": "friendly",
+            "language": "en"
+          }
+        },
+        {
+          "role": "agent",
+          "text": "Great, let's start the technical phase. Can you walk me through a recent project where you used React?",
+          "ts": 1777999302.4346726,
+          "meta": {
+            "difficulty": 2,
+            "skill_focus": "React",
+            "phase": "technical",
+            "turn_index": 1,
+            "interview_style": "friendly",
+            "language": "en"
+          }
+        },
+        {
+          "role": "candidate",
+          "text": "In React, I avoid unnecessary re-renders by keeping state close to where it is used, splitting large components, and memoizing expensive computations with useMemo. I only use React.memo or useCallback when profiling shows the component actually needs it.",
+          "ts": 1777999304.4706216,
+          "meta": {
+            "sentiment": {
+              "label": "POSITIVE",
+              "score": 0.72
+            },
+            "raw_text": "In React, I avoid unnecessary re-renders by keeping state close to where it is used, splitting large components, and memoizing expensive computations with useMemo. I only use React.memo or useCallback when profiling shows the component actually needs it.",
+            "phase": "technical",
+            "interview_style": "friendly",
+            "language_request": "en"
+          }
+        },
+        {
+          "role": "agent",
+          "text": "Can you describe a concrete performance problem you encountered and how you resolved it using memoization or component splitting?",
+          "ts": 1777999305.0952313,
+          "meta": {
+            "difficulty": 2,
+            "skill_focus": "React performance optimization",
+            "phase": "technical",
+            "turn_index": 2,
+            "interview_style": "friendly",
+            "language": "en"
+          }
+        },
+        {
+          "role": "candidate",
+          "text": "For slow PostgreSQL queries I start with EXPLAIN ANALYZE. In one case, a missing composite index on a join and filter path caused an 800 ms query. Adding the index brought it down to around 12 ms.",
+          "ts": 1777999307.137178,
+          "meta": {
+            "sentiment": {
+              "label": "POSITIVE",
+              "score": 0.72
+            },
+            "raw_text": "For slow PostgreSQL queries I start with EXPLAIN ANALYZE. In one case, a missing composite index on a join and filter path caused an 800 ms query. Adding the index brought it down to around 12 ms.",
+            "phase": "technical",
+            "interview_style": "friendly",
+            "language_request": "en"
+          }
+        },
+        {
+          "role": "agent",
+          "text": "Can you explain how you containerized your application with Docker and what challenges you faced during deployment?",
+          "ts": 1777999307.8568683,
+          "meta": {
+            "difficulty": 2,
+            "skill_focus": "Docker",
+            "phase": "technical",
+            "turn_index": 3,
+            "interview_style": "friendly",
+            "language": "en"
+          }
+        },
+        {
+          "role": "candidate",
+          "text": "For JWT authentication in Node.js, I use short-lived access tokens and store refresh tokens in httpOnly cookies. Protected routes validate signature and expiry, and logout revokes refresh tokens server-side.",
+          "ts": 1777999309.8810074,
+          "meta": {
+            "sentiment": {
+              "label": "POSITIVE",
+              "score": 0.72
+            },
+            "raw_text": "For JWT authentication in Node.js, I use short-lived access tokens and store refresh tokens in httpOnly cookies. Protected routes validate signature and expiry, and logout revokes refresh tokens server-side.",
+            "phase": "technical",
+            "interview_style": "friendly",
+            "language_request": "en"
+          }
+        },
+        {
+          "role": "agent",
+          "text": "How do you handle token revocation and refresh token rotation to maintain security in your JWT implementation?",
+          "ts": 1777999310.3975444,
+          "meta": {
+            "difficulty": 2,
+            "skill_focus": "security",
+            "phase": "technical",
+            "turn_index": 4,
+            "interview_style": "friendly",
+            "language": "en"
+          }
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "failures": []
+}

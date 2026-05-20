@@ -1,0 +1,154 @@
+/* Candidate Self-Review — supportive, growth-oriented replay UI. */
+
+.csr-shell {
+  --csr-bg: #0b1120;
+  --csr-surface: #131c30;
+  --csr-text: #e2e8f0;
+  --csr-text-muted: #94a3b8;
+  --csr-accent: #6366f1;
+  --csr-pink: #ec4899;
+
+  min-height: 100vh;
+  background: radial-gradient(1200px 600px at 20% -10%, rgba(99, 102, 241, 0.18), transparent 60%),
+              radial-gradient(900px 500px at 100% 100%, rgba(236, 72, 153, 0.14), transparent 60%),
+              var(--csr-bg);
+  color: var(--csr-text);
+  padding: 56px 24px 80px;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+.csr-header {
+  max-width: 980px;
+  margin: 0 auto 28px;
+  text-align: center;
+}
+
+.csr-header h1 {
+  font-size: clamp(28px, 4vw, 38px);
+  margin: 0 0 10px;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #6366f1 0%, #ec4899 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.csr-subtitle {
+  color: var(--csr-text-muted);
+  font-size: 14px;
+  max-width: 620px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.csr-subtitle strong {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+/* ── Stage / video ─────────────────────────────── */
+.csr-stage {
+  position: relative;
+  max-width: 1100px;
+  margin: 0 auto;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #000;
+  aspect-ratio: 16 / 9;
+}
+
+.csr-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #000;
+}
+
+/* Overlay layer styles live in EmotionVideoOverlay.css (.evo-*) */
+
+/* ── Summary block ────────────────────────────── */
+.csr-summary {
+  max-width: 1100px;
+  margin: 28px auto 16px;
+  padding: 24px 28px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(236, 72, 153, 0.10));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.csr-summary h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+.csr-summary p {
+  font-size: 17px;
+  line-height: 1.55;
+  margin: 0;
+  color: #e2e8f0;
+}
+
+/* ── Footer ───────────────────────────────────── */
+.csr-footer {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 14px 18px;
+  font-size: 12px;
+  color: var(--csr-text-muted);
+  text-align: center;
+  background: rgba(251, 191, 36, 0.05);
+  border: 1px solid rgba(251, 191, 36, 0.18);
+  border-radius: 10px;
+}
+
+.csr-footer strong {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+/* ── Loading + empty states ───────────────────── */
+.csr-loading,
+.csr-empty {
+  max-width: 640px;
+  margin: 60px auto;
+  text-align: center;
+  padding: 56px 28px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+}
+
+.csr-loading h2,
+.csr-empty h2 {
+  font-size: 22px;
+  margin: 16px 0 8px;
+}
+
+.csr-loading p,
+.csr-empty p {
+  color: var(--csr-text-muted);
+  margin: 0;
+}
+
+.csr-loading__emoji {
+  font-size: 56px;
+  animation: csr-spin-slow 3s linear infinite;
+  display: inline-block;
+}
+
+@keyframes csr-spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 720px) {
+  .csr-shell { padding: 36px 14px 60px; }
+  .csr-live-card { right: 10px; bottom: 56px; min-width: 0; padding: 8px 12px; }
+  .csr-live-card__emoji { font-size: 24px; }
+  .csr-live-card__emotion { font-size: 14px; }
+  .csr-stream { bottom: 56px; padding: 6px 10px; }
+  .csr-summary p { font-size: 15px; }
+}

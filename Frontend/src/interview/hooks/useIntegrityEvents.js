@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 
-const SNAPSHOT_THROTTLE_MS = 30000;
+const SNAPSHOT_THROTTLE_HIGH_MS = 5000;
+const SNAPSHOT_THROTTLE_MEDIUM_MS = 15000;
 const EVENT_COOLDOWN_MS = 45000;
 
 const EVENT_RULES = [
@@ -66,7 +67,7 @@ const useIntegrityEvents = ({
   const isEnabled = active && !!interviewId && !!token;
   const ruleStateRef = useRef({});
   const lastRuleEventAtRef = useRef({});
-  const lastSnapshotAtRef = useRef(0);
+  const lastSnapshotAtRef = useRef({ high: 0, medium: 0 });
   const lastBrowserEventAtRef = useRef({});
   const hiddenStartedAtRef = useRef(0);
   const lastFullscreenRef = useRef(!!document.fullscreenElement);
@@ -114,13 +115,16 @@ const useIntegrityEvents = ({
       timestamp: event.timestamp || new Date().toISOString(),
     };
 
-    if ((payload.severity === 'medium' || payload.severity === 'high')) {
+    if (payload.severity === 'high' || payload.severity === 'medium') {
       const now = Date.now();
-      if (now - lastSnapshotAtRef.current >= SNAPSHOT_THROTTLE_MS) {
+      const isHigh = payload.severity === 'high';
+      const throttleMs = isHigh ? SNAPSHOT_THROTTLE_HIGH_MS : SNAPSHOT_THROTTLE_MEDIUM_MS;
+      const key = isHigh ? 'high' : 'medium';
+      if (now - lastSnapshotAtRef.current[key] >= throttleMs) {
         const snapshotBase64 = captureSnapshot();
         if (snapshotBase64) {
           payload.snapshotBase64 = snapshotBase64;
-          lastSnapshotAtRef.current = now;
+          lastSnapshotAtRef.current[key] = now;
         }
       }
     }

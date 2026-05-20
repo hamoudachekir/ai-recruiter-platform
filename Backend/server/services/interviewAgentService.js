@@ -2,13 +2,18 @@
 // The agent service lives at http://localhost:8013 (override via INTERVIEW_AGENT_URL).
 
 const DEFAULT_URL = process.env.INTERVIEW_AGENT_URL || 'http://localhost:8013';
-// 150s gives the Python agent room to do 2 NIM attempts at 60s each + backoff
-// without the Node fetch aborting first. Override via INTERVIEW_AGENT_TIMEOUT_MS.
+// Keep this longer than a single slow LLM turn. The Python interviewer can do
+// provider retries/backoff; aborting at 30s cuts off valid responses and leaves
+// the room stuck on "AI is thinking".
 const AGENT_TIMEOUT_MS = Number(process.env.INTERVIEW_AGENT_TIMEOUT_MS || 150000);
 
 async function agentRequest(path, body) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, AGENT_TIMEOUT_MS);
 
   try {
     const res = await fetch(`${DEFAULT_URL}${path}`, {
@@ -30,6 +35,17 @@ async function agentRequest(path, body) {
       throw new Error(`Agent ${path} ${res.status}: ${detail}`);
     }
     return data;
+  } catch (error) {
+    if (error?.name === 'AbortError' || /abort/i.test(String(error?.message || ''))) {
+      const wrapped = new Error(timedOut
+        ? 'Agent request timed out before the interviewer responded.'
+        : 'Agent request was interrupted before the interviewer responded.');
+      wrapped.code = timedOut ? 'AGENT_TIMEOUT' : 'AGENT_ABORTED';
+      wrapped.retryable = true;
+      wrapped.cause = error;
+      throw wrapped;
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }

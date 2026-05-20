@@ -18,7 +18,7 @@
   gap: 6px;
   background: rgba(91, 134, 229, 0.08);
   border: 1px solid rgba(91, 134, 229, 0.22);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 16px 22px;
 }
 
@@ -28,7 +28,7 @@
   font-weight: 600;
   color: #94a3b8;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0;
 }
 
 .sbc-total-value {
@@ -49,14 +49,14 @@
 
 .sbc-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
 }
 
 .sbc-card {
   background: rgba(30, 41, 59, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.08);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -82,7 +82,7 @@
   font-weight: 600;
   color: #64748b;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 .sbc-value-row {
@@ -95,6 +95,12 @@
   font-size: 28px;
   font-weight: 800;
   line-height: 1;
+}
+
+.sbc-value--text {
+  font-size: 14px;
+  line-height: 1.25;
+  word-break: break-word;
 }
 
 .sbc-max {
@@ -121,4 +127,21 @@
   color: #475569;
   font-weight: 500;
   text-align: right;
+}
+
+.sbc-source {
+  align-self: flex-start;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+}
+
+.sbc-explanation {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.45;
 }

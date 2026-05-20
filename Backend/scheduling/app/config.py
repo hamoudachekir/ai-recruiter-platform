@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     
     # MongoDB Configuration
     mongodb_url: str = "mongodb://localhost:27017"
-    mongodb_database: str = "ai_recruiter_db"
+    mongodb_database: str = "ai_recruiter"
     
     # Node.js Backend URL (for data integration)
     node_backend_url: str = "http://localhost:3001"
@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     frontend_confirmation_url: str = "http://localhost:5173"
     frontend_candidate_scheduling_path: str = "/candidate/scheduling"
     scheduling_public_base_url: str = "http://localhost:5004"
+    platform_call_room_url: str = "http://localhost:5173/call-room/available"
     
     # Interview Configuration
     interview_duration_default: int = 60  # minutes
@@ -76,6 +77,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"
     
     @property
     def mongodb_dsn(self) -> str:

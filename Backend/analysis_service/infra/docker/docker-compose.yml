@@ -1,0 +1,107 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB_NAME: ai_recruiter
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-change-me
+      JWT_ALGORITHM: HS256
+      WHISPER_MODEL: base
+      WHISPER_DEVICE: cpu
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      - redis
+      - mongo
+    networks:
+      - ai_recruiter_net
+
+  worker_cpu:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.worker
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB_NAME: ai_recruiter
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-change-me
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      - redis
+      - mongo
+    networks:
+      - ai_recruiter_net
+
+  worker_gpu:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.gpu_worker
+    profiles: ["gpu"]
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB_NAME: ai_recruiter
+      REDIS_URL: redis://redis:6379/0
+      WHISPER_MODEL: large-v3
+      WHISPER_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      - redis
+      - mongo
+    networks:
+      - ai_recruiter_net
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "2gb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ai_recruiter_net
+
+  mongo:
+    image: mongo:7
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - ai_recruiter_net
+
+  redis_commander:
+    image: rediscommander/redis-commander:latest
+    ports:
+      - "8081:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - ai_recruiter_net
+
+volumes:
+  redis_data:
+  mongo_data:
+  uploads_data:
+
+networks:
+  ai_recruiter_net:
+    driver: bridge

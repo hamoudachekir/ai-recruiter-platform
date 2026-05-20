@@ -16,6 +16,8 @@ import LoginPage from "./Dashboard/layouts/LoginPage";
 import SettingsPage from "./Dashboard/layouts/SettingsPage";
 import CalendarView from "./Dashboard/layouts/CalendarView";
 import AllJobs from "./Dashboard/layouts/AllJobs";
+import AdminProtectedRoute from "./Dashboard/layouts/AdminProtectedRoute";
+import "./Dashboard/AdminDashboard.css";
 
 // Front Office Pages
 import Home from "./pages/Home/Home";
@@ -34,7 +36,11 @@ import EditProfile from "./profileFront/EditProfile";
 import CallRoomDashboard from "./interview/CallRoomDashboard";
 import CallRoomAvailable from "./interview/CallRoomAvailable";
 import CallRoomActive from "./interview/CallRoomActive";
+import CandidateSelfReview from "./interview/review/CandidateSelfReview";
 import EntrepriseProfile from "./pages/Entreprise/EntrepriseProfile";
+import JobInterviewRooms from "./pages/Entreprise/JobInterviewRooms";
+import CandidateComparison from "./pages/Entreprise/CandidateComparison";
+import JoinJobRoom from "./pages/Candidate/JoinJobRoom";
 import JobDetails from "./pages/JobDetails/JobDetails";
 import QuizPage from "./pages/Quiz/QuizPage";
 import CandidateProfile from "./pages/Candidate/CandidateProfile";
@@ -45,19 +51,17 @@ import CandidateMessages from './pages/CandidateMessages';
 // ✅ Google Client ID
 const CLIENT_ID = "122105051479-dna9hfi1gskvlbobkhkpboiml67i4gl7.apps.googleusercontent.com";
 
-// ✅ Dashboard Layout Wrapper
+// Admin Back Office Shell
 const DashboardLayoutWrapper = () => (
-  <div className="app">
-    <TopNav />
-    <div className="row w-100 mt-4">
-      <div className="col-1">
-        <SideNav />
-      </div>
-      <div className="col-11 p-0">
+  <AdminProtectedRoute>
+    <div className="adm-shell">
+      <SideNav />
+      <div className="adm-main">
+        <TopNav />
         <Outlet />
       </div>
     </div>
-  </div>
+  </AdminProtectedRoute>
 );
 
 function App() {
@@ -94,9 +98,13 @@ function App() {
             <Route path="/profile/:id" element={<Profile />} />
             <Route path="/edit-profile/:id" element={<EditProfile />} />
             <Route path="/entreprise/:id" element={<EntrepriseProfile />} />
+            <Route path="/entreprise/:entrepriseId/interview-rooms" element={<JobInterviewRooms />} />
+            <Route path="/entreprise/:entrepriseId/interview-rooms/:roomId/compare" element={<CandidateComparison />} />
+            <Route path="/join/:slug" element={<JoinJobRoom />} />
             <Route path="/call-room/dashboard" element={<CallRoomDashboard />} />
             <Route path="/call-room/available" element={<CallRoomAvailable />} />
             <Route path="/call-room/:roomId" element={<CallRoomActive />} />
+            <Route path="/interview/:interviewId/my-replay" element={<CandidateSelfReview />} />
             <Route path="/quiz/:jobId" element={<QuizPage />} />
             <Route path="/candidate/scheduling" element={<CandidateScheduling />} />
             <Route path="/candidate/:id" element={<CandidateProfile />} />

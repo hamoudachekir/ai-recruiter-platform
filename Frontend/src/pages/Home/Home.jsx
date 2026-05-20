@@ -361,39 +361,42 @@ const Home = () => {
     try {
       const token = localStorage.getItem("token");
       const userId = localStorage.getItem("userId");
-      if (!token || !userId) {
-        console.error("No token or userId found");
-        return;
-      }
+      if (!token || !userId) return;
 
       const response = await axios.get(
         `http://localhost:3001/api/messages/user/${userId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      if (response.data.messages && response.data.messages.length > 0) {
-        const lastMsg = response.data.messages.at(-1);
-        const senderId = lastMsg.from === userId ? lastMsg.to : lastMsg.from;
+      const allMessages = response.data.messages || [];
+
+      // Find the last message with a real user (exclude bot messages)
+      const realMessages = allMessages.filter(
+        (m) => m.from !== "bot" && m.to !== "bot"
+      );
+
+      if (realMessages.length > 0) {
+        const lastMsg = realMessages.at(-1);
+        const partnerId = lastMsg.from === userId ? lastMsg.to : lastMsg.from;
 
         const senderInfo = await axios.get(
-          `http://localhost:3001/Frontend/getUser/${senderId}`,
+          `http://localhost:3001/api/users/${partnerId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
 
+        const u = senderInfo.data;
         setChatPartner({
-          _id: senderInfo.data._id,
-          name: senderInfo.data.name,
-          picture: senderInfo.data.picture || "/images/avatar-placeholder.png"
+          _id: u._id,
+          name: u.name || `${u.firstName || ""} ${u.lastName || ""}`.trim() || "Recruiter",
+          picture: u.picture || null,
         });
-
         setShowMessagePopup(true);
       } else {
-        // If no messages, open bot chat
+        // No real messages yet — open bot as fallback
         openBotChat();
       }
     } catch (error) {
       console.error("Error fetching candidate messages:", error);
-      alert("Could not open messages. Starting chat with NextBot instead.");
       openBotChat();
     }
   };

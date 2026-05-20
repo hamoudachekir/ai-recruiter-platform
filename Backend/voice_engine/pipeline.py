@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, TYPE_CHECKING
-import warnings
+from typing import TYPE_CHECKING, Dict, List
 
 import numpy as np
 
@@ -25,6 +26,8 @@ class TurnResult:
     language: str | None = None
     words: List[dict] = field(default_factory=list)
     silence_before_ms: float = 0.0
+    diarization_used: bool = False  # NEW
+    speaker_count: int = 1  # NEW
 
 
 class VoicePipeline:
@@ -58,10 +61,20 @@ class VoicePipeline:
         silence_gaps = self.vad.get_silence_gaps(audio)
 
         transcripts: List[Transcript] = []
+        skipped = 0
         for segment in speech_segments:
             transcript = self.transcriber.transcribe_segment(segment)
             if transcript.text:
+                if transcript.low_confidence and len(transcript.text.split()) < 4:
+                    skipped += 1
+                    continue
                 transcripts.append(transcript)
+
+        if skipped:
+            warnings.warn(
+                f"Skipped {skipped} low-confidence transcript(s) with fewer than 4 words.",
+                RuntimeWarning,
+            )
 
         diarized = self.diarizer.diarize(audio) if self.diarizer else []
         return self._merge(transcripts, diarized, silence_gaps)
@@ -77,6 +90,9 @@ class VoicePipeline:
             getattr(getattr(self, "config", None), "single_speaker_label", "CANDIDATE")
             or "CANDIDATE"
         )
+
+        diarization_used = bool(diarized)
+        speaker_count = len({seg.speaker for seg in diarized}) if diarized else 1
 
         for transcript in transcripts:
             best_speaker = default_speaker
@@ -104,16 +120,58 @@ class VoicePipeline:
                     language=transcript.language,
                     words=transcript.words,
                     silence_before_ms=silence_before,
+                    diarization_used=diarization_used,
+                    speaker_count=speaker_count,
                 )
             )
 
-        return results
+        return self._map_speaker_labels(results)
 
     def _silence_before(self, start_ms: float, silence_gaps: List[dict]) -> float:
         for gap in silence_gaps:
             if 0 <= start_ms - gap["end_ms"] <= 250:
                 return float(gap["duration_ms"])
         return 0.0
+
+    @staticmethod
+    def _map_speaker_labels(results: List[TurnResult]) -> List[TurnResult]:
+        """Remap raw pyannote SPEAKER_XX labels to RECRUITER/CANDIDATE.
+
+        Heuristic:
+        - All labels already human-readable  → return as-is
+        - 1 unique speaker detected          → return as-is (no remapping)
+        - 3+ unique speakers detected        → return as-is (unusual setup)
+        - Exactly 2 speakers                 → least total duration → RECRUITER,
+                                               most total duration  → CANDIDATE
+        """
+        _raw = re.compile(r"^SPEAKER_\d+$")
+
+        # Nothing to do if no raw labels are present
+        if not any(_raw.match(turn.speaker) for turn in results):
+            return results
+
+        # Aggregate speaking duration per speaker
+        durations: Dict[str, float] = {}
+        for turn in results:
+            dur = turn.end_ms - turn.start_ms
+            durations[turn.speaker] = durations.get(turn.speaker, 0.0) + dur
+
+        unique_speakers = list(durations.keys())
+
+        # Only remap when there are exactly 2 distinct speakers
+        if len(unique_speakers) != 2:
+            return results
+
+        sorted_speakers = sorted(unique_speakers, key=lambda s: durations[s])
+        label_map: Dict[str, str] = {
+            sorted_speakers[0]: "RECRUITER",  # least duration → asks questions
+            sorted_speakers[1]: "CANDIDATE",  # most duration  → gives answers
+        }
+
+        for turn in results:
+            turn.speaker = label_map.get(turn.speaker, turn.speaker)
+
+        return results
 
     @staticmethod
     def _overlap_ms(a1: float, a2: float, b1: float, b2: float) -> float:

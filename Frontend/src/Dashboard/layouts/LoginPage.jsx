@@ -1,128 +1,123 @@
-import React, { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Heading, Subtitle } from "../components/UI/Typography";
-import Button from "../components/UI/Button";
+import { BrainCircuit, Eye, EyeOff } from "lucide-react";
+import "../AdminDashboard.css";
 
-function LoginPage() {
+export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
-  const [admin, setAdmin] = useState(null); // Store admin data
-  const [loading, setLoading] = useState(true); // Track loading state
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-
-  // Fetch admin data from the backend
-  useEffect(() => {
-    const fetchAdmin = async () => {
-      try {
-        const response = await fetch("http://localhost:3001/api/users");
-        if (!response.ok) {
-          throw new Error("Failed to fetch users");
-        }
-        const usersData = await response.json();
-
-        // Find the admin user (role === "ADMIN")
-        const adminData = usersData.find((user) => user.role === "ADMIN");
-        if (!adminData) {
-          throw new Error("Admin account not found");
-        }
-
-        setAdmin(adminData);
-        setLoading(false);
-      } catch (err) {
-        setError("Error fetching admin data: " + err.message);
-        setLoading(false);
-      }
-    };
-
-    fetchAdmin();
-
-    // Clear localStorage on page reload
-    const handleBeforeUnload = () => {
-      localStorage.removeItem("admin");
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
-    // Cleanup the event listener
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
-    // Basic validation
     if (!email || !password) {
       setError("Please fill in all fields.");
       return;
     }
 
-    // Check if admin data is loaded
-    if (!admin) {
-      setError("Admin account not found.");
-      return;
-    }
+    setLoading(true);
+    setError("");
 
-    // Validate credentials
-    if (email === admin.email && password === admin.password) {
-      // Successful login
-      setError("");
+    try {
+      const res = await fetch("http://localhost:3001/api/users");
+      if (!res.ok) throw new Error("Could not reach server");
+      const body = await res.json();
+      const users = body.data || body;
+      const admin = users.find((u) => u.role === "ADMIN");
+      if (!admin) throw new Error("No admin account found");
 
-      // Save admin data to localStorage
-      localStorage.setItem("admin", JSON.stringify(admin));
-
-      // Redirect to the profile page
-      navigate("/dashboard");
-    } else {
-      setError("Invalid email or password.");
+      if (email === admin.email && password === admin.password) {
+        localStorage.setItem("admin", JSON.stringify(admin));
+        navigate("/dashboard");
+      } else {
+        setError("Invalid email or password.");
+      }
+    } catch (err) {
+      setError(err.message || "Login failed");
+    } finally {
+      setLoading(false);
     }
   };
 
-  if (loading) {
-    return <div>Loading admin data...</div>;
-  }
-
   return (
-    <div className="d-flex justify-content-center align-items-center vh-100">
-      <div className="card p-4 shadow" style={{ width: "400px" }}>
-        <h2 className="text-center mb-4">Admin Login</h2>
-        {error && <div className="alert alert-danger">{error}</div>}
+    <div className="adm-login">
+      <div className="adm-login__card">
+        {/* Logo */}
+        <div className="adm-login__logo">
+          <BrainCircuit size={22} />
+        </div>
+
+        <h1 className="adm-login__title">Admin Portal</h1>
+        <p className="adm-login__sub">Sign in to access the admin backoffice</p>
+
+        {error && <div className="adm-login__error">{error}</div>}
+
         <form onSubmit={handleSubmit}>
-          <div className="mb-3">
-            <label htmlFor="email" className="form-label">
-              Email
-            </label>
+          <div className="adm-login__field">
+            <label className="adm-login__label" htmlFor="email">Email address</label>
             <input
-              type="email"
-              className="form-control"
               id="email"
+              type="email"
+              className="adm-input"
+              placeholder="admin@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
               required
             />
           </div>
-          <div className="mb-3">
-            <label htmlFor="password" className="form-label">
-              Password
-            </label>
-            <input
-              type="password"
-              className="form-control"
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+
+          <div className="adm-login__field">
+            <label className="adm-login__label" htmlFor="password">Password</label>
+            <div style={{ position: "relative" }}>
+              <input
+                id="password"
+                type={showPw ? "text" : "password"}
+                className="adm-input"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+                style={{ paddingRight: 40 }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPw((v) => !v)}
+                style={{
+                  position: "absolute",
+                  right: 10,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--adm-muted)",
+                  display: "flex",
+                  alignItems: "center",
+                }}
+              >
+                {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </div>
           </div>
-          <button type="submit" className="btn btn-primary w-100">
-            Log In
+
+          <button
+            type="submit"
+            className="adm-login__submit"
+            disabled={loading}
+          >
+            {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
+
+        <p style={{ textAlign: "center", marginTop: 20, fontSize: "0.73rem", color: "var(--adm-muted)" }}>
+          NextHire Admin · Restricted Access
+        </p>
       </div>
     </div>
   );
 }
-
-export default LoginPage;

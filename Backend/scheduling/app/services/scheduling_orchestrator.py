@@ -268,7 +268,8 @@ class SchedulingOrchestrator:
         interview_schedule_id: str,
         selected_slot: Dict[str, str],
         location: Optional[str] = None,
-        notes: str = ""
+        notes: str = "",
+        platform_meeting_link: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Confirm a selected interview slot and run Phase 2 side effects.
@@ -378,14 +379,13 @@ class SchedulingOrchestrator:
                                     recruiter_info.get("email", ""),
                                 ],
                                 location=location,
-                                create_meet_link=schedule.get("interview_type") in [
-                                    "video",
-                                    "assessment",
-                                ],
+                                # Never create a Google Meet link — the platform
+                                # provides its own call room via platform_meeting_link.
+                                create_meet_link=False,
                                 calendar_id=self.settings.google_calendar_id,
                             )
                             calendar_event_id = calendar_result.get("id")
-                            meeting_link = calendar_result.get("meeting_link")
+                            meeting_link = None  # always use platform room, not Google Meet
                         except GoogleCalendarServiceError as exc:
                             await self.log_repo.log_action(
                                 interview_schedule_id,
@@ -421,12 +421,17 @@ class SchedulingOrchestrator:
                 email_status = "pending"
                 email_result: Dict[str, Any] = {}
                 candidate_action_link = str(schedule.get("candidate_action_link") or "")
+                effective_meeting_link = (
+                    platform_meeting_link
+                    or meeting_link
+                    or self.settings.platform_call_room_url
+                )
                 email_retry_payload = {
                     "start_time": slot_start_iso,
                     "duration_minutes": schedule.get("duration_minutes", 60),
                     "location": location or "",
                     "notes": notes or "",
-                    "meeting_link": meeting_link or "",
+                    "meeting_link": effective_meeting_link,
                     "candidate_action_link": candidate_action_link,
                     "interview_type": schedule.get("interview_type", "video"),
                     "interview_mode": schedule.get("interview_mode", "synchronous"),
@@ -441,7 +446,7 @@ class SchedulingOrchestrator:
                         start_time=slot_start_dt,
                         duration_minutes=schedule.get("duration_minutes", 60),
                         location=location,
-                        meeting_link=meeting_link,
+                        meeting_link=effective_meeting_link,
                         notes=notes,
                         candidate_action_link=candidate_action_link,
                         candidate_timezone=schedule.get("candidate_timezone"),
@@ -538,7 +543,7 @@ class SchedulingOrchestrator:
                 "interview_schedule_id": interview_schedule_id,
                 "status": "confirmed",
                 "calendar_event_id": calendar_event_id,
-                "meeting_link": meeting_link,
+                "meeting_link": platform_meeting_link or meeting_link or self.settings.platform_call_room_url,
                 "candidate_action_link": candidate_action_link,
                 "message": "Interview slot confirmed successfully"
             }

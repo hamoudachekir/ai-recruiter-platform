@@ -1,0 +1,257 @@
+/**
+ * TranscriptPanel.css
+ *
+ * Styles for the transcript and audio panel.
+ */
+
+.transcript-panel {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.transcript-panel__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0 0 20px 0;
+}
+
+/* Summary card */
+.transcript-summary-card {
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.transcript-summary-card__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.transcript-summary-card__icon {
+  font-size: 20px;
+}
+
+.transcript-summary-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.transcript-summary-card__content {
+  padding: 20px;
+}
+
+.transcript-summary__text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #334155;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.transcript-summary__placeholder {
+  font-size: 14px;
+  color: #64748b;
+  font-style: italic;
+  margin: 0;
+}
+
+/* Transcript unavailable */
+.transcript-unavailable {
+  text-align: center;
+  padding: 24px;
+}
+
+.transcript-unavailable__icon {
+  font-size: 40px;
+  display: block;
+  margin-bottom: 12px;
+}
+
+.transcript-unavailable__text {
+  font-size: 15px;
+  color: #475569;
+  margin: 0 0 8px 0;
+}
+
+.transcript-unavailable__reason {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+  padding: 8px 16px;
+  background: #f1f5f9;
+  border-radius: 6px;
+  display: inline-block;
+}
+
+/* Audio metrics card */
+.audio-metrics-card {
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.audio-metrics-card__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.audio-metrics-card__icon {
+  font-size: 20px;
+}
+
+.audio-metrics-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.audio-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  padding: 20px;
+}
+
+.audio-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.audio-metric--notice {
+  background: #fef3c7;
+  padding: 12px;
+  border-radius: 6px;
+  margin: -4px;
+}
+
+.audio-metric__label {
+  font-size: 12px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.audio-metric__value {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.audio-metric__value--success {
+  color: #16a34a;
+}
+
+.audio-metric__value--warning {
+  color: #d97706;
+}
+
+/* Transcript preview */
+.transcript-preview-card {
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.transcript-preview-card__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.transcript-preview-card__icon {
+  font-size: 20px;
+}
+
+.transcript-preview-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.transcript-preview-card__content {
+  padding: 20px;
+}
+
+.transcript-preview__text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #475569;
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.transcript-preview__truncated {
+  font-size: 12px;
+  color: #64748b;
+  font-style: italic;
+  margin: 12px 0 0 0;
+  padding-top: 12px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+/* Deterministic note */
+.transcript-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  background: #f0fdf4;
+  border-radius: 8px;
+  border-left: 4px solid #22c55e;
+}
+
+.transcript-note__icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.transcript-note__text {
+  font-size: 13px;
+  color: #166534;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .transcript-panel {
+    padding: 16px;
+  }
+
+  .audio-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .transcript-preview__text {
+    max-height: 200px;
+  }
+}

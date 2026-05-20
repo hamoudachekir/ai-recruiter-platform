@@ -1,0 +1,15 @@
+.venv
+__pycache__
+*.pyc
+*.pyo
+.git
+node_modules
+tests
+.env
+uploads
+*.pkl
+*.wav
+*.mp4
+*.webm
+.pytest_cache
+.launch-logs

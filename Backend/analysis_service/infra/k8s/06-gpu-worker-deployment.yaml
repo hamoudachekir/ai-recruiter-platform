@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-recruiter-worker-gpu
+  namespace: ai-recruiter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ai-recruiter-worker-gpu
+  template:
+    metadata:
+      labels:
+        app: ai-recruiter-worker-gpu
+    spec:
+      nodeSelector:
+        workload: gpu
+        cloud.google.com/gke-accelerator: nvidia-tesla-t4
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: gpu-worker
+          image: ai-recruiter/gpu-worker:latest
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "rq worker high --url ${REDIS_URL}"]
+          envFrom:
+            - configMapRef:
+                name: ai-recruiter-config
+            - secretRef:
+                name: ai-recruiter-secrets
+          env:
+            - name: WHISPER_MODEL
+              value: large-v3
+            - name: WHISPER_DEVICE
+              value: cuda
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "4"
+              memory: 16Gi
+              nvidia.com/gpu: "1"

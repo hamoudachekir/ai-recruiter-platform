@@ -1,0 +1,199 @@
+/* ── CalendarView dark overrides ───────────────────────── */
+
+/* Two-column layout */
+.calv-grid {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 900px) {
+  .calv-grid { grid-template-columns: 1fr; }
+}
+
+.calv-cal-body {
+  display: flex;
+  justify-content: center;
+}
+
+/* ── react-calendar dark skin ──────────────────────────── */
+.react-calendar {
+  background: transparent !important;
+  border: none !important;
+  font-family: var(--adm-font) !important;
+  width: 100% !important;
+  max-width: 300px;
+}
+
+.react-calendar__navigation {
+  margin-bottom: 10px;
+}
+
+.react-calendar__navigation button {
+  background: transparent !important;
+  color: var(--adm-text) !important;
+  font-size: 0.86rem !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+  min-width: 36px !important;
+}
+
+.react-calendar__navigation button:hover,
+.react-calendar__navigation button:focus {
+  background: rgba(148, 163, 184, 0.08) !important;
+}
+
+.react-calendar__navigation button:disabled {
+  opacity: 0.35 !important;
+}
+
+.react-calendar__month-view__weekdays {
+  text-align: center;
+  font-size: 0.68rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  color: var(--adm-muted) !important;
+}
+
+.react-calendar__month-view__weekdays abbr {
+  text-decoration: none !important;
+  color: var(--adm-muted) !important;
+}
+
+.react-calendar__tile {
+  background: transparent !important;
+  color: var(--adm-text) !important;
+  border-radius: 8px !important;
+  font-size: 0.82rem !important;
+  padding: 8px 4px !important;
+  position: relative;
+}
+
+.react-calendar__tile:hover {
+  background: rgba(148, 163, 184, 0.08) !important;
+}
+
+.react-calendar__tile--now {
+  background: rgba(20, 184, 166, 0.12) !important;
+  color: var(--adm-accent) !important;
+  font-weight: 700 !important;
+}
+
+.react-calendar__tile--active,
+.react-calendar__tile--active:enabled:hover,
+.react-calendar__tile--active:enabled:focus {
+  background: var(--adm-accent) !important;
+  color: #0f172a !important;
+  font-weight: 700 !important;
+}
+
+.react-calendar__tile--active .calv-dot {
+  background: #0f172a;
+}
+
+.react-calendar__month-view__days__day--neighboringMonth {
+  color: rgba(148, 163, 184, 0.3) !important;
+}
+
+/* Dot indicator for days with interviews */
+.calv-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--adm-accent);
+  margin: 2px auto 0;
+}
+
+/* ── Interview card list ────────────────────────────────── */
+.calv-list {
+  min-height: 300px;
+}
+
+.calv-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px;
+}
+
+.calv-card {
+  background: var(--adm-surface2);
+  border: 1px solid var(--adm-border);
+  border-left: 3px solid var(--adm-accent);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.2s, transform 0.15s;
+}
+
+.calv-card:hover {
+  border-color: rgba(20, 184, 166, 0.5);
+  transform: translateX(2px);
+}
+
+.calv-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.calv-card__time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--adm-accent);
+}
+
+.calv-card__duration {
+  font-size: 0.7rem;
+  color: var(--adm-muted);
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.calv-card__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.calv-card__company {
+  font-weight: 400;
+  color: var(--adm-muted);
+}
+
+.calv-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 0.76rem;
+  color: var(--adm-muted);
+}
+
+.calv-card__meta span,
+.calv-card__meta a {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.calv-card__link {
+  color: var(--adm-accent) !important;
+  text-decoration: none;
+}
+
+.calv-card__link:hover {
+  text-decoration: underline;
+}

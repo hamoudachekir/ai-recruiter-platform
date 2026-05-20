@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { containsProfanity } from './utils/profanityFilter';
 import './AgentChatPanel.css';
 
 /**
@@ -19,7 +20,30 @@ const STYLE_OPTIONS = [
   { value: 'fast_screening', label: 'Fast' },
 ];
 
-export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false, interviewStarting = false }) {
+export default function AgentChatPanel({
+  socket,
+  roomId,
+  roomDbId,
+  isRH = false,
+  interviewStarting = false,
+  candidateDraftText = null,
+  turnState = 'candidate_listening',
+  turnStatusLabel = '',
+  submitDisabled = false,
+  inputDisabled = false,
+  onTypingChange,
+  onCandidateAnswerSubmit,
+  onSubmitVoiceDraft,
+  canSubmitVoiceDraft = false,
+  recoverableAgentError = '',
+  onRetryAgentResponse,
+  agentRetrying = false,
+  initialAgentMessage = '',
+  initialAgentPhase = '',
+  initialAgentDifficulty = null,
+  initialAgentSkill = '',
+  initialAgentTurnIndex = null,
+}) {
   const [messages, setMessages] = useState([]); // { role: 'agent'|'candidate', text, meta?, ts }
   const [sessionActive, setSessionActive] = useState(false);
   const [phase, setPhase] = useState('intro');
@@ -38,16 +62,36 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
   const autoStartTriggeredRef = useRef(false);
   const sessionActiveRef = useRef(false);
   const pendingTypedAnswerRef = useRef('');
+  const submitAnswerRef = useRef(null);
+  // Keys of agent messages already added — checked synchronously to survive
+  // React's batching where two near-simultaneous events both see stale `prev`.
+  const seenAgentMsgKeysRef = useRef(new Set());
 
   useEffect(() => {
     sessionActiveRef.current = sessionActive;
   }, [sessionActive]);
 
   useEffect(() => {
+    submitAnswerRef.current = onCandidateAnswerSubmit || null;
+  }, [onCandidateAnswerSubmit]);
+
+  useEffect(() => {
     if (!socket) return undefined;
 
     const onMessage = (payload) => {
       if (payload.roomId && roomId && payload.roomId !== roomId) return;
+
+      const incomingText = String(payload.text || '').trim();
+      // Build a stable key: turnIndex (if present) + first 120 chars of text.
+      // Check synchronously via ref — immune to React batching race where two
+      // near-simultaneous events both see the same stale `prev` snapshot.
+      const msgKey = `${payload.turnIndex ?? 'na'}::${incomingText.slice(0, 120)}`;
+      if (seenAgentMsgKeysRef.current.has(msgKey)) {
+        console.log('💬 [AgentChatPanel] Deduped duplicate message key=', msgKey);
+        return;
+      }
+      seenAgentMsgKeysRef.current.add(msgKey);
+
       console.log('💬 [AgentChatPanel] Received agent message:', payload);
       const wasSessionInactive = !sessionActiveRef.current;
       setSessionActive(true);
@@ -56,81 +100,38 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
       if (payload.interviewStyle) setInterviewStyle(payload.interviewStyle);
       if (payload.difficulty != null) setLastDifficulty(payload.difficulty);
       if (payload.skillFocus) setLastSkill(payload.skillFocus);
-      setMessages((prev) => {
-        // The server fans this event out to room + direct user sockets, so
-        // the same turn can arrive twice. Dedupe on turnIndex + text or recent duplicate text.
-        const incomingText = String(payload.text || '').trim();
-        const now = Date.now();
 
-        // Extended window for intro messages (first agent messages)
-        const isIntroMessage = incomingText.toLowerCase().includes("hello, i'm") &&
-                               incomingText.toLowerCase().includes("interview assistant");
-        const dedupeWindow = isIntroMessage ? 30000 : 5000; // 30s for intro, 5s for others
-
-        // Check if this exact text already exists in recent messages
-        const isRecentDuplicate = prev.some(
-          (m) =>
-            m.role === 'agent' &&
-            String(m.text || '').trim() === incomingText &&
-            Math.abs((m.ts || 0) - now) < dedupeWindow
-        );
-
-        if (isRecentDuplicate) {
-          console.log('💬 [AgentChatPanel] Deduped duplicate message (recent match)');
-          return prev;
-        }
-
-        // For intro messages, also check similarity (first 50 chars) within extended window
-        if (isIntroMessage && prev.length > 0) {
-          const hasSimilarIntro = prev.some(
-            (m) =>
-              m.role === 'agent' &&
-              String(m.text || '').toLowerCase().startsWith("hello, i'm") &&
-              Math.abs((m.ts || 0) - now) < 30000
-          );
-          if (hasSimilarIntro) {
-            console.log('💬 [AgentChatPanel] Deduped similar intro message');
-            return prev;
-          }
-        }
-
-        // Also check last message for turnIndex match
-        const last = prev.at(-1);
-        if (
-          last &&
-          last.role === 'agent' &&
-          String(last.text || '').trim() === incomingText &&
-          (last.meta?.turnIndex === payload.turnIndex || payload.turnIndex == null)
-        ) {
-          console.log('💬 [AgentChatPanel] Deduped duplicate message (last match)');
-          return prev;
-        }
-
-        console.log('💬 [AgentChatPanel] Adding new agent message to feed:', incomingText);
-        return [
-          ...prev,
-          {
-            role: 'agent',
-            text: payload.text || '',
-            meta: { difficulty: payload.difficulty, skillFocus: payload.skillFocus, turnIndex: payload.turnIndex },
-            ts: now,
-          },
-        ];
-      });
+      const now = Date.now();
+      console.log('💬 [AgentChatPanel] Adding new agent message to feed:', incomingText);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'agent',
+          text: payload.text || '',
+          meta: { difficulty: payload.difficulty, skillFocus: payload.skillFocus, turnIndex: payload.turnIndex },
+          ts: now,
+        },
+      ]);
 
       // Candidate typed before the session was ready:
       // start intro first, then forward the queued answer automatically.
       if (!isRH && wasSessionInactive && pendingTypedAnswerRef.current && socket && roomDbId) {
         const queued = pendingTypedAnswerRef.current;
         pendingTypedAnswerRef.current = '';
-        setBusy(true);
-        socket.emit('agent:candidate-turn', {
-          roomId,
-          roomDbId,
-          text: queued,
-          sentiment: null,
-          source: 'text',
-        });
+        if (submitAnswerRef.current) {
+          void submitAnswerRef.current(queued);
+        } else {
+          setBusy(true);
+          socket.emit('agent:candidate-turn', {
+            roomId,
+            roomDbId,
+            text: queued,
+            answerText: queued,
+            answerSource: 'typed',
+            sentiment: null,
+            source: 'typed',
+          });
+        }
       }
     };
 
@@ -152,9 +153,22 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
       setMessages((prev) => [...prev, { role: 'system', text: 'Session ended.', ts: Date.now() }]);
     };
 
+    const onThinking = (payload) => {
+      if (payload?.roomId && roomId && payload.roomId !== roomId) return;
+      setBusy(true);
+      setError('');
+    };
+
     const onError = (payload) => {
       setBusy(false);
-      setError(payload?.message || 'Agent error');
+      const code = payload?.code || '';
+      const rawMessage = String(payload?.message || '');
+      const safeMessage = code === 'AGENT_ABORTED' || /abort/i.test(rawMessage)
+        ? 'The interviewer response was interrupted. Retrying...'
+        : (payload?.retryable
+            ? 'The interviewer response was interrupted. You can retry the AI response.'
+            : 'The interviewer had trouble responding. Please try again.');
+      setError(safeMessage);
       if (!sessionActive) {
         autoStartTriggeredRef.current = false;
       }
@@ -215,7 +229,7 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
           {
             role: 'candidate',
             text,
-            meta: { source: 'voice', sentiment: ev?.detail?.sentiment },
+            meta: { source: ev?.detail?.source || 'voice', sentiment: ev?.detail?.sentiment },
             ts: ev?.detail?.ts || Date.now(),
           },
         ];
@@ -225,6 +239,7 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
     socket.on('agent:message', onMessage);
     socket.on('agent:score', onScore);
     socket.on('agent:ended', onEnded);
+    socket.on('agent:thinking', onThinking);
     socket.on('agent:error', onError);
     socket.on('candidate:message', onCandidateMessage);
     socket.on('candidate:draft', onCandidateDraft);
@@ -234,6 +249,7 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
       socket.off('agent:message', onMessage);
       socket.off('agent:score', onScore);
       socket.off('agent:ended', onEnded);
+      socket.off('agent:thinking', onThinking);
       socket.off('agent:error', onError);
       socket.off('candidate:message', onCandidateMessage);
       socket.off('candidate:draft', onCandidateDraft);
@@ -244,6 +260,41 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
   useEffect(() => {
     if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
   }, [messages, draftBubble]);
+
+  useEffect(() => {
+    if (candidateDraftText == null) return;
+    setDraftBubble(String(candidateDraftText || ''));
+  }, [candidateDraftText]);
+
+  useEffect(() => {
+    const text = String(initialAgentMessage || '').trim();
+    if (!text) return;
+
+    setSessionActive(true);
+    if (initialAgentPhase) setPhase(initialAgentPhase);
+    if (initialAgentDifficulty != null) setLastDifficulty(initialAgentDifficulty);
+    if (initialAgentSkill) setLastSkill(initialAgentSkill);
+
+    setMessages((prev) => {
+      const alreadyShown = prev.some(
+        (message) => message.role === 'agent' && String(message.text || '').trim() === text,
+      );
+      if (alreadyShown) return prev;
+      return [
+        ...prev,
+        {
+          role: 'agent',
+          text,
+          meta: {
+            difficulty: initialAgentDifficulty,
+            skillFocus: initialAgentSkill,
+            turnIndex: initialAgentTurnIndex,
+          },
+          ts: Date.now(),
+        },
+      ];
+    });
+  }, [initialAgentMessage, initialAgentPhase, initialAgentDifficulty, initialAgentSkill, initialAgentTurnIndex]);
 
   useEffect(() => {
     autoStartTriggeredRef.current = false;
@@ -292,31 +343,51 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
     socket.emit('agent:end-session', { roomId, roomDbId });
   };
 
-  const sendAnswer = () => {
+  const sendAnswer = async () => {
     const text = input.trim();
     if (!text || !socket || !roomDbId) return;
+    if (submitDisabled) return;
 
-    // Show candidate message instantly in the chat feed.
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: 'candidate',
-        text,
-        meta: { source: 'text', sentiment: null },
-        ts: Date.now(),
-      },
-    ]);
-    setInput('');
+    if (containsProfanity(text)) {
+      setError('Please avoid inappropriate language in your answer.');
+      setTimeout(() => setError(''), 3500);
+      return;
+    }
 
     if (!sessionActive) {
       pendingTypedAnswerRef.current = text;
+      setInput('');
+      onTypingChange?.(false);
       setBusy(true);
       socket.emit('agent:start-session', { roomId, roomDbId, phase: 'intro', interviewStyle });
       return;
     }
 
+    if (onCandidateAnswerSubmit) {
+      const accepted = await onCandidateAnswerSubmit(text);
+      if (!accepted) {
+        setError('Please type a complete answer before sending.');
+        setTimeout(() => setError(''), 3500);
+        return;
+      }
+      setInput('');
+      onTypingChange?.(false);
+      setBusy(true);
+      return;
+    }
+
+    setInput('');
+    onTypingChange?.(false);
     setBusy(true);
-    socket.emit('agent:candidate-turn', { roomId, roomDbId, text, sentiment: null, source: 'text' });
+    socket.emit('agent:candidate-turn', {
+      roomId,
+      roomDbId,
+      text,
+      answerText: text,
+      answerSource: 'typed',
+      source: 'typed',
+      timestamp: Date.now(),
+    });
   };
 
   const onKeyDown = (e) => {
@@ -435,6 +506,16 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
       )}
 
       {error && <div className="agent-panel__error">{error}</div>}
+      {!isRH && recoverableAgentError && (
+        <div className="agent-panel__notice">
+          <span>{recoverableAgentError}</span>
+          {onRetryAgentResponse && !agentRetrying && !/inappropriate language/i.test(recoverableAgentError) && (
+            <button type="button" className="agent-btn" onClick={onRetryAgentResponse}>
+              Retry AI response
+            </button>
+          )}
+        </div>
+      )}
 
       {isRH && finalReport && (
         <div className="agent-panel__report">
@@ -489,7 +570,7 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
           <div className="agent-panel__empty">
             {isRH
               ? 'Interview intro starts automatically when the room is ready.'
-              : 'Waiting for the interviewer to start the session…'}
+              : 'Waiting for the interviewer to start the session. You can type below once your mic and camera are ready.'}
           </div>
         ) : (
           messages.map((m, idx) => (
@@ -516,31 +597,54 @@ export default function AgentChatPanel({ socket, roomId, roomDbId, isRH = false,
             </span>
           </div>
         )}
-        {draftBubble && (
+        {(draftBubble || turnState === 'candidate_answering') && (
           <div className="agent-msg agent-msg--candidate agent-msg--draft">
             <span className="agent-msg__text" style={{ opacity: 0.7, fontStyle: 'italic' }}>
-              {draftBubble}
+              {draftBubble || 'Listening'}
               <span style={{ marginLeft: 4 }}>…</span>
             </span>
           </div>
         )}
       </div>
 
-      {!isRH && sessionActive && (
+      {!isRH && (
         <div className="agent-panel__composer">
+          {turnStatusLabel && (
+            <div className={`agent-composer__status agent-composer__status--${turnState}`}>
+              {turnStatusLabel}
+            </div>
+          )}
           <textarea
             className="agent-composer__input"
             placeholder="Type your answer… (Enter to send, Shift+Enter for newline)"
             rows={2}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              const nextValue = e.target.value;
+              setInput(nextValue);
+              if (containsProfanity(nextValue)) {
+                setError('Please avoid inappropriate language in your answer.');
+              } else if (error) {
+                setError('');
+              }
+              onTypingChange?.(!!nextValue.trim());
+            }}
             onKeyDown={onKeyDown}
-            disabled={busy}
+            disabled={inputDisabled}
           />
+          {canSubmitVoiceDraft && (
+            <button
+              className="agent-btn"
+              onClick={onSubmitVoiceDraft}
+              disabled={busy || submitDisabled}
+            >
+              Submit voice answer
+            </button>
+          )}
           <button
             className="agent-btn agent-btn--primary"
             onClick={sendAnswer}
-            disabled={busy || !input.trim()}
+            disabled={busy || submitDisabled || !input.trim()}
           >
             Send
           </button>

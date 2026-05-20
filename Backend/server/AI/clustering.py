@@ -18,7 +18,7 @@ CORS(app)
 def get_mongo_collection():
     try:
         client = MongoClient(os.getenv("MONGO_URI"))
-        db = client[os.getenv("MONGO_DB_NAME", "users")]
+        db = client[os.getenv("MONGO_DB_NAME", "ai_recruiter")]
         return db["users"]
     except Exception as e:
         print(f"❌ Erreur de connexion MongoDB : {e}")

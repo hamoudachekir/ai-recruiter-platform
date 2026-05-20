@@ -103,6 +103,28 @@
     font-size: 0.92rem;
   }
 
+  .face-profile-status {
+    display: inline-flex;
+    align-items: center;
+    margin: 0.75rem 0 0;
+    padding: 0.38rem 0.62rem;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.25;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+  }
+
+  .face-profile-status--ready {
+    color: #dcfce7;
+  }
+
+  .face-profile-status--warning,
+  .face-profile-status--error {
+    color: #ffedd5;
+  }
+
   .profile-stats-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -354,6 +376,35 @@
     height: 100%;
     object-fit: cover;
     border: 3px solid rgba(255, 255, 255, 0.8);
+    transition: transform 0.16s ease;
+  }
+
+  .profile-avatar-editor {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55rem;
+    margin-right: 1.5rem;
+  }
+
+  .profile-avatar-editor .profile-avatar-wrapper {
+    margin-right: 0;
+  }
+
+  .profile-image-adjust {
+    width: 132px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 0.5rem;
+    color: #ffffff;
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  .profile-image-adjust input {
+    width: 100%;
+    accent-color: #ffffff;
   }
 
   .image-overlay {
@@ -459,6 +510,15 @@
       margin-bottom: 1rem;
       width: 80px;
       height: 80px;
+    }
+
+    .profile-avatar-editor {
+      margin-right: 0;
+      margin-bottom: 1rem;
+    }
+
+    .profile-avatar-editor .profile-avatar-wrapper {
+      margin-bottom: 0;
     }
     
     .info-grid {

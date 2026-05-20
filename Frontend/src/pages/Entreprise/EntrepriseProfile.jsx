@@ -62,6 +62,8 @@ const EntrepriseProfile = () => {
   ]);
   const [quizBlueprint, setQuizBlueprint] = useState({ totalQuestions: 10 });
   const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
+  const [resendingRoomFor, setResendingRoomFor] = useState(null);
+  const [jobRoomsMap, setJobRoomsMap] = useState({}); // jobId → { _id, stats }
   const [generationInfo, setGenerationInfo] = useState(null);
   const [jobCandidatesForQuiz, setJobCandidatesForQuiz] = useState([]);
   const [selectedQuizCandidateId, setSelectedQuizCandidateId] = useState("");
@@ -443,6 +445,26 @@ const EntrepriseProfile = () => {
     fetchEnterpriseJobs();
   }, [id]);
 
+  // Fetch all JobInterviewRooms for this company and index by jobId
+  useEffect(() => {
+    if (!id) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    axios
+      .get("http://localhost:3001/api/job-rooms", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .then((res) => {
+        const map = {};
+        (res.data?.rooms || []).forEach((room) => {
+          const jid = room.job?._id || room.job;
+          if (jid) map[String(jid)] = room;
+        });
+        setJobRoomsMap(map);
+      })
+      .catch(() => {});
+  }, [id]);
+
   // Call fetchInterviews when job is selected
   useEffect(() => {
     if (selectedJobId) {
@@ -812,6 +834,29 @@ const EntrepriseProfile = () => {
       },
     ];
   };
+
+const handleResendInterviewLink = async (applicationId) => {
+  setResendingRoomFor(applicationId);
+  try {
+    const res = await axios.post(
+      `http://localhost:3001/Frontend/applications/${applicationId}/resend-interview-link`
+    );
+    const { meetingLink } = res.data;
+    // Update the local application list with the new meeting link
+    setSelectedApplications((prev) =>
+      prev.map((a) =>
+        String(a._id) === String(applicationId)
+          ? { ...a, interviewSchedule: { ...a.interviewSchedule, meetingLink } }
+          : a
+      )
+    );
+    alert(`New call room created!\n${meetingLink}`);
+  } catch (err) {
+    alert("Failed to generate new room: " + (err?.response?.data?.message || err.message));
+  } finally {
+    setResendingRoomFor(null);
+  }
+};
 
 const openApplicationModal = async (jobId) => {
   try {
@@ -1827,7 +1872,16 @@ const openApplicationModal = async (jobId) => {
               <h4 className="mb-4">
                 <i className="fas fa-briefcase icon"></i>Jobs posted by your company
               </h4>
-              <span className="jobs-count-pill">{activeJobsCount} Active • {archivedJobsCount} Archived</span>
+              <div className="jobs-section-actions">
+                <Link
+                  to={`/entreprise/${id}/interview-rooms`}
+                  className="btn btn-sm btn-outline-primary me-2"
+                >
+                  <FontAwesomeIcon icon={faVideo} className="me-2" />
+                  Interview rooms & AI ranking
+                </Link>
+                <span className="jobs-count-pill">{activeJobsCount} Active • {archivedJobsCount} Archived</span>
+              </div>
             </div>
             <div className="jobs-grid">
               {activeJobs.map((job, index) => {
@@ -1886,8 +1940,27 @@ const openApplicationModal = async (jobId) => {
                     >
                       <FontAwesomeIcon icon={faBoxArchive} className="me-1" /> Archive
                     </button>
+                    {(() => {
+                      const room = jobRoomsMap[String(job._id)];
+                      const completed = room?.stats?.completedSessions || 0;
+                      if (!room) return null;
+                      return (
+                        <Link
+                          to={`/entreprise/${id}/interview-rooms/${room._id}/compare`}
+                          className="btn btn-sm job-compare-btn"
+                          title={`${completed} completed interview${completed !== 1 ? "s" : ""}`}
+                        >
+                          <FontAwesomeIcon icon={faVideo} className="me-1" />
+                          Compare AI
+                          {completed > 0 && (
+                            <span className="job-compare-badge">{completed}</span>
+                          )}
+                        </Link>
+                      );
+                    })()}
                   </div>
 
+                  <div className="card-body">
                   {isEditingThisCard && (
                     <div className="job-inline-editor mb-3">
                       <div className="row g-2">
@@ -1966,8 +2039,6 @@ const openApplicationModal = async (jobId) => {
                       </div>
                     </div>
                   )}
-
-                  <div className="card-body">
                     <div className="job-detail job-description">
                       <strong className="job-description-label">Description:</strong>
                       <div className="job-description-content">
@@ -2386,16 +2457,52 @@ const openApplicationModal = async (jobId) => {
                       </div>
                     ))}
                   </div>
-                  {app?.interviewSchedule?.meetingLink && (
-                    <a
-                      href={app.interviewSchedule.meetingLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="agent-workflow-link"
-                    >
-                      Open generated meeting link
-                    </a>
-                  )}
+                  {(() => {
+                    const rawLink = app?.interviewSchedule?.meetingLink;
+                    const isStaleLink =
+                      rawLink &&
+                      rawLink.includes("/entreprise/") &&
+                      rawLink.includes("/interview-rooms");
+                    const displayLink = isStaleLink
+                      ? null
+                      : rawLink || null;
+                    const isConfirmed =
+                      app?.interviewSchedule?.status === "confirmed" ||
+                      app?.interviewSchedule?.status === "rescheduled";
+                    return (
+                      <div className="agent-workflow-room-section">
+                        {displayLink && (
+                          <div className="agent-workflow-room-link-row">
+                            <a
+                              href={displayLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="agent-workflow-link"
+                            >
+                              Open generated meeting link
+                            </a>
+                            <span className="agent-workflow-room-url" title={displayLink}>
+                              {displayLink}
+                            </span>
+                          </div>
+                        )}
+                        {isConfirmed && (
+                          <button
+                            type="button"
+                            className="agent-workflow-resend-btn"
+                            onClick={() => handleResendInterviewLink(app._id)}
+                            disabled={resendingRoomFor === app._id}
+                          >
+                            {resendingRoomFor === app._id
+                              ? "Generating…"
+                              : displayLink
+                              ? "Regenerate room & resend email"
+                              : "Generate room & send email"}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {app?.interviewSchedule?.lastError && (
                     <div className="agent-workflow-error">
                       Last error: {app.interviewSchedule.lastError}

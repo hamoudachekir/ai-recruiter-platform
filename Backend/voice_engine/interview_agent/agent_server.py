@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field
 
 from .interview_engine import InterviewEngine
 from .llm_client import LLMError, build_client_from_env
+from ..comparison_agent import ComparisonEngine
+from . import interview_service as _isvc
 
 # Load env in this order so the repo-root .env (where real secrets live) wins
 # over any scaffolded local .env. Without this, a placeholder NVIDIA_API_KEY
@@ -37,17 +39,40 @@ app.add_middleware(
 )
 
 engine: Optional[InterviewEngine] = None
+comparison_engine: Optional[ComparisonEngine] = None
 startup_error: Optional[str] = None
+_redis = None   # redis.asyncio.Redis instance, or None if unavailable
+
+
+@app.on_event("startup")
+async def _startup_redis() -> None:
+    global _redis
+    try:
+        import redis.asyncio as aioredis
+        _redis = aioredis.from_url(
+            os.getenv("REDIS_URL", "redis://localhost:6379"),
+            decode_responses=False,
+            socket_connect_timeout=2,
+        )
+        await _redis.ping()
+    except Exception:
+        _redis = None   # graceful degradation — in-memory fallback in interview_service
 
 
 @app.on_event("startup")
 def _startup() -> None:
-    global engine, startup_error
+    global engine, comparison_engine, startup_error
     try:
-        engine = InterviewEngine(build_client_from_env())
+        client = build_client_from_env()
+        engine = InterviewEngine(client)
+        # Share the same LLM client between live-interview turns and the
+        # batch-style comparison ranker. Cheaper than spinning a second client
+        # and keeps provider settings (Groq, NVIDIA, Anthropic, …) in sync.
+        comparison_engine = ComparisonEngine(client)
         startup_error = None
     except LLMError as exc:
         engine = None
+        comparison_engine = None
         startup_error = str(exc)
 
 
@@ -91,6 +116,45 @@ class EndRequest(BaseModel):
     interview_id: str
 
 
+class CandidatePayload(BaseModel):
+    sessionId: str
+    candidateId: Optional[str] = None
+    candidateName: str = ""
+    candidateEmail: str = ""
+    metrics: dict = Field(default_factory=dict)
+
+
+class ComparisonRankRequest(BaseModel):
+    job: dict = Field(default_factory=dict)
+    candidates: list[CandidatePayload]
+
+
+class InterviewStartReq(BaseModel):
+    room_id: str = Field(..., min_length=1, max_length=200)
+    candidate_id: str = Field(..., min_length=1, max_length=200)
+    session_type: Literal["intro", "technical"] = "intro"
+    job_title: str = ""
+    job_skills: list[str] = Field(default_factory=list)
+    job_description: str = ""
+    interview_style: str = Field("friendly", max_length=40)
+    candidate_name: str = ""
+    candidate_profile: dict = Field(default_factory=dict)
+    preferred_language: str = Field("en", max_length=20)
+
+
+class InterviewMessageReq(BaseModel):
+    room_id: str = Field(..., min_length=1, max_length=200)
+    candidate_id: str = Field(..., min_length=1, max_length=200)
+    message: str = Field(..., min_length=1, max_length=5000)
+    response_time_sec: float = 0.0
+    sentiment_delta: float = 0.0   # -1.0 to 1.0
+
+
+class InterviewEndReq(BaseModel):
+    room_id: str = Field(..., min_length=1, max_length=200)
+    candidate_id: str = Field(..., min_length=1, max_length=200)
+
+
 # ---------- routes ----------
 
 
@@ -102,6 +166,11 @@ def health() -> dict:
         "provider": os.getenv("LLM_PROVIDER", "echo"),
         "interview_styles": ["friendly", "strict", "senior", "junior", "fast_screening"],
         "error": startup_error,
+        "new_interview_routes": [
+            "/api/interview/start",
+            "/api/interview/message",
+            "/api/interview/end",
+        ],
     }
 
 
@@ -162,6 +231,26 @@ def session_end(req: EndRequest) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/comparison/rank")
+def comparison_rank(req: ComparisonRankRequest) -> dict:
+    if comparison_engine is None:
+        detail = "Comparison engine not ready."
+        if startup_error:
+            detail += f" Startup error: {startup_error}"
+        raise HTTPException(status_code=503, detail=detail)
+    try:
+        return comparison_engine.rank(
+            req.job,
+            [c.model_dump() for c in req.candidates],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.get("/session/{interview_id}")
 def session_get(interview_id: str) -> dict:
     eng = _require_engine()
@@ -169,6 +258,68 @@ def session_get(interview_id: str) -> dict:
         return eng.get(interview_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+# ── Nour interview service routes (/api/interview/*) ─────────────────────────
+# New code path using interview_service.py (Redis-backed, IRT-aware).
+# Existing /session/* routes backed by InterviewEngine are unchanged.
+
+
+@app.post("/api/interview/start")
+async def api_interview_start(req: InterviewStartReq) -> dict:
+    try:
+        return await _isvc.start_session(
+            room_id        = req.room_id,
+            candidate_id   = req.candidate_id,
+            session_type   = req.session_type,
+            room_data      = {
+                "job_title":        req.job_title,
+                "job_skills":       req.job_skills,
+                "job_description":  req.job_description,
+                "interview_style":  req.interview_style,
+            },
+            candidate_data = {
+                "name":    req.candidate_name,
+                "profile": req.candidate_profile,
+            },
+            _redis             = _redis,
+            preferred_language = req.preferred_language,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/interview/message")
+async def api_interview_message(req: InterviewMessageReq) -> dict:
+    try:
+        return await _isvc.send_message(
+            room_id           = req.room_id,
+            candidate_id      = req.candidate_id,
+            candidate_message = req.message,
+            response_time_sec = req.response_time_sec,
+            sentiment_delta   = req.sentiment_delta,
+            _redis            = _redis,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/interview/end")
+async def api_interview_end(req: InterviewEndReq) -> dict:
+    try:
+        return await _isvc.end_session(
+            room_id      = req.room_id,
+            candidate_id = req.candidate_id,
+            _redis       = _redis,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 if __name__ == "__main__":

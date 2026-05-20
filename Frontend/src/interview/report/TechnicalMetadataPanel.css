@@ -1,0 +1,115 @@
+/* TechnicalMetadataPanel.css */
+
+.tmp-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.05);
+  margin-bottom: 20px;
+  overflow: hidden;
+  color: #111827;
+}
+
+.tmp-header {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+
+.tmp-header:hover {
+  background: #f9fafb;
+}
+
+.tmp-title-group {
+  flex: 1;
+}
+
+.tmp-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.tmp-subtitle {
+  font-size: 12px;
+  color: #111827;
+  margin: 4px 0 0 0;
+}
+
+.tmp-chevron {
+  font-size: 12px;
+  color: #111827;
+  transition: transform 0.2s;
+  margin-left: 12px;
+}
+
+.tmp-chevron--expanded {
+  transform: rotate(180deg);
+}
+
+.tmp-content {
+  padding: 0 20px 20px 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.tmp-section {
+  margin-top: 16px;
+}
+
+.tmp-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 10px 0;
+}
+
+.tmp-dl {
+  display: grid;
+  gap: 8px;
+}
+
+.tmp-dl-row {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.tmp-dl-row dt {
+  width: 120px;
+  flex-shrink: 0;
+  color: #111827;
+  font-weight: 500;
+}
+
+.tmp-dl-row dd {
+  margin: 0;
+  color: #111827;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.tmp-error {
+  color: #111827;
+  font-weight: 500;
+}
+
+.tmp-note {
+  margin-top: 16px;
+  padding: 12px;
+  background: #f0f9ff;
+  border-left: 4px solid #0ea5e9;
+  border-radius: 0 6px 6px 0;
+  font-size: 12px;
+  color: #111827;
+  line-height: 1.5;
+}

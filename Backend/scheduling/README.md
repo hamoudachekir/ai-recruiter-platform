@@ -439,7 +439,7 @@ DEBUG=False
 
 # MongoDB
 MONGODB_URL=mongodb://localhost:27017
-MONGODB_DATABASE=ai_recruiter_db
+MONGODB_DATABASE=ai_recruiter
 
 # Node Backend Integration
 NODE_BACKEND_URL=http://localhost:3001

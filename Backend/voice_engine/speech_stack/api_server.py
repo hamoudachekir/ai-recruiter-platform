@@ -3,20 +3,20 @@ import json
 import os
 import sys
 import tempfile
-
 from typing import Annotated, AsyncGenerator, Optional
 
 try:
     import edge_tts as _edge_tts
+
     _EDGE_TTS_OK = True
 except ImportError:
     _EDGE_TTS_OK = False
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from dotenv import load_dotenv
 
 try:
     from .speech_stack import SpeechStack
@@ -82,7 +82,7 @@ def _safe_upload_suffix(filename: Optional[str]) -> str:
         return ".webm"
 
     # Keep suffix small and predictable for temp file creation.
-    if len(ext) > 10 or any(ch in ext for ch in ('/', '\\', ':')):
+    if len(ext) > 10 or any(ch in ext for ch in ("/", "\\", ":")):
         return ".webm"
 
     return ext
@@ -155,9 +155,14 @@ def startup() -> None:
             beam_size=int(os.getenv("FW_BEAM_SIZE", "1")),
             neutral_threshold=float(os.getenv("FW_NEUTRAL_THRESHOLD", "0.65")),
             enable_sentiment=True,
-            enable_transcript_correction=_env_bool("FW_ENABLE_TRANSCRIPT_CORRECTION", True),
-            correction_confidence_threshold=float(os.getenv("FW_CORRECTION_CONFIDENCE_THRESHOLD", "0.98")),
-            correction_dictionary_path=os.getenv("FW_CORRECTION_DICTIONARY_PATH", "") or None,
+            enable_transcript_correction=_env_bool(
+                "FW_ENABLE_TRANSCRIPT_CORRECTION", True
+            ),
+            correction_confidence_threshold=float(
+                os.getenv("FW_CORRECTION_CONFIDENCE_THRESHOLD", "0.98")
+            ),
+            correction_dictionary_path=os.getenv("FW_CORRECTION_DICTIONARY_PATH", "")
+            or None,
         )
         startup_error = None
         if _env_preload_tts_default():
@@ -355,7 +360,10 @@ async def transcribe(
 
     upload = audio or audio_file
     if upload is None:
-        raise HTTPException(status_code=422, detail="Missing audio upload field. Use 'audio' or 'audio_file'.")
+        raise HTTPException(
+            status_code=422,
+            detail="Missing audio upload field. Use 'audio' or 'audio_file'.",
+        )
 
     payload = await upload.read()
     if not payload:
@@ -393,7 +401,10 @@ async def transcribe_sentiment(
 
     upload = audio or audio_file
     if upload is None:
-        raise HTTPException(status_code=422, detail="Missing audio upload field. Use 'audio' or 'audio_file'.")
+        raise HTTPException(
+            status_code=422,
+            detail="Missing audio upload field. Use 'audio' or 'audio_file'.",
+        )
 
     payload = await upload.read()
     if not payload:
@@ -405,7 +416,9 @@ async def transcribe_sentiment(
         return _run_with_temp_audio(
             payload,
             upload.filename,
-            lambda temp_path: stack.transcribe_with_sentiment(temp_path, custom_terms=terms),
+            lambda temp_path: stack.transcribe_with_sentiment(
+                temp_path, custom_terms=terms
+            ),
         )
     except Exception as exc:
         # Realtime MediaRecorder chunks can intermittently be undecodable;
@@ -466,10 +479,127 @@ def tts_voices() -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-async def _edge_tts_stream(text: str) -> AsyncGenerator[bytes, None]:
-    """Stream MP3 audio chunks from Microsoft Edge TTS."""
-    voice = os.getenv("EDGE_TTS_VOICE", "en-US-EmmaNeural")
-    rate  = os.getenv("EDGE_TTS_RATE",  "+5%")
+# Multilingual voice mapping for Edge TTS
+EDGE_TTS_VOICES = {
+    # English variants
+    "en": "en-US-EmmaNeural",
+    "en-us": "en-US-EmmaNeural",
+    "en-gb": "en-GB-SoniaNeural",
+    "en-au": "en-AU-NatashaNeural",
+    "en-ca": "en-CA-ClaraNeural",
+    # French variants
+    "fr": "fr-FR-DeniseNeural",
+    "fr-fr": "fr-FR-DeniseNeural",
+    "fr-ca": "fr-CA-SylvieNeural",
+    "fr-be": "fr-BE-CharlineNeural",
+    "fr-ch": "fr-CH-ArianeNeural",
+    # Arabic variants
+    "ar": "ar-SA-ZariyahNeural",
+    "ar-sa": "ar-SA-ZariyahNeural",
+    "ar-eg": "ar-EG-SalmaNeural",
+    "ar-ae": "ar-AE-FatimaNeural",
+    # Spanish
+    "es": "es-ES-ElviraNeural",
+    "es-es": "es-ES-ElviraNeural",
+    "es-mx": "es-MX-DaliaNeural",
+    # German
+    "de": "de-DE-KatjaNeural",
+    "de-de": "de-DE-KatjaNeural",
+    # Italian
+    "it": "it-IT-ElsaNeural",
+    "it-it": "it-IT-ElsaNeural",
+    # Portuguese
+    "pt": "pt-BR-FranciscaNeural",
+    "pt-br": "pt-BR-FranciscaNeural",
+    "pt-pt": "pt-PT-RaquelNeural",
+    # Dutch
+    "nl": "nl-NL-ColetteNeural",
+    "nl-nl": "nl-NL-ColetteNeural",
+    # Multilingual premium voice
+    "multilingual": "fr-FR-RemyMultilingualNeural",
+}
+
+# Language-specific speaking rates
+EDGE_TTS_RATES = {
+    "en": "+5%",  # English - slightly faster
+    "en-us": "+5%",
+    "en-gb": "+5%",
+    "fr": "+0%",  # French - natural pace
+    "fr-fr": "+0%",
+    "fr-ca": "+0%",
+    "ar": "-5%",  # Arabic - slightly slower
+    "ar-sa": "-5%",
+    "es": "+0%",  # Spanish - natural pace
+    "de": "+0%",  # German - natural pace
+    "it": "+0%",  # Italian - natural pace
+    "pt": "+0%",  # Portuguese - natural pace
+    "nl": "+0%",  # Dutch - natural pace
+}
+
+
+def _select_voice_for_language(language_code: Optional[str]) -> str:
+    """Select appropriate Edge TTS voice for language code."""
+    normalized = str(language_code or "").strip().lower()
+
+    # Exact match
+    if normalized in EDGE_TTS_VOICES:
+        voice = EDGE_TTS_VOICES[normalized]
+        print(f"[TTS] language={normalized} voice={voice} (exact match)")
+        return voice
+
+    # Base language match (e.g., 'fr-FR' -> 'fr')
+    base_lang = normalized.split("-")[0] if "-" in normalized else normalized
+    if base_lang in EDGE_TTS_VOICES:
+        voice = EDGE_TTS_VOICES[base_lang]
+        print(f"[TTS] language={normalized} voice={voice} (base match: {base_lang})")
+        return voice
+
+    # Environment variable override
+    env_var = f"EDGE_TTS_{base_lang.upper()}_VOICE"
+    if os.getenv(env_var):
+        voice = os.getenv(env_var)
+        print(f"[TTS] language={normalized} voice={voice} (env: {env_var})")
+        return voice
+
+    # Fallback to default
+    default_voice = os.getenv("EDGE_TTS_VOICE", "en-US-EmmaNeural")
+    print(f"[TTS] language={normalized} voice={default_voice} (fallback)")
+    return default_voice
+
+
+def _select_rate_for_language(language_code: Optional[str]) -> str:
+    """Select appropriate speaking rate for language code."""
+    normalized = str(language_code or "").strip().lower()
+
+    # Exact match
+    if normalized in EDGE_TTS_RATES:
+        return EDGE_TTS_RATES[normalized]
+
+    # Base language match
+    base_lang = normalized.split("-")[0] if "-" in normalized else normalized
+    if base_lang in EDGE_TTS_RATES:
+        return EDGE_TTS_RATES[base_lang]
+
+    # Environment variable override
+    env_var = f"EDGE_TTS_{base_lang.upper()}_RATE"
+    if os.getenv(env_var):
+        return os.getenv(env_var)
+
+    # Fallback
+    return os.getenv("EDGE_TTS_RATE", "+5%")
+
+
+async def _edge_tts_stream(
+    text: str, language: Optional[str] = None
+) -> AsyncGenerator[bytes, None]:
+    """Stream MP3 audio chunks from Microsoft Edge TTS with language-aware voice selection."""
+    voice = _select_voice_for_language(language)
+    rate = _select_rate_for_language(language)
+
+    print(
+        f'[TTS] synthesizing text="{text[:50]}{"..." if len(text) > 50 else ""}" voice={voice} rate={rate}'
+    )
+
     comm = _edge_tts.Communicate(text, voice, rate=rate)
     async for chunk in comm.stream():
         if chunk["type"] == "audio":
@@ -485,50 +615,50 @@ async def _edge_tts_stream(text: str) -> AsyncGenerator[bytes, None]:
 )
 async def tts(request: TtsRequest):
     provider = str(request.provider or "").strip().lower()
-    force_edge = provider in {"edge", "edge_tts", "microsoft_edge"}
+    want_elevenlabs = provider in {"elevenlabs", "eleven_labs", "el"}
 
-    # Default to ElevenLabs. Edge TTS is only used when the client explicitly
-    # asks for it, so installed optional packages cannot silently override the
-    # configured voice provider.
-    if force_edge:
-        if not _EDGE_TTS_OK:
-            raise HTTPException(
-                status_code=503,
-                detail="Edge TTS provider requested but edge-tts package is not installed on speech stack server.",
-            )
+    # ── ElevenLabs path ─ only if explicitly requested AND API key is configured ──
+    if want_elevenlabs:
         try:
-            return StreamingResponse(
-                _edge_tts_stream(request.text),
-                media_type="audio/mpeg",
-                headers={"Content-Disposition": "inline; filename=tts.mp3"},
+            stack = require_stack()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        try:
+            wav_bytes = stack.synthesize_tts(
+                text=request.text,
+                rate=request.rate,
+                volume=request.volume,
+                voice_id=request.voice_id,
+                language=request.language,
             )
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Edge TTS failed: {exc}") from exc
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        is_mp3 = wav_bytes[:3] == b"ID3" or wav_bytes[:2] == b"\xff\xfb"
+        media_type = "audio/mpeg" if is_mp3 else "audio/wav"
+        return StreamingResponse(
+            io.BytesIO(wav_bytes),
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"inline; filename={'tts.mp3' if is_mp3 else 'tts.wav'}"
+            },
+        )
 
-    # ── ElevenLabs fallback ───────────────────────────────────────────────
+    # ── Default: Edge TTS (local backend, no API key required) ──────────────────────
+    if not _EDGE_TTS_OK:
+        raise HTTPException(
+            status_code=503,
+            detail="Edge TTS (default provider) is not available: edge-tts package not installed.",
+        )
     try:
-        stack = require_stack()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    try:
-        wav_bytes = stack.synthesize_tts(
-            text=request.text,
-            rate=request.rate,
-            volume=request.volume,
-            voice_id=request.voice_id,
-            language=request.language,
+        return StreamingResponse(
+            _edge_tts_stream(request.text, language=request.language),
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=tts.mp3"},
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    is_mp3 = wav_bytes[:3] == b"ID3" or wav_bytes[:2] == b"\xff\xfb"
-    media_type = "audio/mpeg" if is_mp3 else "audio/wav"
-    return StreamingResponse(
-        io.BytesIO(wav_bytes),
-        media_type=media_type,
-        headers={"Content-Disposition": f"inline; filename={'tts.mp3' if is_mp3 else 'tts.wav'}"},
-    )
+        raise HTTPException(
+            status_code=500, detail=f"[TTS] Edge TTS generation failed: {exc}"
+        ) from exc
 
 
 if __name__ == "__main__":

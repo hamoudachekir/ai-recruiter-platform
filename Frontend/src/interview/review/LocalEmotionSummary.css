@@ -1,0 +1,441 @@
+/* ─────────────────────────────────────────────────────────────────────
+   LocalEmotionSummary
+   Premium dashboard for the in-video emotion overview.
+   ───────────────────────────────────────────────────────────────────── */
+
+.les-section {
+  --les-bg: rgba(15, 23, 42, 0.55);
+  --les-border: rgba(148, 163, 184, 0.18);
+  --les-text: #e2e8f0;
+  --les-muted: #94a3b8;
+  --les-card-bg: rgba(15, 23, 42, 0.4);
+  --les-card-border: rgba(148, 163, 184, 0.15);
+
+  margin-top: 24px;
+  padding: 24px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(56, 224, 217, 0.06), transparent 55%),
+    radial-gradient(circle at 100% 100%, rgba(168, 85, 247, 0.05), transparent 55%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.7) 0%, rgba(15, 23, 42, 0.4) 100%);
+  border: 1px solid var(--les-border);
+  box-shadow:
+    0 18px 40px -22px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  color: var(--les-text);
+  font-family: "Inter", "SF Pro", system-ui, sans-serif;
+  animation: les-fade-in 0.4s ease;
+}
+
+@keyframes les-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Header ────────────────────────────────────────────────────────── */
+.les-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--les-border);
+}
+
+.les-header__lead {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.les-header__emoji {
+  font-size: 1.8rem;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+}
+
+.les-header__title {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #f1f5f9;
+}
+
+.les-header__subtitle {
+  margin: 3px 0 0;
+  font-size: 0.78rem;
+  color: var(--les-muted);
+  line-height: 1.45;
+}
+
+.les-header__meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.les-pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+.les-pill--info {
+  background: rgba(56, 224, 217, 0.08);
+  border-color: rgba(56, 224, 217, 0.35);
+  color: #99f6e4;
+}
+.les-pill--positive {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #86efac;
+}
+.les-pill--warning {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+.les-pill--neutral {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.32);
+  color: #cbd5e1;
+}
+
+/* ── Empty state ───────────────────────────────────────────────────── */
+.les-empty {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 22px 24px;
+  border-radius: 12px;
+  border: 1px dashed rgba(56, 224, 217, 0.35);
+  background: rgba(56, 224, 217, 0.04);
+  color: #cbd5e1;
+}
+
+.les-empty__icon {
+  font-size: 1.6rem;
+  color: #5eead4;
+}
+
+.les-empty p {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--les-muted);
+}
+
+/* ── Hero metric row ───────────────────────────────────────────────── */
+.les-hero {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.les-hero-card {
+  --accent: rgba(56, 224, 217, 0.85);
+  position: relative;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: linear-gradient(
+    150deg,
+    rgba(15, 23, 42, 0.65),
+    rgba(15, 23, 42, 0.35)
+  );
+  border: 1px solid var(--les-card-border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  isolation: isolate;
+  transition: transform 0.2s ease, box-shadow 0.25s ease, border-color 0.2s ease;
+}
+
+.les-hero-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 0%, var(--accent) 0%, transparent 50%);
+  opacity: 0.06;
+  z-index: -1;
+}
+
+.les-hero-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.les-hero-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+  box-shadow: 0 14px 30px -18px rgba(0, 0, 0, 0.55);
+}
+
+.les-hero-card__label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--les-muted);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.les-hero-card__icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.les-hero-card__body {
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+}
+
+/* Dominant emotion */
+.les-dominant {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.les-dominant__emoji {
+  font-size: 2.4rem;
+  line-height: 1;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.4));
+}
+
+.les-dominant__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.les-dominant__name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.les-dominant__sub {
+  font-size: 0.72rem;
+  color: var(--les-muted);
+  letter-spacing: 0.02em;
+}
+
+/* Gauge tiles */
+.les-gauge-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.les-gauge {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+}
+
+.les-gauge__bg {
+  fill: none;
+  stroke: rgba(148, 163, 184, 0.18);
+}
+
+.les-gauge__value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  line-height: 1;
+}
+
+.les-gauge__num {
+  font-size: 0.95rem;
+}
+
+.les-gauge__unit {
+  font-size: 0.55rem;
+  color: var(--les-muted);
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+.les-gauge-label {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Engagement arc */
+.les-arc {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.les-arc__icon {
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+.les-arc__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.les-arc__label {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  line-height: 1.1;
+}
+
+.les-arc__sub {
+  font-size: 0.7rem;
+  color: var(--les-muted);
+}
+
+/* ── Wrapper card around each inherited sub-component ──────────────── */
+.les-card {
+  position: relative;
+  border-radius: 14px;
+  border: 1px solid var(--les-card-border);
+  background: linear-gradient(
+    140deg,
+    rgba(15, 23, 42, 0.6),
+    rgba(15, 23, 42, 0.3)
+  );
+  padding: 4px;
+  overflow: hidden;
+}
+
+.les-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(56, 224, 217, 0.4),
+    transparent
+  );
+  opacity: 0.7;
+}
+
+/* Style overrides for the sub-components (which use .ed-* classes from
+   EmotionDashboard.css) so they look native inside this premium panel. */
+.les-card .ed-card,
+.les-card .ed-breakdown,
+.les-card .ed-chart-card,
+.les-card .ed-peaks {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 18px 20px !important;
+  margin: 0 !important;
+}
+
+.les-card .ed-card__title {
+  color: #f1f5f9;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+.les-card .ed-card__hint {
+  color: var(--les-muted);
+  font-size: 0.72rem;
+}
+
+.les-card .ed-bar-row__name,
+.les-card .ed-bar-row__pct {
+  color: var(--les-text);
+}
+
+.les-card .ed-bar-row__track {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.les-card .ed-legend__label {
+  color: var(--les-text);
+}
+
+.les-card .ed-legend__note {
+  color: var(--les-muted);
+}
+
+.les-card .ed-peak-row {
+  background: rgba(15, 23, 42, 0.55) !important;
+  border: 1px solid var(--les-card-border) !important;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.les-card .ed-peak-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(56, 224, 217, 0.4) !important;
+  background: rgba(15, 23, 42, 0.7) !important;
+}
+
+.les-card .ed-empty {
+  color: var(--les-muted);
+}
+
+/* ── Footer disclaimer ─────────────────────────────────────────────── */
+.les-footer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.72rem;
+  color: var(--les-muted);
+  padding-top: 12px;
+  border-top: 1px solid var(--les-border);
+  line-height: 1.55;
+}
+
+.les-footer__icon {
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ── Compact breakpoint ─────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .les-section {
+    padding: 18px;
+    gap: 14px;
+  }
+  .les-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .les-header__meta {
+    margin-top: 4px;
+  }
+  .les-dominant__emoji {
+    font-size: 2rem;
+  }
+}

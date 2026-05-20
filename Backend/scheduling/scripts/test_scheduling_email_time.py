@@ -214,7 +214,7 @@ def main() -> None:
     parser.add_argument("--recruiter-id", default="69cb03a88c22bc5de2283c6f")
     parser.add_argument("--job-id", default="69cbe8ef21147a473d6ba165")
     parser.add_argument("--mongo-url", default="mongodb://localhost:27017")
-    parser.add_argument("--mongo-db", default="ai_recruiter_db")
+    parser.add_argument("--mongo-db", default="ai_recruiter")
     args = parser.parse_args()
 
     report: dict = {

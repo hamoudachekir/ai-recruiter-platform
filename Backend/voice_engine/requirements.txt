@@ -7,3 +7,5 @@ torchaudio
 faster-whisper
 pyannote.audio
 silero-vad
+redis>=4.2.0
+pymongo>=4.6.0

@@ -23,6 +23,27 @@ Never output meta tags like D1/D2/D3 in the question text.
 Keep "reasoning" private, concise, and evidence-based; do not expose scoring notes in "next_question".
 """
 
+COMPACT_SYSTEM = """
+You are Angelica, a professional AI interview assistant.
+
+Return STRICT JSON only:
+{"score":0.0,"confidence":0.0,"reasoning":"short private note","next_question":"one short question","difficulty":1,"skill_focus":"topic","done":false}
+
+Rules:
+- Ask exactly one candidate-facing question, maximum one sentence.
+- If the candidate gives a meaningful answer, move forward.
+- Never repeat an asked question or already answered topic.
+- Rephrase only when the whole candidate message clearly asks to repeat.
+- Never say "Of course. Let me rephrase" unless they ask to repeat.
+- Use job title, skills, recent conversation, asked questions, and last answer.
+- Avoid protected-class topics and do not reveal scores or rubric notes.
+- If the answer describes fixing STT, transcript, or interview-flow stability, ask how they tested reliability.
+
+Score only the last candidate answer:
+0.2 unusable/off-topic, 0.5 partial/shallow, 0.7 relevant with detail, 0.85 strong with decisions/result.
+No prose outside JSON.
+"""
+
 
 INTERVIEWER_PERSONA = """
 INTERVIEWER PERSONA:
@@ -47,6 +68,15 @@ Conversation rules:
   sounding patronizing.
 - You do not detect or judge emotion, personality, honesty, or stress from the
   candidate's face or voice. Score only what the answer says.
+- REPHRASE RULE: A substantive candidate answer (more than one sentence or about
+  a specific experience) means the candidate HAS answered. Score it and ask the
+  NEXT relevant question. Never output "Of course. Let me rephrase" after a real
+  answer. Only rephrase when the entire candidate message is a short explicit
+  request like "can you repeat?" or "pardon?".
+- The word "repeated" or "repeating" inside a technical answer (e.g., "the STT
+  captured repeated words") is NOT a request to repeat. Treat it as content.
+- Never ask the same question twice in a row regardless of how the candidate
+  phrased their answer.
 """
 
 
@@ -79,6 +109,8 @@ NEXT QUESTION QUALITY RULES:
 - Never ask multi-part stacked questions with more than one clear ask.
 - Avoid trivia-style questions unless testing a fundamental technical concept.
 - Avoid yes/no questions unless immediately followed by a concrete "how" or "why" ask.
+- When the candidate describes solving a live interview, STT, transcript, or
+  agent-flow issue, prefer a reliability/testing follow-up before rotating.
 """
 
 
@@ -335,6 +367,8 @@ def build_user_turn_prompt(
     job_description: str = "",
     candidate_profile: dict | None = None,
     preferred_language: str = "en",
+    asked_questions: list[str] | None = None,
+    answered_topics: list[str] | None = None,
 ) -> str:
     sentiment_str = "n/a"
     if last_sentiment:
@@ -351,16 +385,34 @@ def build_user_turn_prompt(
     tail_block = "\n".join(tail_lines) if tail_lines else "(no prior turns)"
 
     memory_lines = []
-    for entry in (short_term_memory or [])[-12:]:
+    for entry in (short_term_memory or [])[-8:]:
         role = str(entry.get("role", "?")).lower()
         text = str(entry.get("text", "") or "").strip().replace("\n", " ")
         if not text:
             continue
         label = "candidate" if role == "candidate" else "agent"
-        if len(text) > 180:
-            text = text[:180].rstrip() + "..."
+        if len(text) > 110:
+            text = text[:110].rstrip() + "..."
         memory_lines.append(f"- {label}: {text}")
     memory_block = "\n".join(memory_lines) if memory_lines else "(none)"
+
+    asked_lines = []
+    for question in (asked_questions or [])[-12:]:
+        text = str(question or "").strip().replace("\n", " ")
+        if text:
+            asked_lines.append(f"- {text[:180]}")
+    asked_block = "\n".join(asked_lines) if asked_lines else "(none)"
+
+    topic_lines = []
+    seen_topics: set[str] = set()
+    for topic in (answered_topics or [])[-12:]:
+        text = str(topic or "").strip().replace("\n", " ")
+        key = text.lower()
+        if not text or key in seen_topics:
+            continue
+        seen_topics.add(key)
+        topic_lines.append(f"- {text[:120]}")
+    topics_block = "\n".join(topic_lines) if topic_lines else "(none)"
 
     opener_note = (
         "This is the OPENING turn. There is no prior answer to score; "
@@ -369,8 +421,8 @@ def build_user_turn_prompt(
         else ""
     )
 
-    job_desc_block = (str(job_description or "").strip() or "(none provided)")[:400]
-    profile_block = _format_candidate_profile(candidate_profile)[:900]
+    job_desc_block = (str(job_description or "").strip() or "(none provided)")[:220]
+    profile_block = _format_candidate_profile(candidate_profile)[:550]
     candidate_facts_text = _extract_candidate_facts(transcript_tail)
     language_label = "French" if str(preferred_language or "").lower().startswith("fr") else "English"
 
@@ -397,6 +449,12 @@ LAST_SENTIMENT: {sentiment_str}
 
 CANDIDATE_FACTS_FROM_CHAT: {candidate_facts_text}
 
+ASKED_QUESTIONS_DO_NOT_REPEAT:
+{asked_block}
+
+ANSWERED_TOPICS_AVOID_REASKING:
+{topics_block}
+
 RECENT_TRANSCRIPT_TAIL:
 {tail_block}
 
@@ -404,4 +462,72 @@ SHORT_TERM_MEMORY_WINDOW:
 {memory_block}
 
 Produce the JSON object now.
+"""
+
+
+def build_compact_user_turn_prompt(
+    *,
+    phase: str,
+    job_title: str,
+    job_skills: list[str],
+    candidate_name: str,
+    last_candidate_answer: str,
+    transcript_tail: list[dict],
+    asked_questions: list[str] | None = None,
+    answered_topics: list[str] | None = None,
+    candidate_profile: dict | None = None,
+) -> str:
+    profile_summary = str((candidate_profile or {}).get("short_description") or "").strip()
+    profile_skills = [
+        str(skill).strip()
+        for skill in (candidate_profile or {}).get("skills", [])
+        if str(skill or "").strip()
+    ][:10]
+
+    recent_lines = []
+    for entry in transcript_tail[-8:]:
+        role = str(entry.get("role", "?")).strip()
+        text = str(entry.get("text", "") or "").strip().replace("\n", " ")
+        if not text:
+            continue
+        if len(text) > 180:
+            text = text[:180].rstrip() + "..."
+        recent_lines.append(f"- {role}: {text}")
+
+    asked_lines = []
+    for question in (asked_questions or [])[-10:]:
+        text = str(question or "").strip().replace("\n", " ")
+        if text:
+            asked_lines.append(f"- {text[:160]}")
+
+    topics = []
+    seen_topics: set[str] = set()
+    for topic in (answered_topics or [])[-10:]:
+        text = str(topic or "").strip()
+        key = text.lower()
+        if not text or key in seen_topics:
+            continue
+        seen_topics.add(key)
+        topics.append(f"- {text[:80]}")
+
+    return f"""PHASE: {phase}
+JOB_TITLE: {job_title or "candidate role"}
+JOB_SKILLS: {", ".join(job_skills[:10]) if job_skills else "(none)"}
+CANDIDATE: {candidate_name or "candidate"}
+PROFILE: {profile_summary or "(none)"}; skills={", ".join(profile_skills) if profile_skills else "(none)"}
+
+ASKED_QUESTIONS:
+{chr(10).join(asked_lines) if asked_lines else "(none)"}
+
+ANSWERED_TOPICS:
+{chr(10).join(topics) if topics else "(none)"}
+
+LAST_CANDIDATE_ANSWER:
+\"\"\"{str(last_candidate_answer or "").strip()[:900]}\"\"\"
+
+RECENT_CONVERSATION:
+{chr(10).join(recent_lines) if recent_lines else "(none)"}
+
+Generate the next best interview question. It must not repeat any asked question.
+Return only the strict JSON object.
 """

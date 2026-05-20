@@ -13,7 +13,13 @@ const callRoomSchema = new mongoose.Schema({
   
   // Job reference (optional)
   job: { type: mongoose.Schema.Types.ObjectId, ref: 'Job' },
-  
+
+  // Parent shareable room created by the company for this job. When a candidate
+  // joins via the shared link a new CallRoom is spawned with these two refs
+  // populated so every candidate session is auto-linked to job + company.
+  jobInterviewRoom: { type: mongoose.Schema.Types.ObjectId, ref: 'JobInterviewRoom', index: true },
+  company: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+
   // Room status flow
   status: { 
     type: String, 
@@ -158,6 +164,69 @@ const callRoomSchema = new mongoose.Schema({
     llmError: String,
   },
   
+  // Face identity verification (1:1 matching, candidate photo vs live frame).
+  // No raw frames stored. No race/gender/age analysis.
+  // Not used as a standalone hiring decision — recruiter review required for mismatches.
+  faceVerification: {
+    required: { type: Boolean, default: false },
+    status: {
+      type: String,
+      enum: [
+        'pending', 'matched', 'uncertain', 'not_matched', 'failed', 'skipped',
+        'not_enrolled', 'multiple_faces', 'no_face', 'low_quality',
+        'liveness_failed', 'disabled',
+      ],
+      default: 'pending',
+    },
+    allowInterview: { type: Boolean, default: false },
+    provider: { type: String, default: 'insightface' },
+    model: { type: String, default: 'buffalo_l' },
+    metric: { type: String, default: 'cosine_similarity' },
+    similarity: Number,
+    medianSimilarity: Number,
+    bestSimilarity: Number,
+    distance: Number,
+    bestDistance: Number,
+    threshold: Number,
+    attempts: { type: Number, default: 0 },
+    consecutiveMismatches: { type: Number, default: 0 },
+    matchingFrames: { type: Number, default: 0 },
+    totalFrames: { type: Number, default: 0 },
+    validFrames: { type: Number, default: 0 },
+    verifiedFrames: { type: Number, default: 0 },
+    framesChecked: { type: Number, default: 0 },
+    requiredFrames: { type: Number, default: 3 },
+    minMatchingFrames: { type: Number, default: 2 },
+    livenessPassed: { type: Boolean, default: false },
+    livenessChallenge: String,
+    failOpen: { type: Boolean, default: false },
+    checkedAt: Date,
+    events: [{
+      _id: false,
+      type: {
+        type: String,
+        enum: [
+          'START_CHECK', 'PERIODIC_CHECK',
+          'IDENTITY_MATCH', 'IDENTITY_MISMATCH',
+          'UNCERTAIN', 'MULTIPLE_FACES', 'NO_FACE', 'LOW_QUALITY',
+          'NOT_ENROLLED', 'LIVENESS_FAILED', 'IDENTITY_SERVICE_ERROR',
+        ],
+      },
+      status: String,
+      score: Number,
+      similarity: Number,
+      distance: Number,
+      metric: String,
+      threshold: Number,
+      matchingFrames: Number,
+      totalFrames: Number,
+      livenessScore: Number,
+      timestamp: { type: Date, default: Date.now },
+      note: String,
+      subType: String,
+    }],
+  },
+
   // Final interview agent snapshot (conversation transcript, evaluation, etc)
   agentSnapshot: mongoose.Schema.Types.Mixed,
 

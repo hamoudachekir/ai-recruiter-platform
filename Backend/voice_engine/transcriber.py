@@ -18,6 +18,8 @@ class Transcript:
     language: str | None
     confidence: float
     words: List[dict]
+    low_confidence: bool = False
+    language_probability: float = 0.0
 
 
 class FasterWhisperTranscriber:
@@ -60,13 +62,18 @@ class FasterWhisperTranscriber:
                         }
                     )
 
+        confidence = avg_logprob / max(count, 1)
+        low_confidence = confidence < self.config.min_segment_confidence
+
         return Transcript(
             text=" ".join(texts).strip(),
             start_ms=segment.start_ms,
             end_ms=segment.end_ms,
             language=getattr(info, "language", None),
-            confidence=avg_logprob / max(count, 1),
+            confidence=confidence,
             words=words,
+            low_confidence=low_confidence,
+            language_probability=getattr(info, "language_probability", 0.0),
         )
 
     def transcribe_full(self, audio: np.ndarray) -> List[Transcript]:
@@ -102,6 +109,7 @@ class FasterWhisperTranscriber:
                     language=getattr(info, "language", None),
                     confidence=getattr(seg, "avg_logprob", 0.0),
                     words=words,
+                    language_probability=getattr(info, "language_probability", 0.0),
                 )
             )
 

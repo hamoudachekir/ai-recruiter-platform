@@ -4,6 +4,8 @@ const router = express.Router();
 const bcrypt = require("bcrypt"); // For password hashing
 const jwt = require("jsonwebtoken"); // Import JWT
 const { UserModel } = require("../models/user");
+const { verifyToken } = require("../middleware/auth");
+const { enrollUserFaceProfile, getFaceEnrollmentMessage } = require("../services/faceVerifyService");
 
 router.post("/auth/login", async (req, res) => {
     try {
@@ -96,6 +98,43 @@ router.get("/users/:id", async (req, res) => {
         res.status(200).json(user);
     } catch (err) {
         res.status(500).json({ message: "Error fetching user", error: err.message });
+    }
+});
+
+router.post("/users/:userId/face-profile/enroll", verifyToken, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        if (String(req.user._id) !== String(userId) && req.user.role !== "ADMIN") {
+            return res.status(403).json({ enrolled: false, message: "Not allowed to enroll this profile." });
+        }
+
+        const user = await UserModel.findById(userId);
+        if (!user) {
+            return res.status(404).json({ enrolled: false, message: "User not found." });
+        }
+
+        const enrollment = await enrollUserFaceProfile(user);
+        await UserModel.findByIdAndUpdate(
+            userId,
+            { $set: enrollment.patch },
+            { runValidators: false }
+        );
+
+        const payload = {
+            enrolled: !!enrollment.enrolled,
+            status: enrollment.status || (enrollment.enrolled ? "enrolled" : "failed"),
+            reason: enrollment.reason,
+            model: enrollment.model,
+            quality: enrollment.quality,
+            sourcePhotoUrl: enrollment.photoUrl,
+            updatedAt: enrollment.patch?.["faceProfile.updatedAt"],
+            message: enrollment.enrolled ? "Profile photo verified for interview identity check" : getFaceEnrollmentMessage(enrollment.reason),
+        };
+
+        return res.status(enrollment.enrolled ? 200 : 422).json(payload);
+    } catch (err) {
+        console.error("[FaceProfile/enroll] Error:", err?.message);
+        return res.status(500).json({ enrolled: false, status: "failed", reason: "enrollment_failed" });
     }
 });
 

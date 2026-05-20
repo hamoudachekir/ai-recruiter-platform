@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-recruiter-config
+  namespace: ai-recruiter
+data:
+  MONGO_DB_NAME: ai_recruiter
+  WHISPER_MODEL: base
+  WHISPER_DEVICE: cpu
+  ENABLE_YOLO: "0"
+  ANALYSIS_FRAME_FPS: "1"
+  WORKER_MAX_RETRIES: "3"
+  WORKER_JOB_TIMEOUT: "600"
+  GPU_INFERENCE_TIMEOUT: "900"
+  CPU_FALLBACK_TIMEOUT: "1800"

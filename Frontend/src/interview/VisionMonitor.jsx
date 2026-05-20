@@ -174,6 +174,7 @@ export default function VisionMonitor({
   videoRef,
   onStatusChange,
   showYoloPanel = true,
+  hideUI = false,
 }) {
   const detectorRef = useRef(null);
   const canvasRef = useRef(null);
@@ -495,6 +496,12 @@ export default function VisionMonitor({
   const yoloPerson = getYoloPersonStatus();
   const yoloObjects = getYoloObjectStatus();
 
+  // When hideUI is true, render hidden div to keep all monitoring hooks running
+  // but don't show the Interview Integrity Assistant card in the main interface
+  if (hideUI) {
+    return <div aria-hidden="true" style={{ display: 'none' }} data-vision-monitor="active" />;
+  }
+
   return (
     <div className="vm-card">
       <div className="vm-card__header">
@@ -511,7 +518,7 @@ export default function VisionMonitor({
           </div>
         ))}
       </div>
-      
+
       {/* YOLO Object Monitor Panel - Candidate facing */}
       {showYoloPanel && (
         <div className="vm-yolo-section">
@@ -533,7 +540,7 @@ export default function VisionMonitor({
           </div>
         </div>
       )}
-      
+
       <div className={`vm-message ${status.facePresent && status.faceCentered && status.lightingQuality !== 'poor' && status.distanceStatus === 'good' ? 'vm-message--ok' : 'vm-message--warn'}`}>
         {status.message}
       </div>

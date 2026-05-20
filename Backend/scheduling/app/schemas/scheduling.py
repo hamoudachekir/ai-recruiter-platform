@@ -122,6 +122,7 @@ class ConfirmSlotRequest(BaseModel):
     selected_slot: TimeSlot
     location: Optional[str] = None
     notes: Optional[str] = Field(default="", max_length=500)
+    platform_meeting_link: Optional[str] = None
 
 
 class CandidateTokenConfirmRequest(BaseModel):

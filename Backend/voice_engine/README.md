@@ -109,6 +109,35 @@ Vous pouvez aussi forcer un redémarrage ou changer le modèle LLM:
 .\Backend\voice_engine\scripts\run_voice_interview_stack.ps1 -ForceRestart -LLMProvider ollama -OllamaModel qwen2.5:14b-instruct
 ```
 
+Pour utiliser Groq sur l'agent live, configurez la racine `.env` côté backend seulement:
+
+```env
+LLM_PROVIDER=groq
+GROQ_API_KEY=your_groq_key
+GROQ_MODEL=openai/gpt-oss-120b
+AGENT_MAX_TOKENS=100
+AGENT_TEMPERATURE=0.15
+AGENT_TRANSCRIPT_TAIL_TURNS=8
+AGENT_LLM_TIMEOUT_MS=6000
+```
+
+Le frontend ne reçoit jamais la clé: Node relaie vers le service Python, et le service Python appelle Groq côté serveur.
+
+### Tester une conversation complète agent/candidat
+
+Quand l'interview agent est lancé sur `http://localhost:8013`, vous pouvez simuler une conversation complète avec:
+
+```powershell
+.\.venv\Scripts\python.exe Backend\voice_engine\scripts\test_interview_agent_conversation.py
+```
+
+Le test démarre une session, affiche les réponses candidat et les questions d'Angelica, vérifie que les questions ne sont pas vides, contrôle le temps de réponse, et couvre deux cas importants:
+
+- une vraie réponse qui contient "repeated words" ne doit pas déclencher une répétition de question;
+- "can you repeat?" doit reformuler la dernière question.
+
+Un transcript JSON est sauvegardé dans `Backend\voice_engine\_runtime_logs`.
+
 
 Cette partie est déjà branchée sur la page interview:
 

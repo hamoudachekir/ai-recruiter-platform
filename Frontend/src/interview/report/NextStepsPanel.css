@@ -1,0 +1,69 @@
+.nsp-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 22px;
+  margin-bottom: 24px;
+}
+
+.nsp-card__header {
+  margin-bottom: 16px;
+}
+
+.nsp-card__eyebrow {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0 5px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.nsp-card__title {
+  color: #1e293b;
+  font-size: 19px;
+  margin: 0;
+}
+
+.nsp-list {
+  counter-reset: nsp-counter;
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nsp-list li {
+  align-items: flex-start;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #334155;
+  counter-increment: nsp-counter;
+  display: flex;
+  font-size: 14px;
+  gap: 12px;
+  line-height: 1.5;
+  padding: 13px 14px;
+}
+
+.nsp-list li::before {
+  align-items: center;
+  background: #e0f2fe;
+  border-radius: 999px;
+  color: #075985;
+  content: counter(nsp-counter);
+  display: inline-flex;
+  flex: 0 0 24px;
+  font-size: 12px;
+  font-weight: 800;
+  height: 24px;
+  justify-content: center;
+}
+
+@media (max-width: 640px) {
+  .nsp-card {
+    padding: 16px;
+  }
+}

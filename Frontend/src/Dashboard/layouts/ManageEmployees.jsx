@@ -1,241 +1,225 @@
-import React, { useEffect, useState } from "react";
-import { Heading, Subtitle } from "../components/UI/Typography";
-import Button from "../components/UI/Button";
+import { useEffect, useState } from "react";
+import { Building2, Search, Pencil, Trash2, CheckCircle, XCircle, Check, X } from "lucide-react";
+import "../AdminDashboard.css";
 
-function ManageEmployees() {
+const API = "http://localhost:3001";
+
+const STATUS_BADGE = {
+  APPROVED: "green",
+  REJECTED:  "red",
+  PENDING:   "amber",
+};
+
+export default function ManageEmployees() {
   const [enterprises, setEnterprises] = useState([]);
+  const [filtered, setFiltered] = useState([]);
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [editingId, setEditingId] = useState(null);
-  const [editedEnterprise, setEditedEnterprise] = useState({});
+  const [editedData, setEditedData] = useState({});
 
   useEffect(() => {
-    const fetchEnterprises = async () => {
-      try {
-        const response = await fetch("http://localhost:3001/api/users");
-        if (!response.ok) {
-          throw new Error("Failed to fetch enterprise users");
-        }
-
-        const data = await response.json();
-        console.log("Fetched usersData:", data);
-
-        const enterpriseUsers = data.data.filter((user) => user.role === "ENTERPRISE");
-        setEnterprises(enterpriseUsers);
-      } catch (err) {
-        setError(err.message);
-      } finally {
+    fetch(`${API}/api/admin/companies`)
+      .then((r) => r.json())
+      .then((body) => {
+        const users = body.data || [];
+        setEnterprises(users);
+        setFiltered(users);
         setLoading(false);
-      }
-    };
-
-    fetchEnterprises();
+      })
+      .catch((err) => { setError(err.message); setLoading(false); });
   }, []);
 
-  const handleUpdateStatus = async (id, status) => {
+  useEffect(() => {
+    const q = search.toLowerCase();
+    setFiltered(enterprises.filter((e) =>
+      (e.email || "").toLowerCase().includes(q) ||
+      (e.enterprise?.name || "").toLowerCase().includes(q)
+    ));
+  }, [search, enterprises]);
+
+  const updateStatus = async (id, status) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/users/${id}`, {
+      await fetch(`${API}/api/users/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          verificationStatus: {
-            status: status,
-            updatedDate: new Date().toISOString(),
-          },
-        }),
+        body: JSON.stringify({ verificationStatus: { status, updatedDate: new Date().toISOString() } }),
       });
-
-      if (!response.ok) throw new Error("Failed to update verification status");
-
       setEnterprises((prev) =>
-        prev.map((enterprise) =>
-          enterprise._id === id
-            ? {
-                ...enterprise,
-                verificationStatus: {
-                  ...enterprise.verificationStatus,
-                  status,
-                  updatedDate: new Date().toISOString(),
-                },
-              }
-            : enterprise
-        )
+        prev.map((e) => e._id === id ? { ...e, verificationStatus: { ...e.verificationStatus, status } } : e)
       );
-    } catch (err) {
-      setError(err.message);
-    }
+    } catch (err) { setError(err.message); }
   };
 
   const handleDelete = async (id) => {
+    if (!window.confirm("Delete this company?")) return;
     try {
-      const response = await fetch(`http://localhost:3001/api/users/${id}`, {
-        method: "DELETE",
-      });
-      if (!response.ok) throw new Error("Failed to delete user");
-
-      setEnterprises((prev) => prev.filter((enterprise) => enterprise._id !== id));
-    } catch (err) {
-      setError(err.message);
-    }
+      await fetch(`${API}/api/users/${id}`, { method: "DELETE" });
+      setEnterprises((prev) => prev.filter((e) => e._id !== id));
+    } catch (err) { setError(err.message); }
   };
 
-  const handleEdit = (enterprise) => {
-    setEditingId(enterprise._id);
-    setEditedEnterprise({
-      name: enterprise.enterprise?.name || "",
-      industry: enterprise.enterprise?.industry || "",
-      location: enterprise.enterprise?.location || "",
-      employeeCount: enterprise.enterprise?.employeeCount || "",
+  const handleEdit = (e) => {
+    setEditingId(e._id);
+    setEditedData({
+      name: e.enterprise?.name || "",
+      industry: e.enterprise?.industry || "",
+      location: e.enterprise?.location || "",
+      employeeCount: e.enterprise?.employeeCount || "",
     });
   };
 
   const handleSave = async (id) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/users/${id}`, {
+      await fetch(`${API}/api/users/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enterprise: editedEnterprise }),
+        body: JSON.stringify({ enterprise: editedData }),
       });
-
-      if (!response.ok) throw new Error("Failed to update enterprise");
-
       setEnterprises((prev) =>
-        prev.map((enterprise) =>
-          enterprise._id === id
-            ? {
-                ...enterprise,
-                enterprise: editedEnterprise,
-              }
-            : enterprise
-        )
+        prev.map((e) => e._id === id ? { ...e, enterprise: editedData } : e)
       );
-
       setEditingId(null);
-    } catch (err) {
-      setError(err.message);
-    }
+    } catch (err) { setError(err.message); }
   };
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setEditedEnterprise((prev) => ({ ...prev, [name]: value }));
-  };
-
-  if (loading) return <p>Loading enterprises...</p>;
-  if (error) return <p>Error: {error}</p>;
+  if (loading) return <div className="adm-loading"><div className="adm-spinner" />Loading companies...</div>;
 
   return (
-    <div className="p-4 manage-employees-container">
-      <div className="mb-4 border-bottom pb-2">
-        <Heading>Manage Enterprises</Heading>
-        <Subtitle>Total: {enterprises.length} enterprises</Subtitle>
+    <div className="adm-content">
+      <div className="adm-page-header">
+        <h1 className="adm-page-header__title">Companies</h1>
+        <p className="adm-page-header__sub">{enterprises.length} enterprise accounts on the platform</p>
       </div>
 
-      <div className="enterprise-list">
-        {enterprises.map((enterprise) => (
-          <div
-            key={enterprise._id}
-            className="enterprise-item d-flex justify-content-between align-items-start p-3 mb-3 border rounded"
-          >
-            <div>
-              <h6>{enterprise.email}</h6>
-              {editingId === enterprise._id ? (
-                <div className="d-flex flex-column gap-2">
-                  <input
-                    name="name"
-                    value={editedEnterprise.name}
-                    onChange={handleInputChange}
-                    className="form-control"
-                    placeholder="Enterprise Name"
-                  />
-                  <input
-                    name="industry"
-                    value={editedEnterprise.industry}
-                    onChange={handleInputChange}
-                    className="form-control"
-                    placeholder="Industry"
-                  />
-                  <input
-                    name="location"
-                    value={editedEnterprise.location}
-                    onChange={handleInputChange}
-                    className="form-control"
-                    placeholder="Location"
-                  />
-                  <input
-                    name="employeeCount"
-                    type="number"
-                    value={editedEnterprise.employeeCount}
-                    onChange={handleInputChange}
-                    className="form-control"
-                    placeholder="Employee Count"
-                  />
-                </div>
-              ) : (
-                <div>
-                  <p><strong>Enterprise Name:</strong> {enterprise.enterprise?.name}</p>
-                  <p><strong>Industry:</strong> {enterprise.enterprise?.industry}</p>
-                  <p><strong>Location:</strong> {enterprise.enterprise?.location}</p>
-                  <p><strong>Employee Count:</strong> {enterprise.enterprise?.employeeCount}</p>
-                </div>
-              )}
-              <p>
-                <strong>Verification Status:</strong>{" "}
-                <span
-                  style={{
-                    color:
-                      enterprise.verificationStatus?.status === "APPROVED"
-                        ? "green"
-                        : enterprise.verificationStatus?.status === "REJECTED"
-                        ? "red"
-                        : "orange",
-                  }}
-                >
-                  {enterprise.verificationStatus?.status || "PENDING"}
-                </span>
-              </p>
-            </div>
+      {error && <div className="adm-login__error" style={{ marginBottom: 16 }}>{error}</div>}
 
-            <div className="d-flex flex-column gap-2">
-              {editingId === enterprise._id ? (
-                <>
-                  <button className="btn btn-success btn-sm" onClick={() => handleSave(enterprise._id)}>
-                    Save
-                  </button>
-                  <button className="btn btn-secondary btn-sm" onClick={() => setEditingId(null)}>
-                    Cancel
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button className="btn btn-primary btn-sm" onClick={() => handleEdit(enterprise)}>
-                    Edit
-                  </button>
-                  <button
-                    className="btn btn-success btn-sm"
-                    onClick={() => handleUpdateStatus(enterprise._id, "APPROVED")}
-                    disabled={enterprise.verificationStatus?.status === "APPROVED"}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    className="btn btn-warning btn-sm"
-                    onClick={() => handleUpdateStatus(enterprise._id, "REJECTED")}
-                    disabled={enterprise.verificationStatus?.status === "REJECTED"}
-                  >
-                    Reject
-                  </button>
-                  <button className="btn btn-danger btn-sm" onClick={() => handleDelete(enterprise._id)}>
-                    Delete
-                  </button>
-                </>
-              )}
-            </div>
+      <div className="adm-section">
+        <div className="adm-section__header">
+          <h3 className="adm-section__title">All Companies</h3>
+          <div className="adm-topbar__search" style={{ width: 240 }}>
+            <Search size={14} className="adm-topbar__search-icon" />
+            <input
+              placeholder="Search by name or email..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
-        ))}
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="adm-empty">
+            <Building2 className="adm-empty__icon" />
+            <p className="adm-empty__text">No companies found</p>
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="adm-table">
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Industry</th>
+                  <th>Location</th>
+                  <th>Employees</th>
+                  <th>Verification</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((ent) => (
+                  <tr key={ent._id}>
+                    {editingId === ent._id ? (
+                      <>
+                        <td>
+                          <input className="adm-input" style={{ padding: "6px 10px" }}
+                            value={editedData.name}
+                            onChange={(e) => setEditedData((p) => ({ ...p, name: e.target.value }))}
+                            placeholder="Company name" />
+                        </td>
+                        <td>
+                          <input className="adm-input" style={{ padding: "6px 10px" }}
+                            value={editedData.industry}
+                            onChange={(e) => setEditedData((p) => ({ ...p, industry: e.target.value }))}
+                            placeholder="Industry" />
+                        </td>
+                        <td>
+                          <input className="adm-input" style={{ padding: "6px 10px" }}
+                            value={editedData.location}
+                            onChange={(e) => setEditedData((p) => ({ ...p, location: e.target.value }))}
+                            placeholder="Location" />
+                        </td>
+                        <td>
+                          <input className="adm-input" style={{ padding: "6px 10px", width: 80 }}
+                            type="number"
+                            value={editedData.employeeCount}
+                            onChange={(e) => setEditedData((p) => ({ ...p, employeeCount: e.target.value }))}
+                            placeholder="Count" />
+                        </td>
+                        <td>—</td>
+                        <td>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button className="adm-btn adm-btn--primary adm-btn--sm" onClick={() => handleSave(ent._id)}>
+                              <Check size={13} /> Save
+                            </button>
+                            <button className="adm-btn adm-btn--ghost adm-btn--sm" onClick={() => setEditingId(null)}>
+                              <X size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <div className="adm-avatar" style={{ width: 30, height: 30, fontSize: "0.72rem", borderRadius: 8 }}>
+                              {(ent.enterprise?.name || ent.email || "?")[0].toUpperCase()}
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600 }}>{ent.enterprise?.name || "—"}</div>
+                              <div style={{ fontSize: "0.74rem", color: "var(--adm-muted)" }}>{ent.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ color: "var(--adm-muted)" }}>{ent.enterprise?.industry || "—"}</td>
+                        <td style={{ color: "var(--adm-muted)" }}>{ent.enterprise?.location || "—"}</td>
+                        <td style={{ color: "var(--adm-muted)" }}>{ent.enterprise?.employeeCount || "—"}</td>
+                        <td>
+                          <span className={`adm-badge adm-badge--${STATUS_BADGE[ent.verificationStatus?.status] || "gray"}`}>
+                            {ent.verificationStatus?.status || "PENDING"}
+                          </span>
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <button className="adm-btn adm-btn--ghost adm-btn--sm" onClick={() => handleEdit(ent)} title="Edit">
+                              <Pencil size={13} />
+                            </button>
+                            {ent.verificationStatus?.status !== "APPROVED" && (
+                              <button className="adm-btn adm-btn--sm" style={{ background: "rgba(34,197,94,0.12)", color: "#4ade80", border: "1px solid rgba(34,197,94,0.3)" }}
+                                onClick={() => updateStatus(ent._id, "APPROVED")} title="Approve">
+                                <CheckCircle size={13} />
+                              </button>
+                            )}
+                            {ent.verificationStatus?.status !== "REJECTED" && (
+                              <button className="adm-btn adm-btn--sm" style={{ background: "rgba(245,158,11,0.1)", color: "#fbbf24", border: "1px solid rgba(245,158,11,0.3)" }}
+                                onClick={() => updateStatus(ent._id, "REJECTED")} title="Reject">
+                                <XCircle size={13} />
+                              </button>
+                            )}
+                            <button className="adm-btn adm-btn--danger adm-btn--sm" onClick={() => handleDelete(ent._id)} title="Delete">
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-export default ManageEmployees;

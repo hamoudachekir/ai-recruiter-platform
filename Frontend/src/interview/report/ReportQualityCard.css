@@ -1,0 +1,97 @@
+.rqc-card {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.68);
+  border-radius: 8px;
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+.rqc-card--low {
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.rqc-card--medium {
+  border-color: rgba(251, 191, 36, 0.45);
+}
+
+.rqc-card--high {
+  border-color: rgba(52, 211, 153, 0.45);
+}
+
+.rqc-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.rqc-kicker {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.rqc-title {
+  margin: 4px 0 0;
+  color: #f8fafc;
+  font-size: 20px;
+}
+
+.rqc-pill {
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rqc-pill--ok {
+  background: rgba(16, 185, 129, 0.16);
+  color: #86efac;
+}
+
+.rqc-pill--review {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fcd34d;
+}
+
+.rqc-list {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.rqc-item {
+  margin: 0;
+  color: #cbd5e1;
+  line-height: 1.45;
+}
+
+.rqc-missing {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.rqc-missing__label {
+  color: #fca5a5;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.rqc-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rqc-tag {
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  background: rgba(127, 29, 29, 0.22);
+  color: #fecaca;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 12px;
+}

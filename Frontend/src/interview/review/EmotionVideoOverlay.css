@@ -1,0 +1,134 @@
+/* EmotionVideoOverlay — animated layer above a <video>.
+   Parent must establish a stacking context (position: relative or similar). */
+
+.evo-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  border-radius: inherit;
+  overflow: hidden;
+}
+
+/* Soft inner vignette tinted by the dominant emotion's color */
+.evo-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: box-shadow 0.7s ease;
+  border-radius: inherit;
+}
+
+/* Floating emoji that tracks the candidate's face */
+.evo-floating {
+  position: absolute;
+  transform: translate(-50%, -110%);
+  pointer-events: none;
+  transition: left 0.4s cubic-bezier(0.25, 1, 0.5, 1),
+              top 0.4s cubic-bezier(0.25, 1, 0.5, 1),
+              color 0.5s ease;
+  z-index: 5;
+}
+
+.evo-floating__emoji {
+  font-size: clamp(28px, 4.5vw, 52px);
+  display: inline-block;
+  animation: evo-float-bob 2.2s ease-in-out infinite;
+  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.55));
+  line-height: 1;
+}
+
+@keyframes evo-float-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+
+/* Trailing emotion stream pill */
+.evo-stream {
+  position: absolute;
+  bottom: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 5px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 6;
+  pointer-events: none;
+}
+
+.evo-stream__emoji {
+  font-size: 20px;
+  transition: all 0.3s ease;
+  filter: drop-shadow(0 0 4px currentColor);
+  line-height: 1;
+}
+
+/* Live label card */
+.evo-live-card {
+  position: absolute;
+  bottom: 56px;
+  right: 16px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-left: 4px solid;
+  padding: 10px 14px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 180px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: evo-slide-in 0.4s ease;
+  z-index: 6;
+  pointer-events: none;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes evo-slide-in {
+  from { transform: translateX(20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.evo-live-card__emoji {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.evo-live-card__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.evo-live-card__emotion {
+  text-transform: capitalize;
+  font-weight: 700;
+  font-size: 14px;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+
+.evo-live-card__confidence {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+@media (max-width: 720px) {
+  .evo-live-card {
+    right: 8px;
+    bottom: 48px;
+    min-width: 0;
+    padding: 7px 10px;
+  }
+  .evo-live-card__emoji { font-size: 22px; }
+  .evo-live-card__emotion { font-size: 12px; }
+  .evo-live-card__confidence { font-size: 10px; }
+  .evo-stream { bottom: 48px; padding: 5px 9px; }
+  .evo-stream__emoji { font-size: 17px; }
+}

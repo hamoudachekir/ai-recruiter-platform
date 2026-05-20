@@ -1,0 +1,133 @@
+.jjr-page {
+  min-height: 70vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px 16px 80px;
+}
+
+.jjr-card {
+  width: min(640px, 100%);
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.jjr-card h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.jjr-job-title {
+  margin: 0;
+  color: #1d4ed8;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.jjr-eyebrow {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6b7280;
+}
+
+.jjr-desc {
+  color: #374151;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.jjr-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.jjr-status {
+  margin-left: auto;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #f3f4f6;
+}
+
+.jjr-status.open {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.jjr-status.closed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.jjr-instructions {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.jjr-instructions p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.jjr-checklist {
+  margin: 0;
+  padding-left: 18px;
+  color: #374151;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.jjr-btn {
+  align-self: flex-start;
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #111827;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.jjr-btn.primary {
+  background: #1d4ed8;
+  color: #fff;
+  border-color: #1d4ed8;
+  padding: 12px 24px;
+  font-size: 15px;
+}
+
+.jjr-btn.primary:disabled {
+  background: #93c5fd;
+  border-color: #93c5fd;
+  cursor: not-allowed;
+}
+
+.jjr-foot {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.jjr-error h2 {
+  color: #991b1b;
+}

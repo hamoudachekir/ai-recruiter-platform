@@ -7,6 +7,7 @@ const CallRoom = require('./models/CallRoom');
 const { startVoiceEngineRealtimeWorker } = require('./services/voiceEngineService');
 const interviewAgent = require('./services/interviewAgentService');
 const Job = require('./models/job');
+const { containsProfanity } = require('./utils/profanityFilter');
 
 const activeConnections = new Map();
 const userSockets = new Map();
@@ -20,6 +21,27 @@ const isProd = process.env.NODE_ENV === 'production';
 // we just re-broadcast the cached intro payload instead of re-starting.
 const activeAgentSessions = new Map(); // interviewId -> { startedAt, payload }
 const AGENT_STICKY_MS = 60000;
+const AGENT_TURN_TIMEOUT_MS = Number(process.env.AGENT_TURN_TIMEOUT_MS || 35000);
+const FACE_VERIFY_START_GATE_MAX_AGE_MS = Number(process.env.FACE_VERIFY_START_GATE_MAX_AGE_MS || 90000);
+
+const FACE_GATE_ERROR = 'Face verification must be matched before starting the interview.';
+
+const faceGateAllowsAgent = (room, options = {}) => {
+  if (!room?.candidate) return true;
+  const matched = room.faceVerification?.status === 'matched' && room.faceVerification?.allowInterview === true;
+  if (!matched) return false;
+  if (options.requireFresh !== true) return true;
+  const checkedAt = room.faceVerification?.checkedAt ? new Date(room.faceVerification.checkedAt).getTime() : 0;
+  return checkedAt > 0 && Date.now() - checkedAt <= FACE_VERIFY_START_GATE_MAX_AGE_MS;
+};
+
+const faceGatePayload = (room) => ({
+  code: 'FACE_VERIFICATION_REQUIRED',
+  retryable: true,
+  status: room?.faceVerification?.status || 'pending',
+  allowInterview: room?.faceVerification?.allowInterview === true,
+  message: FACE_GATE_ERROR,
+});
 
 const toNodeBuffer = (chunk) => {
   if (!chunk) return null;
@@ -436,6 +458,18 @@ const setupSocket = (server) => {
         });
       }
 
+      // Also echo back to the sender. The candidate is the one running STT
+      // locally, so without this echo their own handleTranscriptionUpdate
+      // listener never fires, the live draft never appears, and the silence
+      // timer that auto-submits the voice answer to the agent never runs.
+      socket.emit('transcription-update', {
+        text,
+        segment,
+        sentiment,
+        fromUserId: userId,
+        roomId,
+      });
+
       console.log(`📝 Transcription updated for room ${roomId || roomDbId}`);
     });
 
@@ -464,26 +498,25 @@ const setupSocket = (server) => {
         ? normalized
         : 'friendly';
     };
+    const buildAgentFallback = (roomId, interviewId, previousText = '') => ({
+      interviewId,
+      roomId,
+      phase: 'intro',
+      interviewStyle: 'friendly',
+      turnIndex: Date.now(),
+      difficulty: 1,
+      skillFocus: 'clarification',
+      text: previousText
+        ? `I had a temporary AI delay. Please continue from your last answer: "${String(previousText).slice(0, 100)}", and add one concrete example.`
+        : 'I had a temporary AI delay. Please continue: share one concrete example from your background, your role, and the result.',
+    });
 
-    const broadcastAgentMessage = async (roomId, roomDbId, payload) => {
-      agentRoomKeys(roomId, roomDbId).forEach((key) => {
-        io.to(key).emit('agent:message', payload);
-      });
-      // Also push directly to participants' sockets so neither side misses it.
-      try {
-        const participants = roomDbId
-          ? await CallRoom.findById(roomDbId).select('initiator candidate')
-          : roomId
-          ? await CallRoom.findOne({ roomId }).select('initiator candidate')
-          : null;
-        [participants?.initiator, participants?.candidate]
-          .filter(Boolean)
-          .map((x) => x.toString())
-          .forEach((uid) => {
-            const sid = userSockets.get(uid);
-            if (sid) io.to(sid).emit('agent:message', payload);
-          });
-      } catch (_) {}
+    const broadcastAgentMessage = (roomId, _roomDbId, payload) => {
+      // Emit to a single canonical channel. Every participant joins `roomId`
+      // via the `join-room` handler; emitting to multiple overlapping channels
+      // (roomId + roomDbId + personal socket) caused the greeting to appear
+      // 3× in the chat.
+      if (roomId) io.to(roomId).emit('agent:message', payload);
     };
 
     const sendAgentScore = async (roomDbId, roomId, payload) => {
@@ -525,6 +558,17 @@ const setupSocket = (server) => {
         const interviewId = room._id.toString();
         interviewIdForCleanup = interviewId;
         const normalizedInterviewStyle = normalizeInterviewStyle(interviewStyle);
+
+        if (!faceGateAllowsAgent(room, { requireFresh: true })) {
+          console.warn('[agent:start-session] blocked before face verification', {
+            roomId: room.roomId,
+            interviewId,
+            candidateId: room.candidate?._id?.toString?.() || room.candidate?.toString?.(),
+            faceStatus: room.faceVerification?.status,
+            allowInterview: room.faceVerification?.allowInterview,
+          });
+          return socket.emit('agent:error', faceGatePayload(room));
+        }
 
         // Idempotency guard: RH auto-start and candidate kick-off both race to
         // emit this event. If we already started within the sticky window
@@ -674,13 +718,67 @@ const setupSocket = (server) => {
       } catch (_) {}
     });
 
-    socket.on('agent:candidate-turn', async ({ roomId, roomDbId, text, sentiment, source }) => {
+    socket.on('agent:candidate-turn', async (payload, ack) => {
+      const { roomId, roomDbId, text, sentiment, source, turnId } = payload || {};
+      const t0 = Date.now();
+      let ackSent = false;
+      const sendAck = (response) => {
+        if (ackSent || typeof ack !== 'function') return;
+        ackSent = true;
+        try { ack(response); } catch (_) {}
+      };
+      console.log(`📥 agent:candidate-turn IN  roomId=${roomId || '∅'} roomDbId=${roomDbId || '∅'} source=${source || 'voice'} chars=${(text || '').length}`);
       try {
-        if (!text || !text.trim()) return;
+        if (!text || !text.trim()) {
+          console.warn('⚠️  agent:candidate-turn dropped — empty text');
+          sendAck({ ok: false, message: 'empty text' });
+          return;
+        }
+        if (containsProfanity(text)) {
+          console.warn('⚠️  agent:candidate-turn dropped — profanity blocked');
+          sendAck({
+            ok: false,
+            code: 'PROFANITY_BLOCKED',
+            message: 'Please avoid inappropriate language in your answer.',
+          });
+          return socket.emit('agent:error', {
+            code: 'PROFANITY_BLOCKED',
+            retryable: false,
+            message: 'Please avoid inappropriate language in your answer.',
+            turnId: turnId || null,
+          });
+        }
         const interviewId = roomDbId || (roomId && (await CallRoom.findOne({ roomId }).select('_id'))?._id?.toString());
         if (!interviewId) {
+          console.warn('⚠️  agent:candidate-turn dropped — interview session not found');
+          sendAck({ ok: false, message: 'interview session not found' });
           return socket.emit('agent:error', { message: 'interview session not found' });
         }
+
+        const gateRoom = await CallRoom.findById(interviewId).select('roomId candidate faceVerification');
+        if (!faceGateAllowsAgent(gateRoom)) {
+          console.warn('[agent:candidate-turn] blocked before face verification', {
+            roomId: gateRoom?.roomId || roomId,
+            interviewId,
+            candidateId: gateRoom?.candidate?.toString?.(),
+            faceStatus: gateRoom?.faceVerification?.status,
+            allowInterview: gateRoom?.faceVerification?.allowInterview,
+          });
+          const gatePayload = faceGatePayload(gateRoom);
+          sendAck({ ok: false, ...gatePayload });
+          return socket.emit('agent:error', gatePayload);
+        }
+
+        // Ack as soon as we have a valid interview session so the frontend's
+        // 10s ack timeout doesn't fire while the LLM is still composing the
+        // reply (which can legitimately take 15-30s on the slow path).
+        sendAck({ ok: true, turnId: turnId || null, interviewId });
+
+        // Tell both sides we're working on a reply so the UI can show the
+        // "AI is thinking" state while the LLM is busy.
+        agentRoomKeys(roomId, interviewId).forEach((key) => {
+          io.to(key).emit('agent:thinking', { roomId, interviewId, turnId: turnId || null });
+        });
 
         const normalizedSource = String(source || 'voice').toLowerCase();
 
@@ -754,7 +852,16 @@ const setupSocket = (server) => {
           }
         }
 
-        const result = await interviewAgent.candidateTurn({ interviewId, text, sentiment });
+        console.log(`📤 agent:candidate-turn → Python /session/turn  interviewId=${interviewId}`);
+        const result = await Promise.race([
+          interviewAgent.candidateTurn({ interviewId, text, sentiment }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`agent turn timeout after ${AGENT_TURN_TIMEOUT_MS}ms`)), AGENT_TURN_TIMEOUT_MS)
+          ),
+        ]);
+        const elapsed = Date.now() - t0;
+        const replyText = result?.agent_message?.text || '';
+        console.log(`✅ agent:candidate-turn OK in ${elapsed}ms  turn_index=${result?.turn_index} done=${result?.done} replyChars=${replyText.length}`);
 
         broadcastAgentMessage(roomId, interviewId, {
           interviewId, roomId,
@@ -764,6 +871,7 @@ const setupSocket = (server) => {
           text: result.agent_message?.text,
           difficulty: result.agent_message?.difficulty,
           skillFocus: result.agent_message?.skill_focus,
+          turnId: turnId || null,
         });
 
         await sendAgentScore(interviewId, roomId, {
@@ -773,10 +881,17 @@ const setupSocket = (server) => {
           turnIndex: result.turn_index,
           scoring: result.scoring,
           done: result.done,
+          turnId: turnId || null,
         });
       } catch (err) {
-        console.error('agent:candidate-turn failed:', err);
-        socket.emit('agent:error', { message: err.message });
+        console.error(`❌ agent:candidate-turn FAILED in ${Date.now() - t0}ms:`, err?.message || err);
+        // If we crashed before the early ack ran (rare — e.g. mongo blew up
+        // while resolving the interviewId), make sure the client's ack-timeout
+        // doesn't stall on this turn.
+        sendAck({ ok: false, message: err?.message || 'agent turn failed' });
+        const fallback = buildAgentFallback(roomId, roomDbId, text);
+        await broadcastAgentMessage(roomId, roomDbId, { ...fallback, turnId: turnId || null });
+        socket.emit('agent:error', { message: err.message, turnId: turnId || null, retryable: true });
       }
     });
 

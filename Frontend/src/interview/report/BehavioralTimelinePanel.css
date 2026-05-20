@@ -1,0 +1,280 @@
+/* Recruiter-only Behavioral Timeline Overlay (DeepFace / Py-Feat).
+   Advisory-only UI; portaled canvas + emotion-distribution panel sit on
+   top of the existing <video> element without changing its layout. */
+
+/* HTML panel anchored beside the face box on the video — shows the
+   sorted emotion distribution from raw_scores. Replaces the older
+   safe-label text badge. */
+.btp-face-panel {
+  position: absolute;
+  z-index: 6;
+  min-width: 168px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(8, 14, 26, 0.78);
+  border: 1px solid rgba(34, 211, 238, 0.32);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45),
+              0 0 0 1px rgba(34, 211, 238, 0.12) inset;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #e2e8f0;
+  font-family: inherit;
+  pointer-events: none;
+  animation: btp-face-panel-in 0.25s ease;
+}
+
+@keyframes btp-face-panel-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.btp-face-panel__row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.btp-face-panel__row + .btp-face-panel__row {
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.btp-face-panel__emoji {
+  font-size: 14px;
+  line-height: 1;
+  text-align: center;
+}
+
+.btp-face-panel__label {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.btp-face-panel__pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #e2e8f0;
+  font-size: 12px;
+}
+
+
+.btp {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(15, 18, 28, 0.6);
+  color: #e7eaf2;
+}
+
+.btp__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.btp__title {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.btp__subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(231, 234, 242, 0.65);
+  line-height: 1.4;
+  max-width: 520px;
+}
+
+.btp__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.btp__toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.btp__status {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 12.5px;
+  color: rgba(231, 234, 242, 0.85);
+}
+
+.btp__status--muted {
+  color: rgba(231, 234, 242, 0.55);
+}
+
+/* Portaled overlay — sits inside the existing video container.
+   Container in InterviewMediaPanel uses position:relative for its controls
+   so absolute positioning here aligns to the <video> element. */
+.btp-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.btp-badge {
+  position: absolute;
+  right: 12px;
+  bottom: 56px; /* clear of native video controls */
+  max-width: 260px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1.3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-left: 4px solid #9e9e9e;
+  pointer-events: none;
+  z-index: 7;
+}
+
+.btp-badge__label {
+  font-weight: 600;
+}
+
+.btp-badge__confidence {
+  font-size: 11.5px;
+  opacity: 0.8;
+}
+
+@keyframes btp-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes btp-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.btp-badge--in {
+  animation: btp-fade-in 0.3s ease both;
+}
+
+.btp-badge--out {
+  animation: btp-fade-out 0.5s ease both;
+}
+
+/* Strips */
+
+.btp__strips {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btp__strip-row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.btp__strip-label {
+  font-size: 11.5px;
+  color: rgba(231, 234, 242, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.btp-timeline {
+  position: relative;
+  width: 100%;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.btp-timeline__marker {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border: none;
+  padding: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.btp-timeline__marker:hover {
+  opacity: 1;
+}
+
+.btp-timeline__marker--active {
+  opacity: 1;
+  outline: 2px solid rgba(255, 255, 255, 0.85);
+  outline-offset: 1px;
+  transform: scaleY(1.08);
+}
+
+.btp-heatmap {
+  display: flex;
+  width: 100%;
+  height: 16px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.btp-heatmap__bin {
+  height: 100%;
+}
+
+.btp-heatmap__bin--low {
+  background-color: #e8e8e8;
+}
+
+.btp-heatmap__bin--medium {
+  background-color: #ffb74d;
+}
+
+.btp-heatmap__bin--high {
+  background-color: #ef5350;
+}
+
+.btp__summary {
+  display: flex;
+  gap: 18px;
+  font-size: 12.5px;
+  color: rgba(231, 234, 242, 0.85);
+  padding-top: 2px;
+}

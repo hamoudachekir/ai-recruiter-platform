@@ -7,6 +7,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import Navbar from "../components/Navbar/Navbar";
 import Footer from "../components/Footer/Footer";
 import LinkedInSection from "../components/LinkedInSection";
+import { compressProfileImage, createAdjustedProfileImage } from "../utils/imageCompression";
 import "./Profile.css";
 
 const Profile = () => {
@@ -22,12 +23,25 @@ const Profile = () => {
   const [resumeUrl, setResumeUrl] = useState("");
   const [picture, setPicture] = useState(null);
   const [newPicture, setNewPicture] = useState(null);
+  const [pictureFile, setPictureFile] = useState(null);
+  const [pictureZoom, setPictureZoom] = useState(1);
   const [file, setFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState("");
   const [pictureStatus, setPictureStatus] = useState("");
   const [applications, setApplications] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
   const [linkedinData, setLinkedinData] = useState(null);
+
+  const buildImageSrc = (value) => {
+    if (!value) return "/images/team-1.jpg";
+    if (String(value).startsWith("http")) return value;
+    if (String(value).startsWith("/uploads")) return `http://localhost:3001${value}`;
+    return value;
+  };
+
+  const faceProfileMessage = user?.faceProfile?.enrolled
+    ? "Profile photo verified for interview identity check"
+    : "Please upload a clear profile photo";
   
   useEffect(() => {
     const fetchUser = async () => {
@@ -66,35 +80,56 @@ const Profile = () => {
 
   const handleCameraClick = () => fileInputRef.current.click();
 
-  const handlePictureChange = (event) => {
+  const handlePictureChange = async (event) => {
     const selectedFile = event.target.files[0];
     if (!selectedFile) return;
 
-    const reader = new FileReader();
-    reader.onloadend = () => setNewPicture(reader.result);
-    reader.readAsDataURL(selectedFile);
-    setFile(selectedFile);
+    try {
+      setPictureStatus("Optimizing photo...");
+      const optimizedFile = await compressProfileImage(selectedFile);
+      const reader = new FileReader();
+      reader.onloadend = () => setNewPicture(reader.result);
+      reader.readAsDataURL(optimizedFile);
+      setPictureFile(optimizedFile);
+      setPictureZoom(1);
+      setPictureStatus("");
+    } catch (err) {
+      setPictureStatus(err.message || "Could not prepare this image.");
+      event.target.value = "";
+    }
   };
 
   const handlePictureConfirm = async () => {
-    if (!file) return;
-    const formData = new FormData();
-    formData.append("userId", id);
-    formData.append("picture", file);
+    if (!pictureFile) return;
 
     try {
+      setPictureStatus("Adjusting photo...");
+      const adjustedFile = await createAdjustedProfileImage(pictureFile, { zoom: pictureZoom });
+      const formData = new FormData();
+      formData.append("userId", id);
+      formData.append("picture", adjustedFile);
+
       const res = await fetch("http://localhost:3001/Frontend/upload-profile", {
         method: "POST",
         body: formData,
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Upload failed. Try again.");
+      }
       setPicture(data.pictureUrl);
+      setUser((prev) => ({ ...prev, picture: data.pictureUrl, faceProfile: data.faceProfile }));
       setNewPicture(null);
-      setFile(null);
-      setPictureStatus("✔️ Profile picture updated successfully!");
+      setPictureFile(null);
+      setPictureZoom(1);
+      setPictureStatus(
+        data.faceProfile?.enrolled
+          ? "Profile photo verified for interview identity check"
+          : "Please upload a clear profile photo"
+      );
     } catch (err) {
       console.error("❌ Error uploading picture:", err);
-      setPictureStatus("❌ Upload failed. Try again.");
+      setPictureStatus(err.message || "Upload failed. Try again.");
     }
   };
 
@@ -117,7 +152,8 @@ const Profile = () => {
   
   const handlePictureCancel = () => {
     setNewPicture(null);
-    setFile(null);
+    setPictureFile(null);
+    setPictureZoom(1);
     setPictureStatus("");
   };
 
@@ -175,25 +211,47 @@ const Profile = () => {
               {picture && !newPicture ? (
                 <div className="enterprise-image-wrapper">
                   <img
-                    src={`http://localhost:3001${picture}`}
+                    src={buildImageSrc(picture)}
                     alt={user.name}
                     className="enterprise-image"
+                    onError={(event) => {
+                      event.currentTarget.onerror = null;
+                      event.currentTarget.src = "/images/team-1.jpg";
+                    }}
                   />
                   <div className="image-overlay" onClick={handleCameraClick}>
                     <FaCamera className="camera-icon" />
                   </div>
                 </div>
               ) : newPicture ? (
-                <div className="enterprise-image-wrapper">
-                  <img src={newPicture} alt="Preview" className="enterprise-image" />
-                  <div className="image-actions">
-                    <button className="btn btn-success btn-sm" onClick={handlePictureConfirm}>
-                      <FaCheckCircle />
-                    </button>
-                    <button className="btn btn-danger btn-sm" onClick={handlePictureCancel}>
-                      <FaTimesCircle />
-                    </button>
+                <div className="profile-picture-editor">
+                  <div className="enterprise-image-wrapper">
+                    <img
+                      src={newPicture}
+                      alt="Preview"
+                      className="enterprise-image"
+                      style={{ transform: `scale(${pictureZoom})` }}
+                    />
+                    <div className="image-actions">
+                      <button className="btn btn-success btn-sm" onClick={handlePictureConfirm}>
+                        <FaCheckCircle />
+                      </button>
+                      <button className="btn btn-danger btn-sm" onClick={handlePictureCancel}>
+                        <FaTimesCircle />
+                      </button>
+                    </div>
                   </div>
+                  <label className="profile-image-adjust">
+                    <span>Size</span>
+                    <input
+                      type="range"
+                      min="1"
+                      max="2.5"
+                      step="0.05"
+                      value={pictureZoom}
+                      onChange={(event) => setPictureZoom(Number(event.target.value))}
+                    />
+                  </label>
                 </div>
               ) : (
                 <div className="image-placeholder editable" onClick={handleCameraClick}>
@@ -213,6 +271,9 @@ const Profile = () => {
 
             <h2 className="name">{user.name}</h2>
             <p className="role">{user.role}</p>
+            <p className={`face-profile-status face-profile-status--${user.faceProfile?.enrolled ? "ready" : "warning"}`}>
+              {pictureStatus || faceProfileMessage}
+            </p>
 
             <button className="edit-profile-button" onClick={handleEditProfile}>
               <FaCog /> Edit Profile

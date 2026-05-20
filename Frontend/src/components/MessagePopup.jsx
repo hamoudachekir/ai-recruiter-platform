@@ -1,240 +1,261 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import PropTypes from "prop-types";
 import "./MessagePopup.css";
 import axios from "axios";
 
+const API = "http://localhost:3001";
+
+const QUICK_QUESTIONS = [
+  { icon: "💼", text: "How do I apply for jobs?" },
+  { icon: "🎯", text: "Tips for interview preparation" },
+  { icon: "📝", text: "How to improve my profile?" },
+  { icon: "📊", text: "How does AI scoring work?" },
+];
+
+function SendIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="22" y1="2" x2="11" y2="13" />
+      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
+  );
+}
+
 const MessagePopup = ({ socket, selectedUser, onClose, currentUserId }) => {
-  const [messages, setMessages] = useState([]);
-  const [newMsg, setNewMsg] = useState("");
-  const [error, setError] = useState(null);
-  const chatEndRef = useRef(null);
+  const [messages, setMessages]     = useState([]);
+  const [newMsg, setNewMsg]         = useState("");
+  const [error, setError]           = useState(null);
   const [isBotTyping, setIsBotTyping] = useState(false);
+  const [isSending, setIsSending]   = useState(false);
+  const chatEndRef  = useRef(null);
+  const textareaRef = useRef(null);
+
+  const isBot = selectedUser._id === "bot";
 
   // Load chat history
   useEffect(() => {
-    const fetchMessages = async () => {
-      try {
-        const res = await axios.get(
-          `http://localhost:3001/api/messages/history/${currentUserId}/${selectedUser._id}`,
-          {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`
-            }
-          }
-        );
+    if (!selectedUser?._id || !currentUserId) return;
+    axios
+      .get(`${API}/api/messages/history/${currentUserId}/${selectedUser._id}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      })
+      .then((res) => {
         const raw = res.data.messages || [];
-        // Deduplicate by (from + to + text + rounded timestamp) to remove any DB double-saves
         const seen = new Set();
         const deduped = raw.filter((msg) => {
-          const ts = msg.timestamp
-            ? Math.round(new Date(msg.timestamp).getTime() / 2000)
-            : 0;
+          const ts = msg.timestamp ? Math.round(new Date(msg.timestamp).getTime() / 2000) : 0;
           const key = `${msg.from}|${msg.to}|${msg.text}|${ts}`;
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
         });
         setMessages(deduped);
-        setError(null);
-      } catch (err) {
-        console.error("Error loading messages", err);
-        setError("Failed to load messages. Please try again.");
-      }
-    };
-
-    if (selectedUser?._id && currentUserId) {
-      fetchMessages();
-    }
+      })
+      .catch(() => setError("Failed to load messages."));
   }, [selectedUser._id, currentUserId]);
 
-  // Listen for incoming messages — only handle messages FROM the other person.
-  // Self-sent messages are already added optimistically in sendMessage().
+  // Incoming socket messages
   useEffect(() => {
-    if (!socket) return undefined;
-
-    const handleMessage = (msg) => {
+    if (!socket) return;
+    const handler = (msg) => {
       if (msg.from === selectedUser._id && msg.to === currentUserId) {
         setMessages((prev) => [...prev, msg]);
       }
     };
-
-    socket.on("receive-message", handleMessage);
-    return () => socket.off("receive-message", handleMessage);
+    socket.on("receive-message", handler);
+    return () => socket.off("receive-message", handler);
   }, [socket, selectedUser._id, currentUserId]);
 
-  // Auto-scroll to latest message
+  // Auto-scroll
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, isBotTyping]);
 
-  // Send a message
-  const sendMessage = async () => {
-    if (!newMsg.trim()) return;
+  // Core send logic — accepts text directly to avoid stale-state race
+  const doSend = useCallback(async (text) => {
+    const trimmed = text.trim();
+    if (!trimmed || isSending) return;
 
     const messageObj = {
       from: currentUserId,
       to: selectedUser._id,
-      text: newMsg,
+      text: trimmed,
       timestamp: new Date(),
     };
 
+    setMessages((prev) => [...prev, messageObj]);
+    setNewMsg("");
+    setError(null);
+    setIsSending(true);
+
     try {
-      // Add user message immediately
-      setMessages((prev) => [...prev, messageObj]);
-      setNewMsg("");
-      setError(null);
+      await axios.post(`${API}/api/messages/send`, messageObj, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      });
 
-      // Save to database
-      await axios.post(
-        "http://localhost:3001/api/messages/send",
-        messageObj,
-        { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
-      );
-
-      // If sending to bot, get bot response
-      if (selectedUser._id === 'bot') {
+      if (isBot) {
         setIsBotTyping(true);
-
         const res = await axios.post(
-          "http://localhost:3001/api/messages/bot/interaction",
-          { userId: currentUserId, message: newMsg },
+          `${API}/api/messages/bot/interaction`,
+          { userId: currentUserId, message: trimmed },
           { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
         );
-
+        setIsBotTyping(false);
         const botResponse = {
-          from: 'bot',
+          from: "bot",
           to: currentUserId,
           text: res.data.reply,
-          timestamp: new Date()
+          timestamp: new Date(),
         };
-
-        // Add bot response to messages
         setMessages((prev) => [...prev, botResponse]);
-        setIsBotTyping(false);
-
-        // Save bot message to database
-        await axios.post(
-          "http://localhost:3001/api/messages/send",
-          botResponse,
-          { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
-        );
-
-        // Emit bot response via socket
-        socket?.emit("send-message", botResponse);
       } else {
-        // Regular message to human
         socket?.emit("send-message", messageObj);
       }
     } catch (err) {
-      console.error("Error sending message:", err);
+      console.error("Send error:", err);
       setIsBotTyping(false);
       setError("Failed to send message. Please try again.");
+    } finally {
+      setIsSending(false);
+    }
+  }, [currentUserId, selectedUser._id, isBot, isSending, socket]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      doSend(newMsg);
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
+  const formatTime = (ts) =>
+    new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  // Render a single message row
+  const renderMsg = (msg, i) => {
+    const isSent = msg.from === currentUserId;
+    const isFromBot = msg.from === "bot";
+    const key = msg._id || `${msg.from}-${msg.to}-${msg.timestamp || i}`;
+
+    return (
+      <div key={key} className={`mp-msg-row mp-msg-row--${isSent ? "sent" : "received"}`}>
+        {/* Avatar on the left for received messages */}
+        {!isSent && (
+          <div className={`mp-msg-avatar mp-msg-avatar--${isFromBot ? "bot" : "other"}`}>
+            {isFromBot ? "🤖" : (selectedUser.name?.[0] || "?").toUpperCase()}
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, maxWidth: "78%", alignItems: isSent ? "flex-end" : "flex-start" }}>
+          <div className={`mp-bubble${isFromBot ? " mp-bubble--bot" : ""}`}>
+            {isFromBot ? (
+              <span
+                className="mp-text"
+                dangerouslySetInnerHTML={{
+                  __html: (msg.text || "")
+                    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+                    .replace(/\n/g, "<br>"),
+                }}
+              />
+            ) : (
+              <span className="mp-text">{msg.text || ""}</span>
+            )}
+          </div>
+          <div className="mp-time">
+            {formatTime(msg.timestamp)}
+            {isFromBot && <span className="bot-indicator">AI</span>}
+          </div>
+        </div>
+
+        {/* Avatar on the right for sent messages */}
+        {isSent && (
+          <div className="mp-msg-avatar mp-msg-avatar--user">
+            {currentUserId?.[0]?.toUpperCase() || "U"}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
     <div className="message-popup">
+      {/* ── Header ── */}
       <div className="popup-header">
         <div className="popup-user-info">
-          <img
-            src={selectedUser.picture || (selectedUser._id === 'bot' ? "/images/bot-avatar.png" : "/images/avatar-placeholder.png")}
-            alt={selectedUser.name}
-            className="popup-avatar"
-          />
-          <span>
-            {selectedUser._id === 'bot' ? (
-              <>NextBot Assistant <span className="bot-badge">AI</span></>
-            ) : (
-              `Chat with ${selectedUser.name}`
-            )}
-          </span>
+          <div className="popup-avatar-wrap">
+            <div className="popup-avatar-fallback">
+              {isBot ? "🤖" : (selectedUser.name?.[0] || "?").toUpperCase()}
+            </div>
+            {isBot && <span className="popup-online-dot" />}
+          </div>
+          <div className="popup-header-text">
+            <span className="popup-header-name">
+              {isBot ? "NextBot" : selectedUser.name || "User"}
+              {isBot && <span className="bot-badge">AI</span>}
+            </span>
+            <span className="popup-header-sub">
+              {isBot ? "● Online — powered by Groq" : "● Active"}
+            </span>
+          </div>
         </div>
-        <button onClick={onClose} className="close-button">✖</button>
+        <button className="close-button" onClick={onClose} title="Close">✕</button>
       </div>
+
+      {/* ── Messages body ── */}
       <div className="popup-body">
         {error && <div className="error-message">{error}</div>}
+
         {messages.length === 0 ? (
-          <div className="no-messages">
-            {selectedUser._id === 'bot' ? (
-              <>
-                <p>Hello! I'm NextBot 🤖</p>
-                <p>Ask me about job applications, interviews, or profile tips!</p>
-                <div className="bot-quick-questions">
-                  <button onClick={() => { setNewMsg("How do I apply for jobs?"); sendMessage(); }}>
-                    How to apply?
-                  </button>
-                  <button onClick={() => { setNewMsg("Interview tips"); sendMessage(); }}>
-                    Interview tips
-                  </button>
-                  <button onClick={() => { setNewMsg("Profile help"); sendMessage(); }}>
-                    Profile help
-                  </button>
-                </div>
-              </>
-            ) : (
-              <p>No messages yet. Say hello! 👋</p>
-            )}
+          <div className="mp-welcome">
+            <div className="mp-welcome__icon">🤖</div>
+            <div className="mp-welcome__title">Hi! I'm NextBot</div>
+            <div className="mp-welcome__sub">
+              Your AI career assistant for NextHire.<br />
+              Ask me anything about jobs, interviews, or your profile.
+            </div>
+            <div className="bot-quick-questions">
+              {QUICK_QUESTIONS.map((q) => (
+                <button key={q.text} onClick={() => doSend(q.text)}>
+                  {q.icon} {q.text}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
-          messages.map((msg, i) => {
-            const msgKey = msg._id || `${msg.from}-${msg.to}-${msg.timestamp || i}`;
-            return (
-            <div
-              key={msgKey}
-              className={`msg ${msg.from === currentUserId ? "sent" : "received"} ${
-                msg.from === 'bot' ? "bot-msg" : ""
-              }`}
-            >
-              <div className="msg-content">
-                {msg.text.split('\n').map((line, idx) => (
-                  // line index is stable within a single message bubble
-                  // eslint-disable-next-line react/no-array-index-key
-                  <p key={idx}>{line}</p>
-                ))}
-              </div>
-              <div className="msg-time">
-                {new Date(msg.timestamp).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
-                {msg.from === 'bot' && <span className="bot-indicator">AI</span>}
-              </div>
-            </div>
-            );
-          })
+          messages.map(renderMsg)
         )}
+
         {isBotTyping && (
-          <div className="msg received bot-msg">
-            <div className="typing-indicator">
-              <span></span>
-              <span></span>
-              <span></span>
+          <div className="mp-msg-row mp-msg-row--received">
+            <div className="mp-msg-avatar mp-msg-avatar--bot">🤖</div>
+            <div className="mp-bubble mp-bubble--bot">
+              <div className="typing-indicator">
+                <span /><span /><span />
+              </div>
             </div>
           </div>
         )}
+
         <div ref={chatEndRef} />
       </div>
+
+      {/* ── Footer ── */}
       <div className="popup-footer">
         <textarea
+          ref={textareaRef}
           value={newMsg}
           onChange={(e) => setNewMsg(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={
-            selectedUser._id === 'bot'
-              ? "Ask me about jobs, applications, or interviews..."
-              : "Type a message..."
-          }
+          placeholder={isBot ? "Ask NextBot anything…" : "Type a message…"}
           rows={1}
+          disabled={isSending}
         />
-        <button onClick={sendMessage} className="send-button">
-          Send
+        <button
+          className="send-button"
+          onClick={() => doSend(newMsg)}
+          disabled={isSending || !newMsg.trim()}
+          title="Send"
+        >
+          <SendIcon />
         </button>
       </div>
     </div>
@@ -252,8 +273,6 @@ MessagePopup.propTypes = {
   currentUserId: PropTypes.string.isRequired,
 };
 
-MessagePopup.defaultProps = {
-  socket: null,
-};
+MessagePopup.defaultProps = { socket: null };
 
 export default MessagePopup;

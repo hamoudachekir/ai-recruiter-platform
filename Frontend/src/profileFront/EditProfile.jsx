@@ -3,11 +3,18 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader } from "./card";
 import { FaCamera, FaSave } from "react-icons/fa";
 import CreatableSelect from "react-select/creatable";
+import { compressProfileImage, createAdjustedProfileImage } from "../utils/imageCompression";
 import "./EditProfile.css";
 import Navbar from "../components/Navbar/Navbar";
 import Footer from "../components/Footer/Footer";
 
-const PROFILE_IMAGE_MAX_SIZE = 15 * 1024 * 1024;
+const buildProfileImageSrc = (value) => {
+  if (!value) return "/images/team-1.jpg";
+  const raw = String(value);
+  if (raw.startsWith("http")) return raw;
+  if (raw.startsWith("/uploads")) return `http://localhost:3001${raw}`;
+  return raw;
+};
 
 const skillsList = [
   { value: "JavaScript", label: "JavaScript" }, { value: "Python", label: "Python" },
@@ -113,6 +120,8 @@ const EditProfile = () => {
   const [oldPassword, setOldPassword] = useState("");
   const [newPicture, setNewPicture] = useState(null);
   const [selectedPictureFile, setSelectedPictureFile] = useState(null);
+  const [pictureZoom, setPictureZoom] = useState(1);
+  const [pictureFeedback, setPictureFeedback] = useState("");
 
   const skillOptions = useMemo(() => {
     const fromProfile = Array.isArray(formData.profile?.skills)
@@ -181,9 +190,13 @@ const EditProfile = () => {
       if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
 
       if (selectedPictureFile) {
+        setPictureFeedback("Adjusting photo...");
+        const adjustedPictureFile = await createAdjustedProfileImage(selectedPictureFile, {
+          zoom: pictureZoom,
+        });
         const pictureFormData = new FormData();
         pictureFormData.append("userId", id);
-        pictureFormData.append("picture", selectedPictureFile);
+        pictureFormData.append("picture", adjustedPictureFile);
 
         const pictureResponse = await fetch("http://localhost:3001/Frontend/upload-profile", {
           method: "POST",
@@ -197,8 +210,9 @@ const EditProfile = () => {
 
         const pictureData = await pictureResponse.json();
         if (pictureData?.pictureUrl) {
-          setUser((prev) => ({ ...prev, picture: pictureData.pictureUrl }));
+          setUser((prev) => ({ ...prev, picture: pictureData.pictureUrl, faceProfile: pictureData.faceProfile }));
         }
+        setPictureFeedback("Profile photo verified for interview identity check");
       }
 
       const data = await response.json();
@@ -206,6 +220,7 @@ const EditProfile = () => {
       navigate(`/profile/${id}`);
     } catch (error) {
       console.error("❌ Erreur mise à jour du profil :", error);
+      setPictureFeedback(error.message || "Profile update failed.");
     }
   };
 
@@ -262,33 +277,33 @@ const EditProfile = () => {
     }
   };
 
-  const handlePictureChange = (event) => {
+  const handlePictureChange = async (event) => {
     const selectedFile = event.target.files[0];
     if (!selectedFile) return;
 
-    if (selectedFile.size > PROFILE_IMAGE_MAX_SIZE) {
-      window.alert("Image too large. Maximum size is 15MB.");
+    try {
+      setPictureFeedback("Optimizing photo...");
+      const optimizedFile = await compressProfileImage(selectedFile);
+      const reader = new FileReader();
+      reader.onloadend = () => setNewPicture(reader.result);
+      reader.readAsDataURL(optimizedFile);
+      setSelectedPictureFile(optimizedFile);
+      setPictureZoom(1);
+      setPictureFeedback("");
+    } catch (err) {
+      setPictureFeedback(err.message || "Could not prepare this image.");
       event.target.value = "";
-      return;
     }
-
-    const reader = new FileReader();
-    reader.onloadend = () => setNewPicture(reader.result);
-    reader.readAsDataURL(selectedFile);
-    setSelectedPictureFile(selectedFile);
   };
 
   if (loading) return <p className="edit-profile-feedback">Loading profile...</p>;
   if (!user) return <p className="edit-profile-feedback">User not found.</p>;
 
   const pictureValue = user?.picture ? String(user.picture) : "";
-  let normalizedPictureSrc = "/images/team-1.jpg";
-  if (pictureValue) {
-    normalizedPictureSrc = pictureValue.startsWith("http")
-      ? pictureValue
-      : `http://localhost:3001${pictureValue}`;
-  }
-  const profileImageSrc = newPicture || normalizedPictureSrc;
+  const profileImageSrc = newPicture || buildProfileImageSrc(pictureValue);
+  const faceProfileMessage = user.faceProfile?.enrolled
+    ? "Profile photo verified for interview identity check"
+    : "Please upload a clear profile photo";
 
 
   return (
@@ -301,11 +316,18 @@ const EditProfile = () => {
           {/* Header avec Avatar et Email */}
           <CardHeader className="card-header">
             <div className="avatar-container">
-              <img
-                src={profileImageSrc}
-                className="avatar"
-                alt="Profile"
-              />
+              <div className="avatar-preview-frame">
+                <img
+                  src={profileImageSrc}
+                  className="avatar"
+                  alt="Profile"
+                  style={newPicture ? { transform: `scale(${pictureZoom})` } : undefined}
+                  onError={(event) => {
+                    event.currentTarget.onerror = null;
+                    event.currentTarget.src = "/images/team-1.jpg";
+                  }}
+                />
+              </div>
               <button type="button" className="camera-icon" onClick={handleCameraClick}>
                 <FaCamera />
               </button>
@@ -317,10 +339,26 @@ const EditProfile = () => {
                 style={{ display: "none" }}
               />
             </div>
+            {newPicture && (
+              <label className="profile-image-adjust">
+                <span>Size</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="2.5"
+                  step="0.05"
+                  value={pictureZoom}
+                  onChange={(event) => setPictureZoom(Number(event.target.value))}
+                />
+              </label>
+            )}
   
             <h2 className="name">{user.name.toUpperCase()}</h2>
             <p className="email">{user.email}</p>
             <p className="profile-subtitle">Keep your profile current to improve matching accuracy.</p>
+            <p className={`face-profile-status face-profile-status--${user.faceProfile?.enrolled ? "ready" : "warning"}`}>
+              {pictureFeedback || faceProfileMessage}
+            </p>
           </CardHeader>
   
           {/* Contenu du formulaire */}

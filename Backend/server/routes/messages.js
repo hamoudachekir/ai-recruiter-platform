@@ -3,12 +3,28 @@ const router = express.Router();
 const Message = require('../models/Message');
 const mongoose = require('mongoose');
 const User = require('../models/user');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { v4: uuidv4 } = require('uuid');
+const OpenAI = require('openai').default || require('openai');
 
-// Initialize Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+// Groq client (OpenAI-compatible)
+const groqClient = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: 'https://api.groq.com/openai/v1',
+});
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+
+async function askGroq(systemPrompt, userMessage) {
+  const resp = await groqClient.chat.completions.create({
+    model: GROQ_MODEL,
+    max_tokens: 200,
+    temperature: 0.6,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: userMessage },
+    ],
+  });
+  return resp.choices[0]?.message?.content?.trim() || '';
+}
 
 // Save message
 router.post('/send', async (req, res) => {
@@ -102,7 +118,7 @@ router.get('/user/:userId', async (req, res) => {
   }
 });
 
-// Bot interaction with Gemini
+// Bot interaction powered by Groq
 router.post('/bot/interaction', async (req, res) => {
   const { userId, message } = req.body;
 
@@ -111,51 +127,31 @@ router.post('/bot/interaction', async (req, res) => {
   }
 
   try {
-    // Fetch user context with error handling
-    let userContext = '';
+    // Fetch user context
+    let skillsLine = '';
     try {
-      if (!User || typeof User.findById !== 'function') {
-        throw new Error('User model is not properly defined');
+      const user = await User.findById(userId).select('profile role firstName lastName name');
+      if (user) {
+        const skills = user.profile?.skills?.join(', ') || 'not specified';
+        const exp = user.profile?.experience?.map(e => e.title).join(', ') || 'none';
+        skillsLine = `Candidate skills: ${skills}. Experience: ${exp}.`;
       }
-      const user = await User.findById(userId).select('profile role');
-      userContext = user ? `
-        User Role: ${user.role}
-        Skills: ${user.profile?.skills?.join(', ') || 'None'}
-        Experience: ${user.profile?.experience?.map(exp => exp.title).join(', ') || 'None'}
-      ` : 'User Context: Not available';
-    } catch (userErr) {
-      console.error('❌ Error fetching user context:', userErr.message);
-      userContext = 'User Context: Not available due to server issue';
-    }
+    } catch (_) {}
 
-    // Fetch recent messages
-    const recentMessages = await Message.find({
+    // Fetch last 6 messages for context
+    const recent = await Message.find({
       $or: [{ from: userId, to: 'bot' }, { from: 'bot', to: userId }],
-    })
-      .sort({ timestamp: -1 })
-      .limit(5);
-    const messageContext = recentMessages
-      .map(msg => `${msg.from === userId ? 'User' : 'Bot'}: ${msg.text}`)
+    }).sort({ timestamp: -1 }).limit(6);
+    const history = recent.reverse()
+      .map(m => `${m.from === 'bot' ? 'NextBot' : 'Candidate'}: ${m.text}`)
       .join('\n');
 
-    // Define the prompt for Gemini
-    const prompt = `
-      You are NextBot, a professional AI assistant for NextHire, a job recruitment platform. Your role is to assist users with job-related queries in a clear, professional, and friendly manner. Use the following context to tailor your response:
+    const systemPrompt = `You are NextBot, the AI career assistant for NextHire — an AI-powered recruitment platform. You help candidates with job applications, interview preparation, CV tips, and platform navigation.
+${skillsLine}
+Be concise (under 120 words), warm, and professional. Use bullet points when listing steps.
+Recent conversation:\n${history || '(no prior messages)'}`;
 
-      User Context:
-      ${userContext}
-
-      Recent Conversation:
-      ${messageContext}
-
-      User message: "${message}"
-
-      Respond in a professional tone, keeping the response under 150 words. If the user greets you (e.g., "hello", "hi"), introduce yourself briefly and offer job-related assistance.
-    `;
-
-    // Call Gemini API
-    const result = await model.generateContent(prompt);
-    const reply = result.response.text().trim();
+    const reply = await askGroq(systemPrompt, message);
 
     // Save bot response to database
     const botMessageId = uuidv4();

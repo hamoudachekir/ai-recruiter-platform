@@ -197,7 +197,8 @@ const Navbar = () => {
         </button>
   
         <div className="collapse navbar-collapse" id="navbarSupportedContent">
-          <ul className="navbar-nav ms-auto align-items-center">
+          {/* Left zone: public / marketing navigation */}
+          <ul className="navbar-nav nav-group-public me-auto align-items-center">
             <li className="nav-item">
               <Link className="nav-link futuristic-nav-link" to="/home">Home</Link>
             </li>
@@ -213,137 +214,136 @@ const Navbar = () => {
             <li className="nav-item">
               <Link className="nav-link futuristic-nav-link" to="/team">Team</Link>
             </li>
-  
-            {/* 🔒 Authenticated User */}
+          </ul>
+
+          {/* Right zone: app shortcuts + notifications + auth controls */}
+          <ul className="navbar-nav nav-group-user align-items-center">
             {isAuthenticated && userId ? (
-  <>
-    <li className="nav-item notification-nav-item" ref={notificationMenuRef}>
-      <button
-        type="button"
-        className="notification-toggle"
-        aria-label="Notifications"
-        aria-expanded={isNotificationOpen}
-        onClick={handleToggleNotifications}
-      >
-        <FontAwesomeIcon icon={faBell} />
-        {unreadCount > 0 && <span className="notification-alert-dot"></span>}
-        {unreadCount > 0 && (
-          <span className="notification-count-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
-        )}
-      </button>
+              <>
+                <li className="nav-item">
+                  <Link className="nav-link futuristic-nav-link" to={profilePath}>
+                    {userRole === "ENTERPRISE" ? "My Enterprise" : "Mon Profil"}
+                  </Link>
+                </li>
 
-      {isNotificationOpen && (
-        <div className="notification-dropdown" role="menu" aria-label="Notifications menu">
-          <div className="notification-dropdown-header">
-            <h6>Notifications</h6>
-            <span>{unreadCount} new</span>
-          </div>
+                <li className="nav-item">
+                  <Link
+                    className="nav-link futuristic-nav-link"
+                    to={userRole === "CANDIDATE" ? "/call-room/available" : "/call-room/dashboard"}
+                    title={userRole === "CANDIDATE" ? "Browse available interview rooms" : "Your call room dashboard"}
+                  >
+                    {userRole === "CANDIDATE" ? "Interview Rooms" : "Call Rooms"}
+                  </Link>
+                </li>
 
-          <div className="notification-dropdown-actions">
-            <button
-              type="button"
-              className="notification-action-btn"
-              onClick={handleKeepAllNotifications}
-              disabled={notifications.length === 0}
-            >
-              Keep all
-            </button>
-            <button
-              type="button"
-              className="notification-action-btn danger"
-              onClick={handleClearAllNotifications}
-              disabled={notifications.length === 0}
-            >
-              Clear all
-            </button>
-          </div>
-
-          <div className="notification-dropdown-list">
-            {isNotificationLoading && notifications.length === 0 && (
-              <p className="notification-empty-state">Loading notifications...</p>
-            )}
-
-            {!isNotificationLoading && notifications.length === 0 && (
-              <p className="notification-empty-state">No notifications for now.</p>
-            )}
-
-            {notifications.map((notification, index) => {
-              const notificationId = String(notification?._id || "");
-              const key = notificationId || `${String(notification?.date || "")}-${String(notification?.message || "")}-${index}`;
-              const unread = !notification?.seen;
-
-              return (
-                <div key={key} className={`notification-item ${unread ? "unread" : ""}`}>
-                  <div className="notification-item-top">
-                    <p className="notification-message">
-                      {notification?.message || "You have a new notification."}
-                    </p>
-                    {unread && <span className="notification-item-dot"></span>}
-                  </div>
-                  <p className="notification-date">{formatNotificationDate(notification?.date)}</p>
-                  <div className="notification-item-actions">
-                    <button
-                      type="button"
-                      className="notification-item-btn"
-                      onClick={() => handleKeepNotification(notificationId)}
-                      disabled={!unread || !notificationId}
+                {userRole === "ENTERPRISE" && (
+                  <li className="nav-item">
+                    <Link
+                      className="nav-link futuristic-nav-link compare-nav-link"
+                      to={`/entreprise/${userId}/interview-rooms`}
+                      title="AI Candidate Comparison"
                     >
-                      Keep
-                    </button>
-                    <button
-                      type="button"
-                      className="notification-item-btn danger"
-                      onClick={() => handleClearNotification(notificationId)}
-                      disabled={!notificationId}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </li>
+                      Compare
+                    </Link>
+                  </li>
+                )}
 
-    <li className="nav-item">
-      <Link
-        className="nav-link futuristic-nav-link"
-        to={profilePath}
-      >
-        {userRole === "ENTERPRISE" ? "My Enterprise" : "Mon Profil"}
-      </Link>
-    </li>
+                <li className="nav-divider" aria-hidden="true" />
 
-    {/* Interview Rooms Navigation */}
-    {isAuthenticated && userId && (
-      <li className="nav-item">
-        <Link
-          className="nav-link futuristic-nav-link"
-          to={userRole === "CANDIDATE" ? "/call-room/available" : "/call-room/dashboard"}
-          title={userRole === "CANDIDATE" ? "Browse available interview rooms" : "Your call room dashboard"}
-        >
-          {userRole === "CANDIDATE" ? "Interview Rooms" : "Call Rooms"}
-        </Link>
-      </li>
-    )}
+                <li className="nav-item notification-nav-item" ref={notificationMenuRef}>
+                  <button
+                    type="button"
+                    className="notification-toggle"
+                    aria-label="Notifications"
+                    aria-expanded={isNotificationOpen}
+                    onClick={handleToggleNotifications}
+                  >
+                    <FontAwesomeIcon icon={faBell} />
+                    {unreadCount > 0 && <span className="notification-alert-dot"></span>}
+                    {unreadCount > 0 && (
+                      <span className="notification-count-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
+                    )}
+                  </button>
 
-    <li className="nav-item">
-      <button
-        className="btn logout-btn"
-        onClick={handleLogout}
-        style={{
-          background: "transparent",
-          border: "2px solid #5b86e5",
-          color: "#5b86e5",
-          fontWeight: "600",
-          borderRadius: "25px",
-          transition: "all 0.3s ease",
-        }}
-      >
-        Logout
-      </button>
+                  {isNotificationOpen && (
+                    <div className="notification-dropdown" role="menu" aria-label="Notifications menu">
+                      <div className="notification-dropdown-header">
+                        <h6>Notifications</h6>
+                        <span>{unreadCount} new</span>
+                      </div>
+
+                      <div className="notification-dropdown-actions">
+                        <button
+                          type="button"
+                          className="notification-action-btn"
+                          onClick={handleKeepAllNotifications}
+                          disabled={notifications.length === 0}
+                        >
+                          Keep all
+                        </button>
+                        <button
+                          type="button"
+                          className="notification-action-btn danger"
+                          onClick={handleClearAllNotifications}
+                          disabled={notifications.length === 0}
+                        >
+                          Clear all
+                        </button>
+                      </div>
+
+                      <div className="notification-dropdown-list">
+                        {isNotificationLoading && notifications.length === 0 && (
+                          <p className="notification-empty-state">Loading notifications...</p>
+                        )}
+
+                        {!isNotificationLoading && notifications.length === 0 && (
+                          <p className="notification-empty-state">No notifications for now.</p>
+                        )}
+
+                        {notifications.map((notification, index) => {
+                          const notificationId = String(notification?._id || "");
+                          const key = notificationId || `${String(notification?.date || "")}-${String(notification?.message || "")}-${index}`;
+                          const unread = !notification?.seen;
+
+                          return (
+                            <div key={key} className={`notification-item ${unread ? "unread" : ""}`}>
+                              <div className="notification-item-top">
+                                <p className="notification-message">
+                                  {notification?.message || "You have a new notification."}
+                                </p>
+                                {unread && <span className="notification-item-dot"></span>}
+                              </div>
+                              <p className="notification-date">{formatNotificationDate(notification?.date)}</p>
+                              <div className="notification-item-actions">
+                                <button
+                                  type="button"
+                                  className="notification-item-btn"
+                                  onClick={() => handleKeepNotification(notificationId)}
+                                  disabled={!unread || !notificationId}
+                                >
+                                  Keep
+                                </button>
+                                <button
+                                  type="button"
+                                  className="notification-item-btn danger"
+                                  onClick={() => handleClearNotification(notificationId)}
+                                  disabled={!notificationId}
+                                >
+                                  Clear
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </li>
+
+                <li className="nav-item">
+                  <button className="btn logout-btn" onClick={handleLogout}>
+                    Logout
+                  </button>
                 </li>
               </>
             ) : (

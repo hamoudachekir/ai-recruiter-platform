@@ -2,9 +2,27 @@ import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import PublicLayout from "../../layouts/PublicLayout";
+import { compressProfileImage, createAdjustedProfileImage } from "../../utils/imageCompression";
 import "./CandidateProfile.css";
 
-const PROFILE_IMAGE_MAX_SIZE = 15 * 1024 * 1024;
+const getFaceProfileMessage = (faceProfile) => {
+  if (faceProfile?.enrolled) {
+    return {
+      status: "ready",
+      text: "Profile photo verified for interview identity check",
+    };
+  }
+  if (faceProfile?.reason === "no_face" || faceProfile?.reason === "no_valid_face") {
+    return { status: "error", text: "Face could not be detected, please try another image" };
+  }
+  if (faceProfile?.reason === "multiple_faces") {
+    return { status: "error", text: "Please upload a photo with only your face" };
+  }
+  if (faceProfile?.reason === "low_quality") {
+    return { status: "warning", text: "Please upload a clear profile photo" };
+  }
+  return { status: "warning", text: "Please upload a clear profile photo" };
+};
 
 const CandidateProfile = () => {
   const { id } = useParams();
@@ -16,6 +34,7 @@ const CandidateProfile = () => {
   const [error, setError] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [imageZoom, setImageZoom] = useState(1);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -47,27 +66,29 @@ const CandidateProfile = () => {
     }
   };
 
-  const handleImageChange = (e) => {
+  const handleImageChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > PROFILE_IMAGE_MAX_SIZE) {
-      alert("Image too large. Maximum size is 15MB.");
+    try {
+      const optimizedFile = await compressProfileImage(file);
+      setSelectedFile(optimizedFile);
+      setImageZoom(1);
+      const reader = new FileReader();
+      reader.onload = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(optimizedFile);
+    } catch (err) {
+      alert(err.message || "Could not prepare this image.");
       e.target.value = "";
-      return;
     }
-
-    setSelectedFile(file);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImagePreview(reader.result);
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleCancelImage = () => {
     setImagePreview(null);
     setSelectedFile(null);
+    setImageZoom(1);
   };
 
   const handleUploadImage = async () => {
@@ -75,9 +96,10 @@ const CandidateProfile = () => {
 
     setIsUploadingImage(true);
     try {
+      const adjustedFile = await createAdjustedProfileImage(selectedFile, { zoom: imageZoom });
       const formData = new FormData();
       formData.append("userId", id);
-      formData.append("picture", selectedFile);
+      formData.append("picture", adjustedFile);
 
       const res = await fetch("http://localhost:3001/Frontend/upload-profile", {
         method: "POST",
@@ -94,10 +116,15 @@ const CandidateProfile = () => {
 
       const pictureUrl = data.pictureUrl || data.picture;
       if (pictureUrl) {
-        setCandidate(prev => ({ ...prev, picture: pictureUrl }));
+        setCandidate(prev => ({ ...prev, picture: pictureUrl, faceProfile: data.faceProfile || prev.faceProfile }));
         setImagePreview(null);
         setSelectedFile(null);
-        alert("✅ Profile picture updated successfully!");
+        setImageZoom(1);
+        if (data.faceProfile?.enrolled) {
+          alert("✅ Profile picture updated and identity face enrolled!");
+        } else {
+          alert("⚠️ Profile picture updated, but face enrollment needs a clearer photo.");
+        }
       } else {
         console.error("No picture URL in response:", data);
         alert("❌ Image uploaded but URL not returned. Please refresh the page.");
@@ -138,6 +165,7 @@ const CandidateProfile = () => {
   }
 
   const profile = candidate.profile || {};
+  const faceProfileMessage = getFaceProfileMessage(candidate.faceProfile);
   const skillsCount = profile.skills?.length || 0;
   const experienceCount = profile.experience?.length || 0;
   const educationCount = profile.education?.length || 0;
@@ -157,28 +185,43 @@ const CandidateProfile = () => {
       <div className="candidate-profile-container">
       <div className="profile-header">
         {imagePreview ? (
-          <div className="profile-avatar-wrapper">
-            <img
-              src={imagePreview}
-              alt="Preview"
-              className="profile-avatar profile-avatar-image"
-            />
-            <div className="image-actions">
-              <button
-                className="btn-action btn-confirm"
-                onClick={handleUploadImage}
-                disabled={isUploadingImage}
-              >
-                {isUploadingImage ? "Uploading..." : "✔"}
-              </button>
-              <button
-                className="btn-action btn-cancel"
-                onClick={handleCancelImage}
-                disabled={isUploadingImage}
-              >
-                ✕
-              </button>
+          <div className="profile-avatar-editor">
+            <div className="profile-avatar-wrapper">
+              <img
+                src={imagePreview}
+                alt="Preview"
+                className="profile-avatar profile-avatar-image"
+                style={{ transform: `scale(${imageZoom})` }}
+              />
+              <div className="image-actions">
+                <button
+                  className="btn-action btn-confirm"
+                  onClick={handleUploadImage}
+                  disabled={isUploadingImage}
+                >
+                  {isUploadingImage ? "Uploading..." : "✔"}
+                </button>
+                <button
+                  className="btn-action btn-cancel"
+                  onClick={handleCancelImage}
+                  disabled={isUploadingImage}
+                >
+                  ✕
+                </button>
+              </div>
             </div>
+            <label className="profile-image-adjust">
+              <span>Size</span>
+              <input
+                type="range"
+                min="1"
+                max="2.5"
+                step="0.05"
+                value={imageZoom}
+                onChange={(event) => setImageZoom(Number(event.target.value))}
+                disabled={isUploadingImage}
+              />
+            </label>
           </div>
         ) : candidateImage ? (
           <div className="profile-avatar-wrapper">
@@ -188,7 +231,7 @@ const CandidateProfile = () => {
               className="profile-avatar profile-avatar-image"
               onError={(e) => {
                 e.currentTarget.onerror = null;
-                e.currentTarget.style.display = "none";
+                e.currentTarget.src = "/images/team-1.jpg";
               }}
             />
             {isOwnProfile && (
@@ -234,6 +277,11 @@ const CandidateProfile = () => {
           <h1>{candidate.name || "Candidate"}</h1>
           <p className="headline">{profile.headline || "Professional Profile"}</p>
           <p className="profile-subtitle">Detailed candidate overview for hiring decisions</p>
+          {isOwnProfile && (
+            <p className={`face-profile-status face-profile-status--${faceProfileMessage.status}`}>
+              {faceProfileMessage.text}
+            </p>
+          )}
         </div>
       </div>
 

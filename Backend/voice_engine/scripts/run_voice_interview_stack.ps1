@@ -75,18 +75,27 @@ function Start-DetachedPython {
         [Parameter(Mandatory = $true)][string]$StdErrLog
     )
 
+    # NumPy/SciPy/Whisper drag in the Intel MKL Fortran runtime, which aborts
+    # with "forrtl: error (200): program aborting due to window-CLOSE event"
+    # if its parent console receives a close event. Launching via
+    # cmd.exe /c start gives the Python process its own detached console
+    # so it survives the launcher window being closed. Same pattern as Node.
     foreach ($key in $Environment.Keys) {
         Set-Item -Path "Env:$key" -Value $Environment[$key]
     }
 
+    $quotedArgs = ($ArgumentList | ForEach-Object {
+        if ($_ -match '\s') { "`"$_`"" } else { $_ }
+    }) -join ' '
+
+    $cmdLine = "`"$venvPython`" $quotedArgs > `"$StdOutLog`" 2> `"$StdErrLog`""
+
     $process = Start-Process `
-        -FilePath $venvPython `
-        -ArgumentList $ArgumentList `
-        -WorkingDirectory $WorkingDirectory `
-        -RedirectStandardOutput $StdOutLog `
-        -RedirectStandardError $StdErrLog `
+        -FilePath 'cmd.exe' `
+        -ArgumentList @('/c', "start", "`"$Name`"", "/MIN", "/D", "`"$WorkingDirectory`"", 'cmd.exe', '/c', $cmdLine) `
+        -WindowStyle Hidden `
         -PassThru
-    Write-Host "[STARTED] $Name (PID $($process.Id))"
+    Write-Host "[STARTED] $Name launcher (PID $($process.Id)) -- service runs in a detached console"
     return $process
 }
 
@@ -183,8 +192,15 @@ try {
     Write-Host "[READY] Speech stack:      $speechHealthUrl"
     Write-Host "[READY] Interview agent:   $agentHealthUrl"
     Write-Host ''
-    Write-Host 'Keep this terminal open if you want to watch the launcher. The services are running in detached Python processes.'
-    Wait-Process -Id $speechProcess.Id, $agentProcess.Id
+    Write-Host 'Services run in their own detached consoles and will survive this window closing.'
+    Write-Host "Logs:"
+    Write-Host "  speech-stack stdout : $speechOutLog"
+    Write-Host "  speech-stack stderr : $speechErrLog"
+    Write-Host "  interview-agent stdout : $agentOutLog"
+    Write-Host "  interview-agent stderr : $agentErrLog"
+    Write-Host ''
+    Write-Host 'To stop them later, run this script again with -ForceRestart, or close the two minimized'
+    Write-Host '"speech-stack" / "interview-agent" cmd windows in your taskbar.'
 } catch {
     Write-Host ''
     foreach ($logFile in @(

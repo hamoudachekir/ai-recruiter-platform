@@ -330,3 +330,93 @@
   }
 }
 
+
+/* Compare Candidates tab — enterprise-only accent */
+.compare-nav-link { color: #7c3aed !important; font-weight: 600; }
+.compare-nav-link:hover { color: #5b21b6 !important; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Header layout: two clearly-separated zones
+   ───────────────────────────────────────────────────────────────────────── */
+
+.futuristic-navbar .container-fluid {
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
+}
+
+.nav-group-public .nav-item + .nav-item,
+.nav-group-user   .nav-item + .nav-item {
+  margin-left: 2px;
+}
+
+.nav-group-user {
+  gap: 4px;
+}
+
+.nav-group-public .futuristic-nav-link {
+  font-size: 0.95rem;
+  letter-spacing: 0.2px;
+}
+
+/* Subtle pill highlight for the user-side nav links so app shortcuts feel
+   distinct from the public marketing links on the left */
+.nav-group-user .futuristic-nav-link {
+  padding: 6px 12px;
+  border-radius: 8px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.nav-group-user .futuristic-nav-link:hover {
+  background: rgba(91, 134, 229, 0.12);
+}
+
+/* Vertical separator between app shortcuts and notification/auth controls */
+.nav-divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 10px;
+  background: rgba(91, 134, 229, 0.35);
+  list-style: none;
+}
+
+/* Logout — moved out of inline styles for a cleaner, hover-aware button */
+.logout-btn {
+  background: transparent !important;
+  border: 2px solid #5b86e5 !important;
+  color: #5b86e5 !important;
+  font-weight: 600 !important;
+  border-radius: 25px !important;
+  padding: 6px 18px !important;
+  margin-left: 6px;
+  transition: background 0.25s ease, color 0.25s ease, box-shadow 0.25s ease !important;
+}
+
+.logout-btn:hover {
+  background: #5b86e5 !important;
+  color: #0b0c2a !important;
+  box-shadow: 0 4px 14px rgba(91, 134, 229, 0.35) !important;
+}
+
+/* Bell sits at the right edge — keep its dropdown right-anchored so it
+   never overflows the viewport on wide screens */
+.nav-group-user .notification-nav-item {
+  margin: 0 4px;
+}
+
+/* Stack zones vertically on collapsed mobile menu */
+@media (max-width: 991.98px) {
+  .nav-group-public,
+  .nav-group-user {
+    width: 100%;
+  }
+  .nav-group-public { margin-bottom: 6px; }
+  .nav-divider { display: none; }
+  .nav-group-user .futuristic-nav-link {
+    padding: 8px 14px;
+  }
+  .logout-btn {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 6px;
+  }
+}

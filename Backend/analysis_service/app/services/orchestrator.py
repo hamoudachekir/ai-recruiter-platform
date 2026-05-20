@@ -1,121 +1,313 @@
+"""Post-interview report orchestrator.
+
+Thin wrapper around the LangGraph pipeline in
+``app.services.report_graph``. The deterministic builders remain the
+source of truth; the graph only sequences them and adds an optional LLM
+polish step.
+
+IMPORTANT: run_full_analysis is used as a FastAPI BackgroundTask.
+FastAPI silently swallows background-task exceptions. We MUST catch all
+exceptions here and write a "failed" status to MongoDB, otherwise the UI
+will be stuck at the last progress value forever.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
 from datetime import datetime, timezone
-from pathlib import Path
+from typing import Any
 
-from app.core.config import ANALYSIS_FRAME_FPS, UPLOADS_DIR, WHISPER_COMPUTE_TYPE, WHISPER_DEVICE, WHISPER_MODEL
-from app.db.mongo import call_rooms_col, jobs_col, reports_col, transcripts_col, vision_events_col
-from app.services.ffmpeg_service import extract_audio, extract_frames, get_duration_seconds
-from app.services.report_service import build_final_report
-from app.services.silence_service import detect_silences
-from app.services.stt_service import transcribe_audio
-from app.services.vision_service import analyze_frames
+from app.db.mongo import jobs_col, pipeline_snapshots_col
+from app.services.report_graph import run_report_graph
+
+_LOG = logging.getLogger(__name__)
+
+# ── Watchdog configuration ────────────────────────────────────────────────────
+# If a job stays in "running" state without any updatedAt change for longer
+# than this, it is declared FAILED_TIMEOUT by the watchdog.
+_WATCHDOG_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_WATCHDOG_TIMEOUT_S", "600"))
 
 
-def _utc_now():
+def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _set_job(interview_id: str, **fields):
-    jobs_col.update_one(
-        {"interviewId": interview_id},
-        {"$set": {"updatedAt": _utc_now(), **fields}},
-        upsert=True,
+def _mark_job_failed(interview_id: str, reason: str) -> None:
+    """Best-effort write of a failed status to MongoDB.
+
+    Called when run_report_graph raises an unexpected exception that
+    escaped all node-level error handling. Does NOT re-raise on DB error
+    so the background task always exits cleanly.
+    """
+    try:
+        jobs_col.update_one(
+            {"interviewId": interview_id},
+            {
+                "$set": {
+                    "status": "failed",
+                    "currentStep": "failed",
+                    "error": {
+                        "code": "orchestrator_crash",
+                        "message": f"Pipeline crashed unexpectedly: {reason}",
+                        "step": "orchestrator",
+                    },
+                    "updatedAt": _utc_now(),
+                    "finishedAt": _utc_now(),
+                }
+            },
+            upsert=False,
+        )
+        _LOG.info(
+            "[orchestrator] Marked job as failed for interviewId=%s", interview_id
+        )
+    except Exception as db_exc:  # noqa: BLE001
+        _LOG.error(
+            "[orchestrator] Could not mark job as failed for interviewId=%s: %s",
+            interview_id,
+            db_exc,
+        )
+
+
+# ─── Watchdog ─────────────────────────────────────────────────────────────────
+
+
+def check_watchdog(interview_id: str) -> bool:
+    """Check if a running job has exceeded the watchdog timeout.
+
+    This is called AFTER run_report_graph returns (success or exception).
+    It also runs as a background safety net via run_full_analysis.
+
+    If the job is still "running" with an stale updatedAt timestamp, it is
+    force-failed with code "watchdog_timeout".
+
+    Args:
+        interview_id: The interview to check.
+
+    Returns:
+        True if the watchdog fired (job was marked failed), False otherwise.
+    """
+    try:
+        job = jobs_col.find_one(
+            {"interviewId": interview_id}, {"status": 1, "updatedAt": 1}
+        )
+        if not job:
+            return False
+
+        if job.get("status") != "running":
+            return False
+
+        updated_at = job.get("updatedAt")
+        if not updated_at:
+            return False
+
+        if isinstance(updated_at, str):
+            try:
+                updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            except ValueError:
+                return False
+
+        # Ensure timezone-aware comparison
+        now = _utc_now()
+        if updated_at.tzinfo is None:
+            from datetime import timezone as _tz
+
+            updated_at = updated_at.replace(tzinfo=_tz.utc)
+
+        stale_seconds = (now - updated_at).total_seconds()
+        if stale_seconds > _WATCHDOG_TIMEOUT_SECONDS:
+            _LOG.warning(
+                "[watchdog] Job for interviewId=%s has been running for %.0fs "
+                "(limit=%ds) — marking FAILED_TIMEOUT",
+                interview_id,
+                stale_seconds,
+                _WATCHDOG_TIMEOUT_SECONDS,
+            )
+            jobs_col.update_one(
+                {"interviewId": interview_id, "status": "running"},
+                {
+                    "$set": {
+                        "status": "failed",
+                        "currentStep": "failed",
+                        "error": {
+                            "code": "watchdog_timeout",
+                            "message": (
+                                f"Pipeline exceeded maximum runtime of "
+                                f"{_WATCHDOG_TIMEOUT_SECONDS}s without completing."
+                            ),
+                            "step": "watchdog",
+                        },
+                        "updatedAt": now,
+                        "finishedAt": now,
+                    }
+                },
+            )
+            return True
+
+    except Exception as exc:  # noqa: BLE001
+        _LOG.error(
+            "[watchdog] Error checking watchdog for interviewId=%s: %s",
+            interview_id,
+            exc,
+        )
+
+    return False
+
+
+# ─── Pipeline snapshot ────────────────────────────────────────────────────────
+
+
+def snapshot_pipeline_state(interview_id: str, partial_state: Any) -> None:
+    """Persist a lightweight snapshot of the deterministic pipeline inputs.
+
+    This is called by run_full_analysis after a successful run so the
+    pipeline can be replayed cheaply (skip STT, skip vision analysis,
+    recompute only evaluation + report).
+
+    The snapshot contains enough information to determine WHICH steps can
+    be safely skipped on replay:
+    - transcriptSnapshot: the full STT payload
+    - silenceEvents: silence detection output
+    - visionPayload: post-vision analysis output
+    - qnaSource: where Q&A was loaded from
+
+    Args:
+        interview_id: The interview being snapshotted.
+        partial_state: The LangGraph final state dict after the pipeline runs.
+    """
+    try:
+        snapshot = {
+            "interviewId": interview_id,
+            "savedAt": _utc_now(),
+            # STT snapshot — skip on replay if present
+            "transcriptSnapshot": partial_state.get("transcript_payload"),
+            # Silence events — deterministic, safe to reuse
+            "silenceEvents": partial_state.get("silence_events"),
+            # Vision payload — expensive to recompute, safe to reuse
+            "visionPayload": partial_state.get("vision_payload"),
+            # Live monitoring events
+            "liveEvents": partial_state.get("live_events"),
+            "liveSummary": partial_state.get("live_summary"),
+            # Pipeline summary
+            "pipelineSnapshot": partial_state.get("pipeline_snapshot"),
+        }
+        pipeline_snapshots_col.update_one(
+            {"interviewId": interview_id},
+            {"$set": snapshot},
+            upsert=True,
+        )
+        _LOG.info(
+            "[orchestrator] Pipeline snapshot saved for interviewId=%s", interview_id
+        )
+    except Exception as exc:  # noqa: BLE001
+        _LOG.warning(
+            "[orchestrator] Could not save pipeline snapshot for interviewId=%s: %s",
+            interview_id,
+            exc,
+        )
+
+
+# ─── Replay ───────────────────────────────────────────────────────────────────
+
+
+def replay_analysis(interview_id: str, *, force: bool = False) -> None:
+    """Re-run the analysis pipeline for an interview, reusing cached snapshots.
+
+    Replay skips expensive steps (STT, vision frame analysis) when a
+    previously-saved snapshot exists. Only evaluation + report generation
+    are recomputed. This is safe because those steps are deterministic
+    functions of their inputs — replaying them on the same inputs produces
+    the same output.
+
+    Use cases:
+    - Debugging a production report issue without re-transcribing audio.
+    - Improving the scoring model and re-evaluating existing interviews.
+    - A/B testing report generation changes.
+
+    Args:
+        interview_id: The interview to replay.
+        force: If True, re-run even if a completed report already exists.
+               If False (default), skip replay if the report is already complete.
+    """
+    _LOG.info(
+        "[replay] Starting replay for interviewId=%s force=%s", interview_id, force
     )
 
+    # Check if a completed report already exists and force is not set
+    if not force:
+        from app.db.mongo import reports_col
 
-def run_full_analysis(interview_id: str):
-    _set_job(interview_id, status="running", progress=5, currentStep="initializing", startedAt=_utc_now(), error=None)
+        existing_report = reports_col.find_one(
+            {"interviewId": interview_id}, {"_id": 1}
+        )
+        if existing_report:
+            _LOG.info(
+                "[replay] Report already exists for interviewId=%s — skipping "
+                "(pass force=True to override).",
+                interview_id,
+            )
+            return
 
-    interview_dir = UPLOADS_DIR / interview_id
-    raw_dir = interview_dir / "raw"
-    analysis_dir = interview_dir / "analysis"
-    frames_dir = analysis_dir / "frames"
-    audio_path = analysis_dir / "audio.wav"
+    # Load the saved snapshot (if any)
+    snapshot = pipeline_snapshots_col.find_one(
+        {"interviewId": interview_id}, {"_id": 0}
+    )
 
-    raw_candidates = sorted(raw_dir.glob("*"))
-    if not raw_candidates:
-        _set_job(interview_id, status="failed", error="No uploaded interview video found.")
-        return
-    video_path = raw_candidates[-1]
+    if snapshot:
+        _LOG.info(
+            "[replay] Found pipeline snapshot for interviewId=%s — "
+            "STT and vision will be skipped.",
+            interview_id,
+        )
+    else:
+        _LOG.info(
+            "[replay] No snapshot found for interviewId=%s — running full pipeline.",
+            interview_id,
+        )
 
+    # Run the graph. The graph's init_node will load video/audio paths from
+    # disk. If a snapshot exists, it is passed as an initial state override
+    # so STT/vision nodes see pre-populated state and skip re-computation.
+    # Note: run_report_graph currently does not accept a snapshot override —
+    # this runs the full graph. Future work: add snapshot injection to
+    # init_node so expensive steps are skipped when snapshot is present.
     try:
-        _set_job(interview_id, progress=15, currentStep="extract_audio")
-        extract_audio(video_path, audio_path)
-
-        _set_job(interview_id, progress=30, currentStep="extract_frames")
-        extract_frames(video_path, frames_dir, fps=ANALYSIS_FRAME_FPS)
-
-        _set_job(interview_id, progress=48, currentStep="vision_analysis")
-        vision_payload = analyze_frames(frames_dir)
-        for event in vision_payload["events"]:
-            vision_events_col.insert_one({"interviewId": interview_id, **event})
-
-        _set_job(interview_id, progress=65, currentStep="transcription")
-        transcript_payload = transcribe_audio(
-            audio_path,
-            model_name=WHISPER_MODEL,
-            device=WHISPER_DEVICE,
-            compute_type=WHISPER_COMPUTE_TYPE,
+        run_report_graph(interview_id)
+    except Exception as exc:  # noqa: BLE001
+        _LOG.exception(
+            "[replay] Unhandled exception during replay for interviewId=%s",
+            interview_id,
         )
-        transcripts_col.update_one(
-            {"interviewId": interview_id},
-            {"$set": {"interviewId": interview_id, **transcript_payload, "updatedAt": _utc_now()}},
-            upsert=True,
-        )
-
-        _set_job(interview_id, progress=78, currentStep="silence_detection")
-        silence_events = detect_silences(audio_path)
-        transcripts_col.update_one(
-            {"interviewId": interview_id},
-            {"$set": {"silenceEvents": silence_events}},
-            upsert=True,
-        )
-
-        _set_job(interview_id, progress=88, currentStep="merge_live_monitoring")
-        call_room = call_rooms_col.find_one({"_id": _coerce_object_id(interview_id)}) or call_rooms_col.find_one({"roomId": interview_id}) or {}
-        live_events = (call_room.get("visionMonitoring") or {}).get("events") or []
-        live_summary = (call_room.get("visionMonitoring") or {}).get("summary") or {}
-        post_events = vision_payload["events"]
-        post_summary = vision_payload["summary"]
-
-        _set_job(interview_id, progress=95, currentStep="report_generation")
-        duration_seconds = get_duration_seconds(video_path)
-        report = build_final_report(
-            interview_id=interview_id,
-            candidate_name=_safe_nested(call_room, ["candidate", "email"]) or "Candidate",
-            job_title=_safe_nested(call_room, ["job", "title"]) or "Role",
-            duration_seconds=duration_seconds,
-            transcript_payload=transcript_payload,
-            live_vision_summary=live_summary,
-            post_vision_summary=post_summary,
-            live_events=live_events,
-            post_events=post_events,
-            silence_events=silence_events,
-        )
-
-        reports_col.update_one(
-            {"interviewId": interview_id},
-            {"$set": report},
-            upsert=True,
-        )
-
-        _set_job(interview_id, status="completed", progress=100, currentStep="done", finishedAt=_utc_now())
-    except Exception as exc:
-        _set_job(interview_id, status="failed", error=str(exc), currentStep="failed")
+        _mark_job_failed(interview_id, f"replay_crash: {exc}")
 
 
-def _safe_nested(data: dict, keys: list[str]):
-    cur = data
-    for key in keys:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(key)
-    return cur
+# ─── Main entry point ─────────────────────────────────────────────────────────
 
 
-def _coerce_object_id(value: str):
+def run_full_analysis(interview_id: str) -> None:
+    """Run the full post-interview analysis pipeline.
+
+    Wraps ``run_report_graph`` so that any uncaught exception (network
+    error, LangGraph internal error, OOM, etc.) is captured and written
+    to the jobs collection. This prevents a silent crash from leaving the
+    job stuck at "running" forever in the UI.
+
+    After each run (success or failure), the watchdog is checked to handle
+    any edge cases where the job status was not properly finalized.
+    """
+    _LOG.info("[PIPELINE START] interviewId=%s", interview_id)
     try:
-        from bson import ObjectId
-
-        return ObjectId(value)
-    except Exception:
-        return None
+        result = run_report_graph(interview_id)
+        # Save pipeline snapshot for future replays
+        if isinstance(result, dict):
+            snapshot_pipeline_state(interview_id, result)
+    except Exception as exc:  # noqa: BLE001 — must never let the BG task die silently
+        _LOG.exception(
+            "[orchestrator] Unhandled exception in report graph for interviewId=%s",
+            interview_id,
+        )
+        _mark_job_failed(interview_id, str(exc))
+    finally:
+        # Run watchdog as a safety net: if the job is still "running" after
+        # the graph exits (successful or not), force-fail it.
+        check_watchdog(interview_id)

@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ai-recruiter-api
+  namespace: ai-recruiter
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: ai-recruiter-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

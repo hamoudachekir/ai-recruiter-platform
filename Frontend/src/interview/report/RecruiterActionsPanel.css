@@ -1,0 +1,161 @@
+/* RecruiterActionsPanel.css */
+
+.rap-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.rap-header {
+  margin-bottom: 20px;
+}
+
+.rap-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 6px 0;
+}
+
+.rap-subtitle {
+  font-size: 14px;
+  color: #111827;
+  margin: 0;
+}
+
+.rap-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.rap-action {
+  background: #f9fafb;
+  border-left: 4px solid #e5e7eb;
+  border-radius: 0 8px 8px 0;
+  padding: 16px;
+}
+
+.rap-action--high {
+  background: #fef2f2;
+  border-left-color: #ef4444;
+}
+
+.rap-action--medium {
+  background: #fffbeb;
+  border-left-color: #f59e0b;
+}
+
+.rap-action--low {
+  background: #f0fdf4;
+  border-left-color: #22c55e;
+}
+
+.rap-action-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.rap-priority {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+.rap-priority--high {
+  background: #ef4444;
+  color: white;
+}
+
+.rap-priority--medium {
+  background: #f59e0b;
+  color: white;
+}
+
+.rap-priority--low {
+  background: #22c55e;
+  color: white;
+}
+
+.rap-time {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.rap-action-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #111827;
+  margin: 0 0 6px 0;
+}
+
+.rap-action-reason {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.rap-decisions {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 20px;
+}
+
+.rap-decisions-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 12px 0;
+}
+
+.rap-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rap-btn {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 16px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.rap-btn--primary {
+  background: #4f46e5;
+  color: white;
+}
+
+.rap-btn--primary:hover {
+  background: #4338ca;
+}
+
+.rap-btn--secondary {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.rap-btn--secondary:hover {
+  background: #c7d2fe;
+}
+
+.rap-btn--neutral {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.rap-btn--neutral:hover {
+  background: #e5e7eb;
+}

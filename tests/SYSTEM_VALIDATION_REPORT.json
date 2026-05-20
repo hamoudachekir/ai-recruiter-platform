@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-05-12T16:41:45.769951",
+  "phases": {
+    "Phase 1": {
+      "status": "fail",
+      "tests": {
+        "analysis_service_running": true,
+        "backend_api_running": true,
+        "mongodb_connected": true,
+        "collection_video_analysis_jobs": true,
+        "collection_interview_final_reports": true,
+        "collection_interview_transcripts": true,
+        "collection_callrooms": false
+      }
+    },
+    "Phase 2": {
+      "status": "partial",
+      "tests": {
+        "graph_version_room-1777903120863-91bbnqcfq": false,
+        "graph_version_room-1777975894653-wrvmpfpju": false,
+        "graph_version_room-1777980010569-ux76j4w1o": false,
+        "graph_version_room-1777987318586-zpa5qpqwy": false,
+        "graph_version_room-1777990314812-xjnv6zi7k": true,
+        "pipeline_snapshots_exist": false
+      },
+      "replay_consistency": {
+        "room-1777903120863-91bbnqcfq": {
+          "score1": null,
+          "score2": null,
+          "consistent": true
+        }
+      }
+    },
+    "Phase 3": {
+      "status": "partial",
+      "tests": {
+        "decision_trace_exists": false,
+        "bias_report_exists": false,
+        "confidence_decision_exists": false,
+        "audit_log_exists": false
+      },
+      "explainability_coverage": {}
+    },
+    "Phase 4": {
+      "status": "partial",
+      "tests": {
+        "shadow_mode_flag_exists": false,
+        "shadow_mode_enabled": false,
+        "ml_model_version_tracked": false,
+        "ml_prediction_exists": false,
+        "feature_extraction_working": false
+      },
+      "shadow_mode_validation": {}
+    },
+    "Phase 4.5": {
+      "status": "partial",
+      "tests": {
+        "feature_schema_exists": false,
+        "ab_group_assigned": false,
+        "graph_version_exists": false,
+        "graph_completed_flag": false,
+        "quality_gate_exists": false
+      }
+    },
+    "Phase 5": {
+      "status": "pass",
+      "tests": {
+        "metrics_endpoint_exists": false,
+        "ats_infrastructure_present": false,
+        "tenant_support_present": true
+      }
+    }
+  },
+  "summary": {
+    "total_tests": 30,
+    "passed": 8,
+    "failed": 22,
+    "warnings": 0
+  }
+}

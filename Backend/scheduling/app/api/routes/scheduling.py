@@ -173,7 +173,8 @@ async def confirm_slot(
             interview_schedule_id=request.interview_schedule_id,
             selected_slot=slot_data,
             location=request.location,
-            notes=request.notes
+            notes=request.notes,
+            platform_meeting_link=request.platform_meeting_link,
         )
         
         return ConfirmSlotResponse(

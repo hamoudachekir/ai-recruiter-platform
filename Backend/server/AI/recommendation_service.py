@@ -206,7 +206,7 @@ SKILL_SYNONYMS = {
 
 # Initialize MongoDB connection
 client = MongoClient(os.getenv("MONGO_URI"))
-db = client[os.getenv("MONGO_DB_NAME", "users")]
+db = client[os.getenv("MONGO_DB_NAME", "ai_recruiter")]
 
 # Load the embedding backend
 model = EmbeddingBackend()

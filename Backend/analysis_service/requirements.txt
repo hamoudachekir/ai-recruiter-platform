@@ -3,8 +3,32 @@ uvicorn[standard]
 python-multipart
 pymongo
 pydantic
-mediapipe
 opencv-python
 numpy
 faster-whisper
 ultralytics
+langgraph>=0.2
+httpx
+python-dotenv
+xgboost
+scikit-learn
+redis>=5.0
+rq>=1.15
+PyJWT>=2.8
+prometheus-client>=0.19
+websockets>=12.0
+httpx>=0.25
+# Optional recruiter-only behavioral insights backends.
+# No API key is required; service degrades gracefully if absent.
+fer
+mediapipe
+# Recruiter-only behavioral timeline overlay (DeepFace).
+# Advisory-only; lazy-imported so missing install does not break startup.
+deepface>=0.0.93
+tf-keras
+# Preferred emotion engine: Py-Feat (AffectNet-trained, exposes FACS Action
+# Units). Heavy: requires torch (~2 GB) and downloads ~1 GB of model weights
+# on first run. Imported lazily — service falls back to DeepFace if missing.
+py-feat>=0.6.0
+torch>=2.0.0
+torchvision>=0.15.0

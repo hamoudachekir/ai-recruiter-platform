@@ -15,6 +15,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import AIRecommendationCard from './AIRecommendationCard';
+import ReportQualityCard from './ReportQualityCard';
 import ScoreBreakdownCards from './ScoreBreakdownCards';
 import TechnicalSkillMatch from './TechnicalSkillMatch';
 import QuestionEvaluationTable from './QuestionEvaluationTable';
@@ -150,9 +151,9 @@ export default function CandidateReportPage({ roomId, room, apiBase, token, onCl
     );
   }
 
-  const { candidateInfo, finalRecommendation, scoreBreakdown, questionEvaluations,
+  const { candidateInfo, finalRecommendation, reportQuality, scoreBreakdown, questionEvaluations,
           technicalAnalysis, communicationAnalysis, visionIntegrityReport,
-          aiInterviewerNotes, recruiterDecision } = report;
+          aiInterviewerNotes, recruiterDecision, evidence } = report;
 
   const visionEvents = room?.integrityEvents || room?.visionMonitoring?.events || [];
 
@@ -211,6 +212,7 @@ export default function CandidateReportPage({ roomId, room, apiBase, token, onCl
           {activeSection === 'overview' && (
             <div className="crp-section">
               <AIRecommendationCard recommendation={finalRecommendation} candidateInfo={candidateInfo} />
+              <ReportQualityCard quality={reportQuality} />
 
               {/* Candidate info card */}
               <div className="crp-info-grid">
@@ -275,10 +277,22 @@ export default function CandidateReportPage({ roomId, room, apiBase, token, onCl
                 ))}
               </div>
               <div className="crp-comm-score">
-                Communication Score: <strong>{communicationAnalysis?.score ?? '–'} / 20</strong>
+                Communication Score: <strong>{communicationAnalysis?.score ?? 'Not enough evidence'}</strong>
               </div>
               {communicationAnalysis?.summary && (
                 <p className="crp-comm-summary">{communicationAnalysis.summary}</p>
+              )}
+              {communicationAnalysis?.transcriptPreview && (
+                <div className="crp-note-block">
+                  <h4>Transcript Preview</h4>
+                  <p>{communicationAnalysis.transcriptPreview}</p>
+                </div>
+              )}
+              {!communicationAnalysis?.transcriptPreview && (
+                <div className="crp-note-block">
+                  <h4>Transcript Warning</h4>
+                  <p>Transcript content is unavailable, so HR and communication evaluation require recruiter review.</p>
+                </div>
               )}
             </div>
           )}
@@ -309,21 +323,29 @@ export default function CandidateReportPage({ roomId, room, apiBase, token, onCl
               <div className="crp-ai-notes">
                 <div className="crp-note-block">
                   <h4>Interview Summary</h4>
-                  <p>{aiInterviewerNotes?.summary || 'No summary available.'}</p>
+                  <p>{aiInterviewerNotes?.summary || 'Not enough evidence.'}</p>
                 </div>
+                {(evidence || []).length > 0 && (
+                  <div className="crp-note-block">
+                    <h4>Evidence</h4>
+                    <ul>{evidence.map((item, i) => (
+                      <li key={i}><strong>{item.reason}</strong> {item.quote}</li>
+                    ))}</ul>
+                  </div>
+                )}
                 <div className="crp-note-cols">
                   <div className="crp-note-col crp-note-col--green">
                     <h4>Strengths Observed</h4>
                     {(aiInterviewerNotes?.strengths || []).length > 0
                       ? <ul>{(aiInterviewerNotes.strengths).map((s, i) => <li key={i}>{s}</li>)}</ul>
-                      : <p className="crp-note-empty">None identified.</p>
+                      : <p className="crp-note-empty">Not enough evidence.</p>
                     }
                   </div>
                   <div className="crp-note-col crp-note-col--amber">
                     <h4>Areas to Explore</h4>
                     {(aiInterviewerNotes?.weaknesses || []).length > 0
                       ? <ul>{(aiInterviewerNotes.weaknesses).map((s, i) => <li key={i}>{s}</li>)}</ul>
-                      : <p className="crp-note-empty">None identified.</p>
+                      : <p className="crp-note-empty">Not enough evidence.</p>
                     }
                   </div>
                 </div>

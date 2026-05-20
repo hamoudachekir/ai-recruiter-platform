@@ -1,0 +1,133 @@
+/* JobFitPanel.css */
+
+.jfp-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px 22px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.jfp-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.jfp-card__eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 6px 0;
+}
+
+.jfp-card__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.jfp-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: #f3f4f6;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.jfp-status--strong {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.jfp-status--moderate {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.jfp-status--weak {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.jfp-status--unknown {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.jfp-summary {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #374151;
+  margin: 0 0 16px 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.jfp-subtitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 8px 0;
+}
+
+.jfp-skills {
+  margin-bottom: 14px;
+}
+
+.jfp-skills__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.jfp-skill {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 12px;
+  background: #eff6ff;
+  color: #1e40af;
+  border-radius: 16px;
+  border: 1px solid #dbeafe;
+}
+
+.jfp-missing {
+  margin-bottom: 14px;
+}
+
+.jfp-list {
+  list-style: disc;
+  padding-left: 18px;
+  margin: 0;
+}
+
+.jfp-list li {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #4b5563;
+  margin-bottom: 4px;
+}
+
+.jfp-followup {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.jfp-followup .jfp-subtitle {
+  color: #059669;
+  margin-bottom: 10px;
+}
+
+.jfp-followup .jfp-list li {
+  color: #065f46;
+}

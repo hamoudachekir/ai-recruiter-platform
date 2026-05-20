@@ -1,0 +1,313 @@
+/**
+ * AnalysisStatusPanel.css
+ *
+ * Styles for the analysis status panel with state-based theming.
+ */
+
+.analysis-status-panel {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: border-color 0.2s ease;
+}
+
+.analysis-status-panel--running {
+  border-color: #5b86e5;
+  background: linear-gradient(135deg, #ffffff 0%, #f0f4ff 100%);
+}
+
+.analysis-status-panel--completed {
+  border-color: #22c55e;
+  background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
+}
+
+.analysis-status-panel--failed {
+  border-color: #ef4444;
+  background: linear-gradient(135deg, #ffffff 0%, #fef2f2 100%);
+}
+
+.analysis-status-panel--pending {
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, #ffffff 0%, #fffbeb 100%);
+}
+
+/* Header */
+.analysis-status-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.analysis-status-panel__icon {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.analysis-status-panel__info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.analysis-status-panel__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+/* Status badges */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-badge--neutral {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.status-badge--pending {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.status-badge--running {
+  background: #dbeafe;
+  color: #2563eb;
+  animation: pulse 2s infinite;
+}
+
+.status-badge--completed {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.status-badge--failed {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Message */
+.analysis-status-panel__message {
+  color: #64748b;
+  font-size: 14px;
+  margin: 0 0 16px 0;
+  line-height: 1.5;
+}
+
+/* Progress bar */
+.analysis-progress {
+  margin: 16px 0;
+}
+
+.analysis-progress__bar {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.analysis-progress__fill {
+  height: 100%;
+  background: linear-gradient(90deg, #5b86e5 0%, #36d1dc 100%);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.analysis-progress__info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.analysis-progress__percent {
+  font-weight: 600;
+  color: #5b86e5;
+}
+
+.analysis-progress__step {
+  color: #64748b;
+  font-style: italic;
+}
+
+/* Error display */
+.analysis-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.analysis-error__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.analysis-error__icon {
+  font-size: 18px;
+}
+
+.analysis-error__title {
+  font-weight: 600;
+  color: #dc2626;
+  font-size: 14px;
+}
+
+.analysis-error__message {
+  color: #7f1d1d;
+  font-size: 14px;
+  margin: 0 0 8px 0;
+  line-height: 1.5;
+}
+
+.analysis-error__step {
+  color: #991b1b;
+  font-size: 12px;
+  font-family: monospace;
+  background: #fee2e2;
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin: 0 0 12px 0;
+}
+
+.analysis-error__dismiss {
+  background: #dc2626;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.analysis-error__dismiss:hover {
+  background: #b91c1c;
+}
+
+/* Action buttons */
+.analysis-status-panel__actions {
+  margin-top: 16px;
+}
+
+.analysis-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.analysis-btn--primary {
+  background: #5b86e5;
+  color: white;
+}
+
+.analysis-btn--primary:hover:not(:disabled) {
+  background: #4a6fd4;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(91, 134, 229, 0.3);
+}
+
+.analysis-btn--secondary {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.analysis-btn--secondary:hover:not(:disabled) {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+
+.analysis-btn--loading {
+  background: #e2e8f0;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.analysis-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.analysis-btn__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #cbd5e1;
+  border-top-color: #5b86e5;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Deterministic note */
+.analysis-status-panel__note {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 12px;
+  color: #64748b;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+.analysis-note__icon {
+  flex-shrink: 0;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .analysis-status-panel {
+    padding: 16px;
+  }
+
+  .analysis-status-panel__header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .analysis-status-panel__info {
+    width: 100%;
+  }
+
+  .analysis-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
