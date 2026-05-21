@@ -31,6 +31,7 @@ const SENTIMENT_META = {
   angry: { color: "#f87171", emoji: "😠", label: "Angry" },
   surprised: { color: "#a3e635", emoji: "😲", label: "Surprised" },
   fear: { color: "#fbbf24", emoji: "😨", label: "Tense" },
+  disgust: { color: "#c084fc", emoji: "🤢", label: "Disgust" },
   neutral: { color: "#94a3b8", emoji: "😐", label: "Neutral" },
 };
 
@@ -67,27 +68,38 @@ const drawCornerBrackets = (ctx, x, y, w, h, color) => {
 // by SENTIMENT_HYSTERESIS to take over (prevents rapid flipping).
 const sentimentFromScores = (s, current) => {
   if (!s) return "neutral";
-  const smile = Math.max(s.mouthSmileLeft || 0, s.mouthSmileRight || 0);
-  const frown = Math.max(s.mouthFrownLeft || 0, s.mouthFrownRight || 0);
-  const browDown = Math.max(s.browDownLeft || 0, s.browDownRight || 0);
-  const browInnerUp = s.browInnerUp || 0;
-  const jawOpen = s.jawOpen || 0;
+  const v = (k) => Math.max(0, s[k] || 0);
+  const maxPair = (a, b) => Math.max(v(a), v(b));
+
+  const smile = maxPair("mouthSmileLeft", "mouthSmileRight");
+  const frown = maxPair("mouthFrownLeft", "mouthFrownRight");
+  const browDown = maxPair("browDownLeft", "browDownRight");
+  const browInnerUp = v("browInnerUp");
+  const browOuterUp = maxPair("browOuterUpLeft", "browOuterUpRight");
+  const eyeSquint = maxPair("eyeSquintLeft", "eyeSquintRight");
+  const eyeWide = maxPair("eyeWideLeft", "eyeWideRight");
+  const jawOpen = v("jawOpen");
+  const jawForward = v("jawForward");
+  const noseSneer = maxPair("noseSneerLeft", "noseSneerRight");
+  const upperLipUp = maxPair("mouthUpperUpLeft", "mouthUpperUpRight");
+  const lipPress = maxPair("mouthPressLeft", "mouthPressRight");
 
   const scores = {
-    happy: smile,
-    surprised: jawOpen > 0.35 ? (jawOpen + browInnerUp) * 0.6 : 0,
-    angry: browDown > 0.4 ? browDown : 0,
-    sad: frown,
-    fear: browInnerUp > 0.4 ? browInnerUp * 0.8 : 0,
-    neutral: 0.22,
+    happy: smile * 1.2,
+    surprised: jawOpen * 0.7 + eyeWide * 0.7 + browOuterUp * 0.5,
+    angry: browDown * 1.0 + eyeSquint * 0.5 + jawForward * 0.4 + lipPress * 0.4,
+    sad: frown * 1.0 + browInnerUp * 0.4,
+    fear: browInnerUp * 0.7 + eyeWide * 0.5,
+    disgust: noseSneer * 1.1 + upperLipUp * 0.7,
+    neutral: 0.18,
   };
 
   let best = "neutral";
   let bestScore = 0;
-  for (const [k, v] of Object.entries(scores)) {
-    if (v > bestScore) {
+  for (const [k, val] of Object.entries(scores)) {
+    if (val > bestScore) {
       best = k;
-      bestScore = v;
+      bestScore = val;
     }
   }
   if (current && best !== current) {
@@ -117,6 +129,10 @@ const formatPct = (v) => Math.round(Math.max(0, Math.min(1, v)) * 100);
 // Map smoothed blendshape scores to a 7-emotion probability distribution
 // compatible with the existing EmotionDashboard breakdown / timeline / peaks.
 // Output is normalized so values sum to 1.
+//
+// Each emotion blends multiple MediaPipe blendshapes (FACS-style action units)
+// without strict gates, so subtle expressions still register instead of being
+// dropped to ~0 and overwhelmed by neutral.
 const blendshapesToEmotionProbs = (s) => {
   const empty = {
     neutral: 1,
@@ -128,26 +144,67 @@ const blendshapesToEmotionProbs = (s) => {
     disgust: 0,
   };
   if (!s) return empty;
-  const smile = Math.max(s.mouthSmileLeft || 0, s.mouthSmileRight || 0);
-  const frown = Math.max(s.mouthFrownLeft || 0, s.mouthFrownRight || 0);
-  const browDown = Math.max(s.browDownLeft || 0, s.browDownRight || 0);
-  const browInnerUp = s.browInnerUp || 0;
-  const jawOpen = s.jawOpen || 0;
-  const noseSneer = Math.max(s.noseSneerLeft || 0, s.noseSneerRight || 0);
-  const pucker = s.mouthPucker || 0;
 
+  const v = (k) => Math.max(0, s[k] || 0);
+  const maxPair = (a, b) => Math.max(v(a), v(b));
+
+  const smile = maxPair("mouthSmileLeft", "mouthSmileRight");
+  const dimple = maxPair("mouthDimpleLeft", "mouthDimpleRight");
+  const cheekSquint = maxPair("cheekSquintLeft", "cheekSquintRight");
+
+  const frown = maxPair("mouthFrownLeft", "mouthFrownRight");
+  const mouthStretch = maxPair("mouthStretchLeft", "mouthStretchRight");
+  const browInnerUp = v("browInnerUp");
+  const browDown = maxPair("browDownLeft", "browDownRight");
+  const browOuterUp = maxPair("browOuterUpLeft", "browOuterUpRight");
+  const eyeSquint = maxPair("eyeSquintLeft", "eyeSquintRight");
+  const eyeWide = maxPair("eyeWideLeft", "eyeWideRight");
+  const jawOpen = v("jawOpen");
+  const jawForward = v("jawForward");
+  const noseSneer = maxPair("noseSneerLeft", "noseSneerRight");
+  const upperLipUp = maxPair("mouthUpperUpLeft", "mouthUpperUpRight");
+  const lipPress = maxPair("mouthPressLeft", "mouthPressRight");
+  const mouthFunnel = v("mouthFunnel");
+  const mouthPucker = v("mouthPucker");
+
+  // Each emotion gets multiple cues, gently weighted. No hard thresholds —
+  // subtle micro-expressions surface as low (but non-zero) probabilities.
   const raw = {
-    happy: smile,
-    sad: frown * 0.8,
-    angry: browDown * (frown > 0.1 ? 1 : 0.4),
-    surprise: jawOpen > 0.3 ? jawOpen * 0.7 + browInnerUp * 0.3 : 0,
-    fear: browInnerUp > 0.3 && jawOpen < 0.3 ? browInnerUp * 0.6 : 0,
-    disgust: Math.max(noseSneer, pucker * 0.4),
+    happy: smile * 1.2 + dimple * 0.6 + cheekSquint * 0.4,
+    sad:
+      frown * 1.1 +
+      browInnerUp * 0.5 +
+      mouthStretch * 0.3 +
+      (browInnerUp > 0.2 && browDown > 0.15 ? 0.25 : 0),
+    angry:
+      browDown * 1.1 +
+      eyeSquint * 0.5 +
+      jawForward * 0.4 +
+      lipPress * 0.5 +
+      noseSneer * 0.3,
+    surprise:
+      jawOpen * 0.9 +
+      eyeWide * 0.9 +
+      browOuterUp * 0.6 +
+      browInnerUp * 0.4 +
+      mouthFunnel * 0.3,
+    fear:
+      browInnerUp * 0.7 +
+      eyeWide * 0.6 +
+      mouthStretch * 0.4 +
+      (browInnerUp > 0.25 && eyeWide > 0.2 ? 0.3 : 0),
+    disgust:
+      noseSneer * 1.2 +
+      upperLipUp * 0.8 +
+      browDown * 0.4 +
+      mouthPucker * 0.3,
   };
+
   const sumRaw =
     raw.happy + raw.sad + raw.angry + raw.surprise + raw.fear + raw.disgust;
-  // Residual mass = neutral; the more "active" the face, the less neutral.
-  const neutralWeight = Math.max(0, 1 - sumRaw * 1.6);
+  // Residual mass = neutral. Multiplier (1.1) is lower than before so an
+  // active face doesn't collapse all non-neutral signals to near-zero.
+  const neutralWeight = Math.max(0.05, 1 - sumRaw * 1.1);
   const total = sumRaw + neutralWeight || 1;
   return {
     neutral: neutralWeight / total,

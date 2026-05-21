@@ -250,21 +250,32 @@ function createIntegrityEvents(yoloResult, context = {}) {
     });
   }
 
-  // D. REFERENCE_MATERIAL_VISIBLE - book detected
+  // D. REFERENCE_MATERIAL_VISIBLE - book / notebook / cahier / folder / paper.
+  // The Python service flips bookDetected=true for: (a) the COCO `book`
+  // class, (b) high-confidence handbag/suitcase mislabels, (c) the OpenCV
+  // `paper` heuristic that catches plain sheets/documents held to camera.
   if (summary.bookDetected) {
-    const bookDetections = detections.filter(d => d.label === 'book');
+    const bookDetections = detections.filter(d =>
+      d.label === 'book'
+      || d.label === 'handbag'
+      || d.label === 'suitcase'
+      || d.label === 'paper'
+    );
     const maxConfidence = bookDetections.length > 0
       ? Math.max(...bookDetections.map(d => d.confidence))
       : 0.6;
-    
+    const hasPaper = bookDetections.some(d => d.label === 'paper');
+
     events.push({
       type: 'REFERENCE_MATERIAL_VISIBLE',
-      source: 'yolov8',
+      source: hasPaper ? 'opencv_paper' : 'yolov8',
       severity: 'low',
       timestamp,
       questionId,
       confidence: maxConfidence,
-      evidence: 'A book or document-like object was detected in the camera frame.',
+      evidence: hasPaper
+        ? 'A paper sheet, document, or notebook page was detected in the camera frame.'
+        : 'A book, notebook, or document-like object was detected in the camera frame.',
       detections: bookDetections,
       needsRecruiterReview: true,
     });

@@ -227,43 +227,47 @@ const JobInterviewRooms = () => {
     if (!activeRoomId) return;
     setComparisonLoading(true);
     try {
+      // NVIDIA Llama 3.3 70B free-tier routinely takes 2-3 minutes to rank
+      // 5+ candidates. Match the server's 5-minute socket timeout so we
+      // don't abort early and show a misleading "Comparison failed" toast
+      // while the backend is still working.
       const res = await axios.post(
         `${API_BASE}/api/job-rooms/${activeRoomId}/comparison`,
         { includeOnlyCompleted: true },
-        { headers, timeout: 90000 },
+        { headers, timeout: 300000 },
       );
       setComparison(res.data?.comparison || null);
       toast.success("Ranking generated");
     } catch (err) {
-      toast.error(
-        err.response?.data?.error ||
-          err.response?.data?.message ||
-          "Comparison failed",
-      );
+      // ECONNABORTED = the axios timeout fired. The server is still working;
+      // the report will land in the next /comparison fetch.
+      if (err?.code === "ECONNABORTED") {
+        toast.info(
+          "Ranking is taking longer than expected — it will appear shortly. " +
+            "You can also click 'Refresh' in a minute to see the result.",
+        );
+      } else {
+        toast.error(
+          err.response?.data?.error ||
+            err.response?.data?.message ||
+            "Comparison failed",
+        );
+      }
     } finally {
       setComparisonLoading(false);
     }
   };
 
-  const handleExportPdf = async () => {
+  const handleExportPdf = () => {
     if (!activeRoomId) return;
-    try {
-      const res = await axios.get(
-        `${API_BASE}/api/job-rooms/${activeRoomId}/comparison/pdf`,
-        { headers, responseType: "blob" },
-      );
-      const blob = new Blob([res.data], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `comparison-${activeRoomId}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      toast.error(err.response?.data?.message || "PDF export failed");
-    }
+    const url = `${API_BASE}/api/job-rooms/${activeRoomId}/comparison/pdf?token=${encodeURIComponent(token)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `comparison-${activeRoomId}.pdf`;
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   // ─── Rendering ─────────────────────────────────────────────────────────────

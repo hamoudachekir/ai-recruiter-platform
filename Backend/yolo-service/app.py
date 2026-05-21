@@ -31,13 +31,17 @@ from ultralytics import YOLO
 
 # Configuration from environment
 MODEL_NAME = os.getenv("YOLO_MODEL", "yolov8n.pt")
-CONFIDENCE_THRESHOLD = float(os.getenv("YOLO_CONFIDENCE", "0.25"))
-PHONE_CONFIDENCE = float(os.getenv("YOLO_PHONE_CONFIDENCE", "0.55"))
-BOOK_CONFIDENCE = float(os.getenv("YOLO_BOOK_CONFIDENCE", "0.55"))
-SCREEN_CONFIDENCE = float(os.getenv("YOLO_SCREEN_CONFIDENCE", "0.60"))
+CONFIDENCE_THRESHOLD = float(os.getenv("YOLO_CONFIDENCE", "0.20"))
+# Thresholds tuned for the YOLOv8n (nano) model + 640px webcam frames where
+# handheld objects often detect at 0.30-0.50 confidence.
+PHONE_CONFIDENCE = float(os.getenv("YOLO_PHONE_CONFIDENCE", "0.30"))
+BOOK_CONFIDENCE = float(os.getenv("YOLO_BOOK_CONFIDENCE", "0.30"))
+SCREEN_CONFIDENCE = float(os.getenv("YOLO_SCREEN_CONFIDENCE", "0.50"))
 MAX_IMAGE_SIZE = int(os.getenv("YOLO_MAX_IMAGE_SIZE", "1920"))
 
-# COCO class indices we care about
+# COCO class indices we care about. We also include handbag/suitcase since
+# YOLO frequently classifies handheld notebooks/folders/cahiers as one of
+# these — they're treated as reference-material-like objects below.
 TARGET_CLASSES = {
     "person": 0,
     "cell phone": 67,
@@ -47,6 +51,8 @@ TARGET_CLASSES = {
     "mouse": 64,
     "tv": 62,
     "remote": 65,
+    "handbag": 26,
+    "suitcase": 28,
 }
 
 # Reverse mapping for quick lookup
@@ -155,11 +161,96 @@ def decode_base64_image(frame_base64: str) -> np.ndarray:
     return image
 
 
+def detect_paper_sheets(image: np.ndarray) -> List[dict]:
+    """Detect paper / document / notebook sheets in front of the camera.
+
+    COCO's YOLOv8 has no class for plain paper. We approximate it with an
+    OpenCV pipeline that fires when the candidate holds up a light-coloured
+    rectangular sheet:
+
+      1. Blur + adaptive threshold to isolate bright planar regions
+      2. Find contours, approximate to polygons
+      3. Keep quads (4 vertices) that are large enough (>4% of frame),
+         not tiny (<35% of frame so we don't pick the wall behind the
+         candidate), have a paper-like aspect ratio (0.5–2.2), and contain
+         a high-brightness interior (mean V > 170 in HSV)
+
+    Each hit is returned as a fake detection so it merges naturally with
+    the YOLO `detections` list and triggers the existing REFERENCE_MATERIAL
+    pipeline downstream.
+    """
+    if image is None or image.size == 0:
+        return []
+    h, w = image.shape[:2]
+    frame_area = float(h * w)
+    if frame_area <= 0:
+        return []
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(gray, 60, 180)
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
+
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    hits: List[dict] = []
+
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        rel = area / frame_area
+        # Reject too small (background noise) and too large (entire wall).
+        if rel < 0.04 or rel > 0.35:
+            continue
+
+        peri = cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, 0.025 * peri, True)
+        if len(approx) < 4 or len(approx) > 6:
+            continue
+
+        x, y, bw, bh = cv2.boundingRect(approx)
+        if bw <= 0 or bh <= 0:
+            continue
+        ratio = bw / float(bh)
+        if ratio < 0.5 or ratio > 2.2:
+            continue
+
+        # Reject the head/skin region: skin has saturation. Real paper is
+        # near-white with low saturation. We sample the bounding-box interior.
+        roi_hsv = hsv[y:y + bh, x:x + bw]
+        if roi_hsv.size == 0:
+            continue
+        mean_v = float(np.mean(roi_hsv[:, :, 2]))
+        mean_s = float(np.mean(roi_hsv[:, :, 1]))
+        if mean_v < 170 or mean_s > 70:
+            continue
+
+        # "Fill ratio" — how much of the bbox the contour actually occupies.
+        # A real sheet fills ~80%+ of its bbox; random shapes fill much less.
+        fill = area / float(bw * bh) if bw * bh > 0 else 0.0
+        if fill < 0.70:
+            continue
+
+        # Confidence is a soft score from coverage + whiteness. Capped so it
+        # doesn't drown out genuine YOLO detections.
+        confidence = min(0.90, 0.40 + (mean_v - 170) / 200 + fill * 0.2)
+
+        hits.append({
+            "label": "paper",
+            "confidence": round(confidence, 3),
+            "bbox": [float(x), float(y), float(x + bw), float(y + bh)],
+        })
+
+    # Cap at 3 hits to keep payload small even on noisy frames.
+    hits.sort(key=lambda d: d["confidence"], reverse=True)
+    return hits[:3]
+
+
 def run_detection(image: np.ndarray) -> tuple[List[dict], DetectionSummary]:
     """Run YOLO detection on image and return detections + summary."""
     detections = []
     summary = DetectionSummary()
-    
+
     if model is None:
         raise RuntimeError("YOLO model not loaded")
     
@@ -206,6 +297,13 @@ def run_detection(image: np.ndarray) -> tuple[List[dict], DetectionSummary]:
                 phone_detected = True
             elif class_name == "book" and conf >= BOOK_CONFIDENCE:
                 book_detected = True
+            elif class_name in ("handbag", "suitcase") and conf >= 0.55:
+                # YOLOv8n often mislabels notebooks/folders/cahiers held in a
+                # candidate's hand as a handbag or suitcase. Treat strong
+                # detections as reference-material signals so the recruiter
+                # dashboard surfaces them. The high threshold keeps real bags
+                # in the background from triggering.
+                book_detected = True
             elif class_name == "laptop" and conf >= SCREEN_CONFIDENCE:
                 laptop_detected = True
             elif class_name == "keyboard":
@@ -216,7 +314,20 @@ def run_detection(image: np.ndarray) -> tuple[List[dict], DetectionSummary]:
                 tv_detected = True
             elif class_name == "remote":
                 remote_detected = True
-    
+
+    # ── OpenCV paper / document / notebook sheet detection ──────────────
+    # COCO has no `paper` class. We add an OpenCV-based detector that fires
+    # when the candidate holds up a light-coloured rectangular sheet and
+    # treat it as a reference-material signal so the existing event
+    # pipeline (snapshot save + REFERENCE_MATERIAL_VISIBLE event) kicks in.
+    try:
+        paper_hits = detect_paper_sheets(image)
+    except Exception as _exc:
+        paper_hits = []
+    if paper_hits:
+        detections.extend(paper_hits)
+        book_detected = True
+
     # Build summary
     summary = DetectionSummary(
         personCount=person_count,

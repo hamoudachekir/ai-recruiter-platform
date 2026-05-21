@@ -15,12 +15,22 @@ const fmtDate = (d) => {
 };
 
 /**
- * Stream a ranked-comparison PDF report into the given writable stream
- * (typically an Express response).
+ * Build a ranked-comparison PDF and return it as a Buffer.
+ * Using a buffer (instead of piping directly to res) ensures Express can flush
+ * CORS and other response headers before any body bytes are written.
  */
-function buildComparisonPdf({ room, comparison }, stream) {
-  const doc = new PDFDocument({ size: "A4", margin: 48 });
-  doc.pipe(stream);
+function buildComparisonPdfBuffer({ room, comparison }) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 48 });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    _fillPdf(doc, { room, comparison });
+  });
+}
+
+function _fillPdf(doc, { room, comparison }) {
 
   // Header
   doc
@@ -131,4 +141,4 @@ function buildComparisonPdf({ room, comparison }, stream) {
   doc.end();
 }
 
-module.exports = { buildComparisonPdf };
+module.exports = { buildComparisonPdfBuffer };

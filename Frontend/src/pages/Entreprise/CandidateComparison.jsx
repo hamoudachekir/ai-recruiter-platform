@@ -291,24 +291,15 @@ const CandidateComparison = () => {
     }
   };
 
-  const handleExportPdf = async () => {
-    try {
-      const res = await axios.get(
-        `${API_BASE}/api/job-rooms/${roomId}/comparison/pdf`,
-        { headers, responseType: "blob" }
-      );
-      const blob = new Blob([res.data], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `comparison-${roomId}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      toast.error(err.response?.data?.message || "PDF export failed");
-    }
+  const handleExportPdf = () => {
+    const url = `${API_BASE}/api/job-rooms/${roomId}/comparison/pdf?token=${encodeURIComponent(token)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `comparison-${roomId}.pdf`;
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   // ─── Derived data ──────────────────────────────────────────────────────────
@@ -345,10 +336,18 @@ const CandidateComparison = () => {
     return sortedCandidates.filter((c) => selectedSessionIds.includes(c.sessionId));
   }, [sortedCandidates, selectedSessionIds]);
 
+  // Max candidates the side-by-side comparison view can render legibly.
+  // The radar chart + columnar layout get cramped past ~8; the limit exists
+  // for readability, not as a backend constraint.
+  const MAX_COMPARE = 8;
+
   const toggleSelect = (sessionId) => {
     setSelectedSessionIds((prev) => {
       if (prev.includes(sessionId)) return prev.filter((id) => id !== sessionId);
-      if (prev.length >= 4) { toast.info("Compare up to 4 candidates at a time"); return prev; }
+      if (prev.length >= MAX_COMPARE) {
+        toast.info(`Compare up to ${MAX_COMPARE} candidates at a time`);
+        return prev;
+      }
       return [...prev, sessionId];
     });
   };
@@ -1047,16 +1046,27 @@ const ScoreCard = ({
       ))}
     </div>
 
-    {(c.aiRank?.strengths?.length > 0 || c.aiRank?.gaps?.length > 0) && (
-      <div className="cc-chips-row">
-        {c.aiRank.strengths?.slice(0, 3).map((s) => (
-          <span key={s} className="cc-chip strength">{s}</span>
-        ))}
-        {c.aiRank.gaps?.slice(0, 2).map((g) => (
-          <span key={g} className="cc-chip gap">{g}</span>
-        ))}
-      </div>
-    )}
+    {(c.aiRank?.strengths?.length > 0 || c.aiRank?.gaps?.length > 0) && (() => {
+      // Drop gap chips that complain about the input data itself instead of
+      // the candidate's performance. These leak through when the LLM was fed
+      // a metrics dict with a 0/null field (e.g. "Missing technical theta",
+      // "Unknown resilience index") — that's a data-pipeline gap, not
+      // candidate feedback, and showing it to the recruiter is noise.
+      const META_GAP = /^\s*(?:unknown|missing|n\/a|no data|not\s+available)\b/i;
+      const realGaps = (c.aiRank.gaps || []).filter((g) => !META_GAP.test(String(g)));
+      const realStrengths = (c.aiRank.strengths || []).filter((s) => !META_GAP.test(String(s)));
+      if (realStrengths.length === 0 && realGaps.length === 0) return null;
+      return (
+        <div className="cc-chips-row">
+          {realStrengths.slice(0, 3).map((s) => (
+            <span key={s} className="cc-chip strength">{s}</span>
+          ))}
+          {realGaps.slice(0, 2).map((g) => (
+            <span key={g} className="cc-chip gap">{g}</span>
+          ))}
+        </div>
+      );
+    })()}
 
     {c.aiRank?.justification && (
       <p className="cc-card-justification">{c.aiRank.justification}</p>

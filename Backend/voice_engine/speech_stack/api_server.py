@@ -61,7 +61,11 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_language_default() -> Optional[str]:
-    raw = str(os.getenv("FW_LANGUAGE", "auto") or "").strip().lower()
+    # Default pinned to English. Whisper in auto-detect ("auto"/None) routinely
+    # hallucinates Arabic / Chinese / Russian fragments on silence or noisy
+    # input, which leaks into the candidate's transcript preview. If your
+    # interviews are actually multilingual, set FW_LANGUAGE=fr or auto via env.
+    raw = str(os.getenv("FW_LANGUAGE", "en") or "").strip().lower()
     if raw in {"", "auto", "none"}:
         return None
     return raw

@@ -3309,11 +3309,7 @@ const CallRoomActive = () => {
                     !isRH &&
                     (faceVerifStatus !== "matched" ||
                       agentRetrying ||
-                      [
-                        "agent_speaking",
-                        "candidate_submitting",
-                        "agent_thinking",
-                      ].includes(turnState))
+                      turnState === "candidate_submitting")
                   }
                   inputDisabled={
                     !isRH && (!roomDbId || faceVerifStatus !== "matched")

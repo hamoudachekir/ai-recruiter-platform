@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { containsProfanity } from './utils/profanityFilter';
 import './AgentChatPanel.css';
 
+// Belt-and-suspenders: strip any leading sentiment label that may bleed
+// through from the agent (the system prompt forbids it, but LLMs sometimes
+// echo POSITIVE/NEGATIVE/NEUTRAL anyway). Keeps the candidate-facing chat
+// free of analyst-only tokens regardless of upstream behavior.
+const SENTIMENT_PREFIX_RX = /^(?:POSITIVE|NEGATIVE|NEUTRAL)[.!,:;\s-]+/i;
+const stripSentimentPrefix = (s) =>
+  String(s || '').replace(SENTIMENT_PREFIX_RX, '').trim();
+
 /**
  * Adaptive interview agent chat panel.
  *
@@ -102,12 +110,13 @@ export default function AgentChatPanel({
       if (payload.skillFocus) setLastSkill(payload.skillFocus);
 
       const now = Date.now();
+      const cleanText = stripSentimentPrefix(payload.text || '');
       console.log('💬 [AgentChatPanel] Adding new agent message to feed:', incomingText);
       setMessages((prev) => [
         ...prev,
         {
           role: 'agent',
-          text: payload.text || '',
+          text: cleanText,
           meta: { difficulty: payload.difficulty, skillFocus: payload.skillFocus, turnIndex: payload.turnIndex },
           ts: now,
         },
@@ -177,6 +186,11 @@ export default function AgentChatPanel({
 
     const onCandidateMessage = (payload) => {
       if (payload.roomId && roomId && payload.roomId !== roomId) return;
+      // Drop any synthetic "sentiment_label" packets the server may emit —
+      // POSITIVE/NEGATIVE/NEUTRAL strings must never appear in the
+      // candidate-facing transcript. Sentiment lives in the recruiter
+      // report and per-message `meta.sentiment` only.
+      if (payload.type === 'sentiment_label') return;
       setDraftBubble(''); // final answer arrived — drop the ghost
       setMessages((prev) => {
         // Deduplicate: if we just pushed an optimistic local bubble, skip the echo.

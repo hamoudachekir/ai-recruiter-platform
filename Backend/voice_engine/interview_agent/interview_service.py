@@ -19,6 +19,17 @@ import time
 from typing import Any
 
 from .agent_prompt_builder import RoomContext, build_system_prompt
+from .agent_state_utils import (
+    REPEAT_INSTRUCTION,
+    classify_question_type,
+    depth_instruction_for_theta,
+    format_domain_coverage,
+    is_repeat_request,
+    stress_instruction_for,
+    stress_label_from_level,
+    update_domain_coverage,
+    variety_instruction,
+)
 from .irt_engine import (
     QuestionHint,
     compute_stress_level,
@@ -153,6 +164,11 @@ def _build_fresh_session(
         "started_at":       time.time(),
         "ended":            False,
         "preferred_language": preferred_language,
+        # ── New stateful fields (issues #1, #3) ───────────────────────────
+        # Existing sessions without these still load fine because every
+        # read uses .get() with a safe default.
+        "domain_coverage":     {},
+        "recent_question_types": [],  # tail of QUESTION_TYPES per agent turn
     }
 
 
@@ -282,6 +298,23 @@ async def send_message(
         session["struggle_streak"],
     )
     session["stress_level"] = stress
+    stress_label_str = stress_label_from_level(stress)
+
+    # ── Domain coverage update (issue #3) ────────────────────────────────────
+    # Cheap regex extractor — no extra LLM call. Carries forward existing
+    # mentions and grows depth_score when the answer contains trade-off
+    # vocabulary. Backward compatible: missing key → {} default.
+    session["domain_coverage"] = update_domain_coverage(
+        session.get("domain_coverage") or {},
+        candidate_message,
+    )
+
+    # ── Repeat / clarification detection (issue #5) ─────────────────────────
+    repeat_instr = REPEAT_INSTRUCTION if is_repeat_request(candidate_message) else ""
+
+    # ── Variety / rotation (issue #1) ───────────────────────────────────────
+    recent_types = session.get("recent_question_types") or []
+    variety_text = variety_instruction(recent_types)
 
     # ── Question hint from IRT engine ────────────────────────────────────────
     hint: QuestionHint | None = select_question(
@@ -306,6 +339,12 @@ async def send_message(
         turn_index        = session["turn_index"],
         preferred_language= session.get("preferred_language", "en"),
         question_hint     = hint["text"] if hint else "",
+        # ── Dynamic injections (issues #1, #2, #3, #4, #5) ─────────────────
+        stress_instruction    = stress_instruction_for(stress_label_str),
+        depth_instruction     = depth_instruction_for_theta(session["theta"]),
+        domain_coverage_block = format_domain_coverage(session["domain_coverage"]),
+        variety_block         = variety_text,
+        repeat_instruction    = repeat_instr,
     )
     system_prompt = build_system_prompt(ctx)
 
@@ -361,16 +400,32 @@ async def send_message(
     if hint is not None:
         session["used_question_ids"].append(hint["id"])
 
+    # ── Track question type for variety rotation (issue #1) ─────────────────
+    # We classify what the LLM actually produced (not what we asked it for),
+    # since the agent occasionally drifts from the requested shape. Keep
+    # only the last 5 entries to bound prompt growth.
+    qtype = classify_question_type(next_question)
+    recent_types_list = list(session.get("recent_question_types") or [])
+    recent_types_list.append(qtype)
+    session["recent_question_types"] = recent_types_list[-5:]
+
     # ── Store evaluation ─────────────────────────────────────────────────────
     session["evaluations"].append({
-        "turn_index":  session["turn_index"],
-        "score":       round(score, 3),
-        "confidence":  round(confidence, 3),
+        "turn_index":   session["turn_index"],
+        "score":        round(score, 3),
+        "confidence":   round(confidence, 3),
         "stress_level": round(stress, 3),
-        "skill_focus": skill_focus,
-        "reasoning":   reasoning,
-        "difficulty":  difficulty,
-        "fallback":    fallback_used,
+        "stress_label": stress_label_str,
+        "skill_focus":  skill_focus,
+        "reasoning":    reasoning,
+        "difficulty":   difficulty,
+        "fallback":     fallback_used,
+        "question_type": qtype,
+        # Snapshot the candidate's question + their answer here so downstream
+        # report builders can rebuild Q/A pairs even when the live message
+        # stream did not reach Mongo.
+        "question":          session["transcript"][-2]["text"] if len(session["transcript"]) >= 2 else "",
+        "candidate_answer":  candidate_message,
     })
 
     # ── Append agent turn ────────────────────────────────────────────────────
@@ -389,13 +444,15 @@ async def send_message(
         "turn_index":    session["turn_index"],
         "agent_message": next_question,
         "scoring": {
-            "score":       round(score, 3),
-            "confidence":  round(confidence, 3),
-            "theta":       round(new_theta, 3),
+            "score":        round(score, 3),
+            "confidence":   round(confidence, 3),
+            "theta":        round(new_theta, 3),
             "stress_level": round(stress, 3),
-            "reasoning":   reasoning,
-            "skill_focus": skill_focus,
-            "difficulty":  difficulty,
+            "stress_label": stress_label_str,
+            "reasoning":    reasoning,
+            "skill_focus":  skill_focus,
+            "difficulty":   difficulty,
+            "question_type": qtype,
         },
         "done": done,
     }

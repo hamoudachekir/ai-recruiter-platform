@@ -1036,6 +1036,175 @@ router.get("/:interviewId/recording", async (req, res) => {
  * Returns the stored recruiterReport (or a mock if not yet generated).
  * Only the room initiator (RH) can access this.
  */
+// ── Transcript sanitization ────────────────────────────────────────────────
+// Whisper STT hallucinates Arabic / Chinese / Russian fragments during
+// silence or noisy audio, which leaks into the "Transcript Preview" the
+// recruiter sees. We strip standalone runs of non-Latin script when the
+// interview is being conducted in English/French. The check is conservative:
+// individual non-ASCII characters mixed inside Latin words (accents, é, ï)
+// are preserved.
+const FOREIGN_SCRIPT_RUN = /[؀-ۿݐ-ݿࢠ-ࣿऀ-ॿ一-鿿぀-ヿ㐀-䶿Ѐ-ӿ]+(?:[\s\p{P}]+[؀-ۿݐ-ݿࢠ-ࣿऀ-ॿ一-鿿぀-ヿ㐀-䶿Ѐ-ӿ]+)*/gu;
+
+function sanitizeTranscriptText(text) {
+  if (!text) return "";
+  // Strip standalone non-Latin script runs (Arabic, CJK, Cyrillic, Devanagari).
+  let out = String(text).replace(FOREIGN_SCRIPT_RUN, " ");
+  // Collapse the gap left behind to a single space.
+  out = out.replace(/[ \t]{2,}/g, " ");
+  // Drop empty lines and leading whitespace.
+  out = out
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join("\n");
+  return out.trim();
+}
+
+// Skill lexicon for transcript-based detection. Mirrors the one in
+// recruiterReportService.js — kept here for the analysis_pipeline adapter
+// path so reports built via the Python pipeline still surface skills.
+const _SKILL_LEXICON = [
+  ['react', /\breact(?:\.?js)?\b/i],
+  ['vue', /\bvue(?:\.?js)?\b/i],
+  ['angular', /\bangular(?:\.?js)?\b/i],
+  ['next.js', /\bnext\.?js\b/i],
+  ['node.js', /\bnode(?:\.?js)?\b/i],
+  ['express', /\bexpress(?:\.?js)?\b/i],
+  ['nestjs', /\bnest(?:\.?js)?\b/i],
+  ['javascript', /\bjavascript\b|\bjs\b/i],
+  ['typescript', /\btypescript\b|\bts\b/i],
+  ['python', /\bpython\b/i],
+  ['java', /\bjava\b(?!script)/i],
+  ['c#', /\bc#|c sharp\b/i],
+  ['c++', /\bc\+\+|cpp\b/i],
+  ['go', /\bgolang\b/i],
+  ['rust', /\brust\b/i],
+  ['php', /\bphp\b/i],
+  ['mongodb', /\bmongo\s?db\b|\bmongo\b/i],
+  ['postgresql', /\bpostgres(?:ql)?\b/i],
+  ['mysql', /\bmysql\b/i],
+  ['redis', /\bredis\b/i],
+  ['sql', /\bsql\b/i],
+  ['aws', /\baws\b/i],
+  ['azure', /\bazure\b/i],
+  ['gcp', /\bgcp\b/i],
+  ['docker', /\bdocker\b/i],
+  ['kubernetes', /\bkubernetes\b|\bk8s\b/i],
+  ['git', /\bgit(?:hub)?\b/i],
+  ['rest', /\brest(?:ful)?\b/i],
+  ['graphql', /\bgraphql\b/i],
+  ['microservices', /\bmicro\s?services?\b/i],
+  ['agile', /\bagile\b/i],
+  ['scrum', /\bscrum\b/i],
+  ['machine learning', /\bmachine learning\b|\bml\b/i],
+  ['django', /\bdjango\b/i],
+  ['flask', /\bflask\b/i],
+  ['fastapi', /\bfastapi\b/i],
+  ['tailwind', /\btailwind\b/i],
+  ['html', /\bhtml5?\b/i],
+  ['css', /\bcss3?\b|\bsass\b|\bscss\b/i],
+];
+
+function _extractSkillsFromText(text) {
+  const t = String(text || '');
+  if (!t) return [];
+  const found = new Set();
+  for (const [name, rx] of _SKILL_LEXICON) {
+    if (rx.test(t)) found.add(name);
+  }
+  return [...found];
+}
+
+// Pull a Q/A pair list from whichever transcript source is populated.
+function _resolveTurnsFromRoom(callRoom) {
+  if (!callRoom) return [];
+  const live = Array.isArray(callRoom.messages) ? callRoom.messages : [];
+  if (live.length > 0) return live;
+
+  const snap = callRoom.agentSnapshot && typeof callRoom.agentSnapshot === 'object'
+    ? callRoom.agentSnapshot
+    : null;
+  const transcript = Array.isArray(snap?.transcript) ? snap.transcript : [];
+  if (transcript.length > 0) {
+    return transcript.map((t) => ({ role: t.role, text: t.text }));
+  }
+  const evals = Array.isArray(snap?.evaluations) ? snap.evaluations : [];
+  if (evals.length > 0) {
+    const out = [];
+    for (const e of evals) {
+      const q = String(e.question || e.prompt || '').trim();
+      const a = String(e.candidate_answer || e.answer || e.response || '').trim();
+      if (q) out.push({ role: 'agent', text: q });
+      if (a) out.push({ role: 'candidate', text: a });
+    }
+    return out;
+  }
+  return [];
+}
+
+function _buildQuestionEvaluationsFromRoom(callRoom) {
+  const snap = callRoom?.agentSnapshot || {};
+  const agentEvals = Array.isArray(snap.evaluations) ? snap.evaluations : [];
+
+  if (agentEvals.length > 0) {
+    return agentEvals.map((e, idx) => {
+      const questionText = String(e.question || e.prompt || '').trim();
+      const answerText = String(
+        e.candidate_answer || e.answer || e.response || '',
+      ).trim();
+      const wordCount = answerText.split(/\s+/).filter(Boolean).length;
+      const rawScore = Number(e.score);
+      const score10 = Number.isFinite(rawScore)
+        ? Math.max(1, Math.min(10, Math.round(rawScore <= 1 ? rawScore * 10 : rawScore)))
+        : Math.max(1, Math.min(10, Math.round(2 + wordCount / 25)));
+      return {
+        questionId: `Q${idx + 1}`,
+        question: questionText,
+        answer: answerText,
+        category: String(e.category || e.skill_focus || 'General'),
+        score: score10,
+        feedback: String(e.feedback || e.reasoning || ''),
+        detectedSkills: Array.isArray(e.detected_skills)
+          ? e.detected_skills.map(String)
+          : _extractSkillsFromText(answerText),
+        answerQuality:
+          score10 >= 8 ? 'good' : score10 >= 5 ? 'average' : 'weak',
+      };
+    });
+  }
+
+  // Pair up agent → candidate messages from whichever source is available.
+  const turns = _resolveTurnsFromRoom(callRoom);
+  if (turns.length === 0) return [];
+
+  const pairs = [];
+  let lastAgent = null;
+  let idx = 0;
+  for (const m of turns) {
+    if (m.role === 'agent') {
+      lastAgent = m;
+    } else if (m.role === 'candidate' && lastAgent) {
+      idx += 1;
+      const q = String(lastAgent.text || '').trim();
+      const a = String(m.text || '').trim();
+      const wordCount = a.split(/\s+/).filter(Boolean).length;
+      const score = Math.max(1, Math.min(10, Math.round(2 + wordCount / 25)));
+      pairs.push({
+        questionId: `Q${idx}`,
+        question: q,
+        answer: a,
+        category: 'General',
+        score,
+        feedback: '',
+        detectedSkills: _extractSkillsFromText(a),
+        answerQuality: score >= 8 ? 'good' : score >= 5 ? 'average' : 'weak',
+      });
+      lastAgent = null;
+    }
+  }
+  return pairs;
+}
+
 function _adaptAnalysisReport(ar, callRoom) {
   const tech = ar.technicalEvaluation || {};
   const hr = ar.hrEvaluation || {};
@@ -1044,6 +1213,85 @@ function _adaptAnalysisReport(ar, callRoom) {
   const recDecision = callRoom?.recruiterDecision || null;
   const reportQuality = ar.reportQuality || {};
   const recruiterDecisionSummary = ar.recruiterDecisionSummary || null;
+
+  // ── Build derived data from the raw room ────────────────────────────────
+  const questionEvaluations = _buildQuestionEvaluationsFromRoom(callRoom);
+
+  // Combine all candidate-side text for skill scanning.
+  const turns = _resolveTurnsFromRoom(callRoom);
+  const candidateText = turns
+    .filter((t) => t.role === 'candidate')
+    .map((t) => String(t.text || ''))
+    .concat(questionEvaluations.map((q) => String(q.answer || '')))
+    .join(' \n ');
+
+  const jobSkills = Array.isArray(callRoom?.job?.skills)
+    ? callRoom.job.skills.map((s) => String(s).toLowerCase().trim()).filter(Boolean)
+    : [];
+  const detectedSkills = [
+    ...new Set(
+      [
+        ...questionEvaluations.flatMap((q) => q.detectedSkills || []),
+        ..._extractSkillsFromText(candidateText),
+      ]
+        .map((s) => String(s).toLowerCase().trim())
+        .filter(Boolean),
+    ),
+  ];
+  const matchedSkills = detectedSkills.filter((s) => jobSkills.includes(s));
+  const missingSkills = jobSkills.filter(
+    (s) => !detectedSkills.some((d) => d.includes(s) || s.includes(d)),
+  );
+  const strongSkills = questionEvaluations
+    .filter((q) => q.answerQuality === 'good' && q.detectedSkills?.length > 0)
+    .flatMap((q) => q.detectedSkills);
+  const weakSkills = questionEvaluations
+    .filter((q) => q.answerQuality === 'weak' && q.detectedSkills?.length > 0)
+    .flatMap((q) => q.detectedSkills);
+
+  // ── Communication sub-metrics (clarity, relevance, …) ───────────────────
+  const candidateMsgs = turns.filter((t) => t.role === 'candidate');
+  const totalWords = candidateMsgs.reduce(
+    (sum, m) => sum + String(m.text || '').split(/\s+/).filter(Boolean).length,
+    0,
+  );
+  const avgWords = candidateMsgs.length > 0
+    ? Math.round(totalWords / candidateMsgs.length)
+    : 0;
+  const goodAnswers = questionEvaluations.filter((q) => q.answerQuality === 'good').length;
+  const totalAnswers = questionEvaluations.length || 1;
+  const goodRatio = goodAnswers / totalAnswers;
+
+  const clarityLabel =
+    avgWords >= 40 && goodRatio >= 0.5 ? 'Clear and articulate' :
+    avgWords >= 20 ? 'Generally clear' :
+    avgWords > 0 ? 'Clarity needs improvement' : 'Insufficient transcript';
+  const relevanceLabel =
+    goodRatio >= 0.7 ? 'Highly relevant answers' :
+    goodRatio >= 0.4 ? 'Mostly relevant' :
+    candidateMsgs.length > 0 ? 'Some answers need more focus' : 'Insufficient transcript';
+  const structureLabel =
+    goodRatio >= 0.7 ? 'Well-structured responses' :
+    candidateMsgs.length > 0 ? 'Responses could benefit from better structure' : 'Insufficient transcript';
+  const completenessLabel =
+    avgWords >= 60 ? 'Comprehensive answers provided' :
+    avgWords >= 30 ? 'Adequate detail in most answers' :
+    avgWords > 0 ? 'Answers were brief' : 'Insufficient transcript';
+  const examplesLabel =
+    goodAnswers >= 2 ? 'Supported answers with relevant examples' :
+    candidateMsgs.length > 0 ? 'Limited use of concrete examples' : 'Insufficient transcript';
+
+  // ── Aggregate YOLO + integrity event counts from the raw events ─────────
+  const integrityEvents = Array.isArray(callRoom?.integrityEvents)
+    ? callRoom.integrityEvents
+    : [];
+  const yoloSum = callRoom?.visionMonitoring?.yoloSummary || {};
+  const countEvents = (type) => integrityEvents.filter((e) => e.type === type).length;
+  const phoneCount = yoloSum.phoneDetections || countEvents('PHONE_VISIBLE');
+  const referenceCount = yoloSum.bookDetections || countEvents('REFERENCE_MATERIAL_VISIBLE');
+  const screenCount = yoloSum.screenDetections || countEvents('SCREEN_DEVICE_VISIBLE');
+  const multiplePeopleCount =
+    yoloSum.personCountIssues || countEvents('MULTIPLE_PEOPLE');
 
   const finalRec =
     typeof ar.finalRecommendation === "object" && ar.finalRecommendation
@@ -1119,49 +1367,97 @@ function _adaptAnalysisReport(ar, callRoom) {
       hrScore: hr.score ?? null,
       integrityScore: ar.integrityScore ?? null,
     },
-    questionEvaluations: [],
+    questionEvaluations,
     technicalAnalysis: {
       score: tech.score ?? null,
       source: tech.source || "unavailable",
       confidence: tech.confidence || "low",
       summary: tech.summary || "",
       explanation: tech.explanation || "",
-      strengths: tech.strengths || [],
-      weaknesses: tech.weaknesses || [],
+      detectedSkills,
+      matchedSkills,
+      missingSkills,
+      strengths:
+        strongSkills.length > 0
+          ? [...new Set(strongSkills)]
+          : (tech.strengths && tech.strengths.length > 0
+              ? tech.strengths
+              : detectedSkills.slice(0, 5)),
+      weaknesses:
+        weakSkills.length > 0
+          ? [...new Set(weakSkills)]
+          : tech.weaknesses || [],
     },
     communicationAnalysis: {
       transcriptionAvailable: audio.transcriptionAvailable || false,
       longSilenceEvents: audio.longSilenceEvents || 0,
-      summary: ar.transcriptSummary || "",
+      summary: sanitizeTranscriptText(ar.transcriptSummary || ""),
       transcriptPreview: ar.transcript?.fullText
-        ? String(ar.transcript.fullText).slice(0, 700)
+        ? sanitizeTranscriptText(String(ar.transcript.fullText)).slice(0, 700)
         : "",
       score: hr.score ?? null,
       source: hr.source || "unavailable",
       confidence: hr.confidence || "low",
+      clarity: clarityLabel,
+      relevance: relevanceLabel,
+      structure: structureLabel,
+      completeness: completenessLabel,
+      examplesQuality: examplesLabel,
     },
     // Field names match what VisionIntegritySummary.jsx destructures
     visionIntegrityReport: {
       riskLevel,
       facePresencePercentage: Math.round(facePresencePct * 10) / 10,
       lookingAwayTotalSeconds: 0,
-      multiplePeopleEvents: hasMultipleFaces ? 1 : 0,
-      phoneDetections: 0,
-      referenceMaterialDetections: 0,
-      additionalScreenDetections: 0,
+      multiplePeopleEvents:
+        multiplePeopleCount || (hasMultipleFaces ? 1 : 0),
+      phoneDetections: phoneCount,
+      referenceMaterialDetections: referenceCount,
+      additionalScreenDetections: screenCount,
       cameraBlockedEvents: absenceCount,
       lightingQuality: (vision.lightingIssues || 0) > 0 ? "Poor" : "Good",
       tabSwitchCount: 0,
       fullscreenExitCount: 0,
-      summary: `Face visible ${facePresencePct.toFixed(1)}% of interview. ${absenceCount} absence event(s) detected.${hasMultipleFaces ? " Multiple faces were detected." : ""}`,
+      summary: `Face visible ${facePresencePct.toFixed(1)}% of interview. ${absenceCount} absence event(s) detected.${
+        hasMultipleFaces ? " Multiple faces were detected." : ""
+      }${phoneCount > 0 ? ` ${phoneCount} phone detection(s).` : ""}${
+        referenceCount > 0 ? ` ${referenceCount} reference material detection(s).` : ""
+      }`,
       flaggedMoments,
     },
-    aiInterviewerNotes: {
-      summary: ar.transcriptSummary || "",
-      strengths: ar.transcript?.fullText ? tech.strengths || [] : [],
-      weaknesses: ar.transcript?.fullText ? tech.weaknesses || [] : [],
-      recommendedFollowUpQuestions: [],
-    },
+    aiInterviewerNotes: (() => {
+      const followUps = [];
+      if (missingSkills.length > 0) {
+        followUps.push(
+          `Ask the candidate to explain hands-on experience with ${missingSkills.slice(0, 3).join(', ')}.`,
+        );
+      }
+      const weakCats = [...new Set(
+        questionEvaluations.filter((q) => q.answerQuality === 'weak').map((q) => q.category),
+      )];
+      for (const c of weakCats.slice(0, 2)) {
+        followUps.push(`Consider a follow-up question on "${c}" to assess depth.`);
+      }
+      if (followUps.length === 0 && questionEvaluations.length > 0) {
+        followUps.push('Review the transcript and recording before deciding.');
+      }
+      const summary = ar.transcriptSummary
+        || (questionEvaluations.length > 0
+          ? `Candidate answered ${questionEvaluations.length} question(s), ${goodAnswers} at high quality. Skills surfaced: ${detectedSkills.slice(0, 6).join(', ') || 'none detected'}.`
+          : 'No transcript was captured for AI analysis.');
+      return {
+        summary,
+        strengths:
+          strongSkills.length > 0
+            ? [...new Set(strongSkills)].slice(0, 5)
+            : detectedSkills.slice(0, 5),
+        weaknesses:
+          weakSkills.length > 0
+            ? [...new Set(weakSkills)].slice(0, 5)
+            : missingSkills.slice(0, 5),
+        recommendedFollowUpQuestions: followUps,
+      };
+    })(),
     transcript: ar.transcript || null,
     transcriptSummary: ar.transcriptSummary || "",
     evidence: ar.evidence || [],

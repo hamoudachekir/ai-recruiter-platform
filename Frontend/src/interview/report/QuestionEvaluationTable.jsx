@@ -28,7 +28,12 @@ export default function QuestionEvaluationTable({ evaluations }) {
   if (!Array.isArray(evaluations) || evaluations.length === 0) {
     return (
       <div className="qet-empty">
-        <p>No question evaluations available. This may be because the interview transcript was not captured.</p>
+        <p>No question evaluations available yet.</p>
+        <p className="qet-empty__hint">
+          If the interview just ended, click <strong>🔄 Regenerate</strong> at
+          the top of the report — the conversation transcript is rebuilt from
+          the AI agent snapshot or speech transcription on each generation.
+        </p>
       </div>
     );
   }

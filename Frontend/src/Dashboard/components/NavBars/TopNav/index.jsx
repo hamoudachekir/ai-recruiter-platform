@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Search, Bell, Settings, LogOut, X, LayoutDashboard, Users, Building2, Briefcase, CalendarDays } from "lucide-react";
 import "../../../AdminDashboard.css";
 import "./TopNav.css";
-import "./TopNav.css";
 
 const PAGE_TITLES = {
   "/dashboard":                   "Overview",

@@ -198,6 +198,13 @@ class RoomContext:
     turn_index:       int                = 0
     preferred_language: str              = "en"
     question_hint:    str                = ""
+    # ── Dynamic injections (see agent_state_utils.py) ─────────────────────
+    # All optional; default to empty so existing callers keep working.
+    stress_instruction:     str = ""    # warm-up / pivot text based on stress label
+    depth_instruction:      str = ""    # theta → question depth band
+    domain_coverage_block:  str = ""    # pretty-printed skill map
+    variety_block:          str = ""    # "don't repeat the last question shape"
+    repeat_instruction:     str = ""    # set when candidate asked to repeat
 
 
 # ── Prompt builder ─────────────────────────────────────────────────────────────
@@ -264,6 +271,33 @@ def build_system_prompt(ctx: RoomContext) -> str:
     if comfort_text:
         comfort_block = f"\nCANDIDATE STRESS DETECTED — use this comfort phrase naturally:\n\"{comfort_text}\"\n"
 
+    # ── Dynamic stress-routing block (issue #2) ─────────────────────────────
+    # Always overrides the legacy comfort_block when present, since it carries
+    # the more specific instruction tied to the current stress label.
+    stress_block = ""
+    if ctx.stress_instruction:
+        stress_block = f"\nEMOTIONAL ROUTING:\n{ctx.stress_instruction}\n"
+
+    # ── Depth band (issue #4) ───────────────────────────────────────────────
+    depth_block = ""
+    if ctx.depth_instruction:
+        depth_block = f"\n{ctx.depth_instruction}\n"
+
+    # ── Domain state (issue #3) ─────────────────────────────────────────────
+    coverage_block = ""
+    if ctx.domain_coverage_block:
+        coverage_block = (
+            "\nDOMAIN COVERAGE SO FAR (skills already covered — do NOT re-ask "
+            "these basics; explore gaps or push deeper):\n"
+            f"{ctx.domain_coverage_block}\n"
+        )
+
+    # ── Variety / rotation (issue #1) ───────────────────────────────────────
+    variety_block = f"\n{ctx.variety_block}\n" if ctx.variety_block else ""
+
+    # ── Repeat-request handling (issue #5) ──────────────────────────────────
+    repeat_block = f"\nREPEAT REQUEST:\n{ctx.repeat_instruction}\n" if ctx.repeat_instruction else ""
+
     # ── Language instruction ─────────────────────────────────────────────────
     lang_line = "Respond in French." if ctx.preferred_language.startswith("fr") else "Respond in English."
 
@@ -286,6 +320,11 @@ def build_system_prompt(ctx: RoomContext) -> str:
 
         f"{session_block}\n"
 
+        f"{depth_block}"
+        f"{coverage_block}"
+        f"{variety_block}"
+        f"{stress_block}"
+        f"{repeat_block}"
         f"{hint_block}"
         f"{comfort_block}\n"
 

@@ -214,9 +214,96 @@ function calculateScores(room, visionMetrics) {
 
 // ─── Question evaluations ─────────────────────────────────────────────────────
 
+// Build a turn-by-turn message list from whichever sources are populated on
+// the room. Saving live messages is best-effort and can drop entries on
+// network blips or short sessions, so we also fall back to the interview
+// agent's own snapshot transcript and to STT segments as a last resort.
+function resolveConversationMessages(room) {
+  const live = Array.isArray(room.messages) ? room.messages : [];
+  if (live.length > 0) return live;
+
+  const snapshot = room.agentSnapshot && typeof room.agentSnapshot === 'object'
+    ? room.agentSnapshot
+    : null;
+  const snapshotTranscript = Array.isArray(snapshot?.transcript)
+    ? snapshot.transcript
+    : [];
+  if (snapshotTranscript.length > 0) {
+    return snapshotTranscript.map((t) => ({
+      role: t.role,
+      text: t.text,
+      timestamp: t.ts ? new Date(Number(t.ts) * 1000) : undefined,
+    }));
+  }
+
+  // Last-resort: rebuild Q/A pairs from the agent's evaluation list. The
+  // agent stores { question, candidate_answer, score, ... } per turn even
+  // when the live message stream didn't reach Mongo.
+  const evals = Array.isArray(snapshot?.evaluations) ? snapshot.evaluations : [];
+  if (evals.length > 0) {
+    const synthetic = [];
+    for (const e of evals) {
+      const q = str(e.question || e.prompt || '').trim();
+      const a = str(e.candidate_answer || e.answer || e.response || '').trim();
+      if (q) synthetic.push({ role: 'agent', text: q });
+      if (a) synthetic.push({ role: 'candidate', text: a });
+    }
+    if (synthetic.length > 0) return synthetic;
+  }
+
+  // STT segments don't carry speaker roles, so we can't reliably split them
+  // into Q/A pairs — but if it's the only thing we have, surface the whole
+  // transcript as a single candidate turn so the panel renders something
+  // useful instead of an empty state.
+  const segments = Array.isArray(room?.transcription?.segments)
+    ? room.transcription.segments
+    : [];
+  const sttText = segments.map((s) => str(s.text)).filter(Boolean).join(' ').trim();
+  if (sttText) {
+    return [
+      { role: 'agent', text: 'Interview transcript (speaker roles not separated)' },
+      { role: 'candidate', text: sttText },
+    ];
+  }
+
+  return [];
+}
+
 function buildQuestionEvaluations(room) {
-  const messages = Array.isArray(room.messages) ? room.messages : [];
+  const messages = resolveConversationMessages(room);
   if (messages.length === 0) return [];
+
+  // If the interview agent already produced per-turn evaluations, prefer
+  // those — they include the agent's own scoring/feedback rather than the
+  // word-count heuristic below.
+  const agentEvals = Array.isArray(room.agentSnapshot?.evaluations)
+    ? room.agentSnapshot.evaluations
+    : [];
+  if (agentEvals.length > 0) {
+    return agentEvals.map((e, idx) => {
+      const questionText = str(e.question || e.prompt || '').trim();
+      const answerText = str(e.candidate_answer || e.answer || e.response || '').trim();
+      const wordCount = answerText.split(/\s+/).filter(Boolean).length;
+      const score10 = Math.max(
+        1,
+        Math.min(10, Math.round((Number(e.score) || 0) * 10)),
+      );
+      return {
+        questionId: `Q${idx + 1}`,
+        question: questionText,
+        answer: answerText,
+        category: str(e.category || e.skill_focus || 'General'),
+        score: score10,
+        feedback: str(e.feedback || e.reasoning || ''),
+        detectedSkills: Array.isArray(e.detected_skills)
+          ? e.detected_skills.map(String)
+          : [],
+        answerQuality:
+          score10 >= 8 ? 'good' : score10 >= 5 ? 'average' : 'weak',
+        wordCount,
+      };
+    });
+  }
 
   const pairs = [];
   let lastAgentMsg = null;
@@ -280,28 +367,158 @@ function buildQuestionEvaluations(room) {
 
 // ─── Technical skills analysis ────────────────────────────────────────────────
 
+// Broad technology lexicon used to scan transcripts. Each entry is a regex
+// fragment paired with the canonical skill name. The regex is matched
+// case-insensitively against the candidate's combined transcript.
+const SKILL_LEXICON = [
+  // Frontend frameworks / libs
+  ['react', /\breact(?:\.?js)?\b/i],
+  ['vue', /\bvue(?:\.?js)?\b/i],
+  ['angular', /\bangular(?:\.?js)?\b/i],
+  ['next.js', /\bnext\.?js\b/i],
+  ['svelte', /\bsvelte\b/i],
+  ['redux', /\bredux\b/i],
+  ['tailwind', /\btailwind\b/i],
+  ['html', /\bhtml5?\b/i],
+  ['css', /\bcss3?\b|\bsass\b|\bscss\b/i],
+  // Languages
+  ['javascript', /\bjavascript\b|\bjs\b/i],
+  ['typescript', /\btypescript\b|\bts\b/i],
+  ['python', /\bpython\b/i],
+  ['java', /\bjava\b(?!script)/i],
+  ['c#', /\bc#|c sharp\b/i],
+  ['c++', /\bc\+\+|cpp\b/i],
+  ['go', /\bgolang\b|\bgo lang\b/i],
+  ['rust', /\brust\b/i],
+  ['php', /\bphp\b/i],
+  ['ruby', /\bruby\b/i],
+  ['kotlin', /\bkotlin\b/i],
+  ['swift', /\bswift\b/i],
+  // Backend / runtime
+  ['node.js', /\bnode(?:\.?js)?\b/i],
+  ['express', /\bexpress(?:\.?js)?\b/i],
+  ['nestjs', /\bnest(?:\.?js)?\b/i],
+  ['django', /\bdjango\b/i],
+  ['flask', /\bflask\b/i],
+  ['fastapi', /\bfastapi\b|fast api\b/i],
+  ['spring', /\bspring(?: boot)?\b/i],
+  ['rails', /\bruby on rails\b|\brails\b/i],
+  ['laravel', /\blaravel\b/i],
+  ['.net', /\.net\b|\bdotnet\b/i],
+  // Databases
+  ['mongodb', /\bmongo\s?db\b|\bmongo\b/i],
+  ['postgresql', /\bpostgres(?:ql)?\b/i],
+  ['mysql', /\bmysql\b/i],
+  ['redis', /\bredis\b/i],
+  ['elasticsearch', /\belastic\s?search\b/i],
+  ['sql', /\bsql\b/i],
+  ['nosql', /\bno\s?sql\b/i],
+  ['sqlite', /\bsqlite\b/i],
+  // Cloud / infra
+  ['aws', /\baws\b|amazon web services\b/i],
+  ['azure', /\bazure\b/i],
+  ['gcp', /\bgcp\b|google cloud\b/i],
+  ['docker', /\bdocker\b/i],
+  ['kubernetes', /\bkubernetes\b|\bk8s\b/i],
+  ['terraform', /\bterraform\b/i],
+  ['nginx', /\bnginx\b/i],
+  ['linux', /\blinux\b|\bubuntu\b|\bdebian\b/i],
+  // CI/CD / version control / tooling
+  ['git', /\bgit(?:hub)?\b/i],
+  ['gitlab', /\bgitlab\b/i],
+  ['jenkins', /\bjenkins\b/i],
+  ['ci/cd', /\bci\s*\/?\s*cd\b/i],
+  // Concepts / methodologies
+  ['rest', /\brest(?:ful)?\s*api\b|\brest\b/i],
+  ['graphql', /\bgraphql\b/i],
+  ['websockets', /\bweb\s?sockets?\b/i],
+  ['microservices', /\bmicro\s?services?\b/i],
+  ['agile', /\bagile\b/i],
+  ['scrum', /\bscrum\b/i],
+  ['tdd', /\btdd\b|test driven\b/i],
+  // AI / Data
+  ['machine learning', /\bmachine learning\b|\bml\b/i],
+  ['deep learning', /\bdeep learning\b/i],
+  ['nlp', /\bnlp\b|natural language\b/i],
+  ['tensorflow', /\btensor\s?flow\b/i],
+  ['pytorch', /\bpy\s?torch\b/i],
+  ['pandas', /\bpandas\b/i],
+  ['numpy', /\bnumpy\b/i],
+];
+
+function extractSkillsFromText(text) {
+  const t = str(text);
+  if (!t) return [];
+  const found = new Set();
+  for (const [name, rx] of SKILL_LEXICON) {
+    if (rx.test(t)) found.add(name);
+  }
+  return [...found];
+}
+
 function buildTechnicalAnalysis(room, questionEvaluations) {
   const job = room.job || {};
-  const jobSkills = Array.isArray(job.skills) ? job.skills.map(s => String(s).toLowerCase()) : [];
+  const jobSkills = Array.isArray(job.skills)
+    ? job.skills.map(s => String(s).toLowerCase().trim()).filter(Boolean)
+    : [];
+
+  // Pull skills from three sources so we don't depend on the heuristic
+  // pair-by-pair pass alone:
+  //   1. each evaluation's detectedSkills
+  //   2. the interview agent's own per-turn skill_focus / detected_skills
+  //   3. a full-transcript regex scan over the candidate side
+  const fromEvals = questionEvaluations.flatMap(q =>
+    Array.isArray(q.detectedSkills) ? q.detectedSkills : []
+  );
+
+  const agentEvals = Array.isArray(room.agentSnapshot?.evaluations)
+    ? room.agentSnapshot.evaluations
+    : [];
+  const fromAgent = agentEvals.flatMap(e => {
+    const list = [];
+    if (Array.isArray(e.detected_skills)) list.push(...e.detected_skills.map(String));
+    if (e.skill_focus) list.push(String(e.skill_focus));
+    return list;
+  });
+
+  const candidateText = (Array.isArray(room.messages) ? room.messages : [])
+    .filter(m => m.role === 'candidate')
+    .map(m => str(m.text))
+    .concat(agentEvals.map(e => str(e.candidate_answer || e.answer || '')))
+    .concat(
+      Array.isArray(room?.transcription?.segments)
+        ? room.transcription.segments.map(s => str(s.text))
+        : []
+    )
+    .join(' \n ');
+  const fromTranscript = extractSkillsFromText(candidateText);
 
   const allDetected = [...new Set(
-    questionEvaluations.flatMap(q => q.detectedSkills)
+    [...fromEvals, ...fromAgent, ...fromTranscript]
+      .map(s => String(s).toLowerCase().trim())
+      .filter(Boolean)
   )];
 
   const matchedSkills = allDetected.filter(s => jobSkills.includes(s));
-  const missingSkills = jobSkills.filter(s => !allDetected.includes(s));
+  const missingSkills = jobSkills.filter(s => !allDetected.some(d => d.includes(s) || s.includes(d)));
   const strongSkills = questionEvaluations
-    .filter(q => q.answerQuality === 'good' && q.detectedSkills.length > 0)
+    .filter(q => q.answerQuality === 'good' && Array.isArray(q.detectedSkills) && q.detectedSkills.length > 0)
     .flatMap(q => q.detectedSkills);
   const weakSkills = questionEvaluations
-    .filter(q => q.answerQuality === 'weak' && q.detectedSkills.length > 0)
+    .filter(q => q.answerQuality === 'weak' && Array.isArray(q.detectedSkills) && q.detectedSkills.length > 0)
     .flatMap(q => q.detectedSkills);
+
+  // If we still have no strong/weak attribution, fall back to listing the
+  // detected skills as "strong" so the dashboard isn't empty.
+  const strengths = strongSkills.length > 0
+    ? [...new Set(strongSkills)]
+    : allDetected.slice(0, 5);
 
   return {
     detectedSkills: allDetected,
     matchedSkills: [...new Set(matchedSkills)],
     missingSkills: [...new Set(missingSkills)],
-    strengths: [...new Set(strongSkills)],
+    strengths,
     weaknesses: [...new Set(weakSkills)],
   };
 }

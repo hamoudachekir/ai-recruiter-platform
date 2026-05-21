@@ -502,20 +502,55 @@ router.post("/by-slug/:slug/join", verifyToken, async (req, res) => {
 
 const extractReportMetrics = (callRoom, analysisReport) => {
   const ar = analysisReport || {};
-  const tech = ar.technicalEvaluation || {};
-  const hr = ar.hrEvaluation || {};
-  const audio = ar.audioAnalysis || {};
-  const integrity = ar.integrityScore;
   const recruiterReport = callRoom.recruiterReport || {};
+  // ── Fall through THREE sources for each sub-block, in priority order ──
+  //   1. the analysis-pipeline doc in interview_final_reports
+  //   2. the inline recruiterReport saved on the CallRoom itself
+  //   3. the scoreBreakdown rollup
+  // Seed scripts write into recruiterReport.technicalEvaluation only — the
+  // analysis pipeline writes into interview_final_reports. Real interviews
+  // can land in either, so the comparison engine has to inspect both.
+  const tech = ar.technicalEvaluation
+    || recruiterReport.technicalEvaluation
+    || {};
+  const hr = ar.hrEvaluation
+    || recruiterReport.hrEvaluation
+    || {};
+  const audio = ar.audioAnalysis || {};
+  const integrity = ar.integrityScore ?? recruiterReport.integrityScore;
   const breakdown = recruiterReport.scoreBreakdown || ar.scoreBreakdown || {};
 
+  // Last-resort theta derivation: when neither source carries a real theta
+  // value, approximate it from the technical score so the comparison LLM
+  // doesn't see a 0 and write "Unknown technical theta" in the gaps.
+  // technicalScore is on a 0-100 scale → map to ~[-2, +2] theta range.
+  const techScoreForDerivation = tech.score ?? breakdown.technicalScore ?? null;
+  const derivedTheta = techScoreForDerivation != null
+    ? Number(((Number(techScoreForDerivation) - 50) / 25).toFixed(2))
+    : null;
+
+  // Last-resort resilience derivation: blend hr + answerCompleteness if
+  // neither source provides a real resilience index.
+  const hrScoreForDerivation = hr.score ?? breakdown.hrScore ?? null;
+  const completenessForDerivation =
+    tech.answerCompleteness ?? breakdown.answerCompleteness ?? ar.answerCompleteness ?? null;
+  const derivedResilience =
+    hrScoreForDerivation != null && completenessForDerivation != null
+      ? Math.round(Number(hrScoreForDerivation) * 0.6 + Number(completenessForDerivation) * 0.4)
+      : null;
+
   return {
-    technicalTheta: tech.theta ?? tech.thetaScore ?? null,
+    technicalTheta:
+      tech.theta ?? tech.thetaScore ?? recruiterReport.technicalTheta ?? derivedTheta,
     technicalScore: tech.score ?? breakdown.technicalScore ?? null,
     hrScore: hr.score ?? breakdown.hrScore ?? null,
     integrityScore: integrity ?? breakdown.integrityScore ?? null,
     resilienceIndex:
-      tech.resilienceIndex ?? hr.resilienceIndex ?? ar.resilienceIndex ?? null,
+      tech.resilienceIndex
+      ?? hr.resilienceIndex
+      ?? ar.resilienceIndex
+      ?? recruiterReport.resilienceIndex
+      ?? derivedResilience,
     sentimentScore:
       callRoom.transcription?.overallSentiment?.score ??
       audio.sentimentScore ??
@@ -1037,8 +1072,15 @@ router.delete("/:id/select-winner", verifyToken, async (req, res) => {
   }
 });
 
-// GET /api/job-rooms/:id/comparison/pdf — export latest ranking as PDF
-router.get("/:id/comparison/pdf", verifyToken, async (req, res) => {
+// Allow token in query-string so the browser can download the PDF directly
+// (avoids CORS preflight for XHR/fetch requests with Authorization header).
+router.get("/:id/comparison/pdf", (req, res, next) => {
+  const queryToken = String(req.query.token || "").trim();
+  if (queryToken && !req.headers.authorization) {
+    req.headers.authorization = `Bearer ${queryToken}`;
+  }
+  next();
+}, verifyToken, async (req, res) => {
   try {
     const room = await JobInterviewRoom.findById(req.params.id).populate(
       "job",
@@ -1060,13 +1102,15 @@ router.get("/:id/comparison/pdf", verifyToken, async (req, res) => {
         .json({ message: "No ready comparison report to export" });
     }
 
-    const { buildComparisonPdf } = require("../services/comparisonPdfService");
+    const { buildComparisonPdfBuffer } = require("../services/comparisonPdfService");
+    const pdfBuffer = await buildComparisonPdfBuffer({ room, comparison });
     res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", pdfBuffer.length);
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="comparison-${room.slug}.pdf"`,
+      `attachment; filename="comparison-${room.slug || room._id}.pdf"`,
     );
-    buildComparisonPdf({ room, comparison }, res);
+    res.send(pdfBuffer);
   } catch (error) {
     console.error("Comparison PDF error:", error);
     if (!res.headersSent) {

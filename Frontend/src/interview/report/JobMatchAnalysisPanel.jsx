@@ -28,12 +28,12 @@ export default function JobMatchAnalysisPanel({ report, job }) {
         <FitMetric
           label="Technical Fit"
           score={technical.score || 0}
-          grade={technical.grade || 'N/A'}
+          grade={technical.grade || gradeFromScore(technical.score)}
         />
         <FitMetric
           label="Communication Fit"
           score={hr.score || 0}
-          grade={hr.grade || 'N/A'}
+          grade={hr.grade || gradeFromScore(hr.score)}
         />
       </div>
 
@@ -147,4 +147,18 @@ function formatFitLabel(fitLevel) {
     unknown: 'Unknown',
   };
   return labels[fitLevel] || 'Unknown';
+}
+
+// Derive a short descriptive label from a 0-100 score when the backend
+// didn't populate a grade. Mirrors the standard A/B/C bands but uses words
+// the recruiter can read at a glance.
+function gradeFromScore(score) {
+  const n = Number(score);
+  if (!Number.isFinite(n) || n <= 0) return 'N/A';
+  if (n >= 90) return 'Excellent';
+  if (n >= 80) return 'Strong';
+  if (n >= 70) return 'Good';
+  if (n >= 60) return 'Fair';
+  if (n >= 40) return 'Weak';
+  return 'Poor';
 }
