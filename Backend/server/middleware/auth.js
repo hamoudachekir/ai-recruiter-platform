@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { UserModel } = require('../models/user');
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY || process.env.JWT_SECRET;
 
@@ -35,4 +36,37 @@ const verifyToken = (req, res, next) => {
     }
 };
 
-module.exports = { verifyToken };
+/**
+ * Require the caller to have role = 'ENTERPRISE'.
+ *
+ * The legacy jwt.sign calls in this codebase signed { id, email } only — no
+ * role field — so older tokens (and any token issued before the role-in-JWT
+ * change) won't have req.user.role set. We fall back to a DB lookup in that
+ * case so existing sessions keep working without forcing a re-login.
+ *
+ * Must run after verifyToken so req.user._id is populated.
+ */
+const requireEnterprise = async (req, res, next) => {
+    try {
+        // Fast path — new tokens carry role directly.
+        if (req.user?.role === 'ENTERPRISE') {
+            return next();
+        }
+        if (!req.user?._id) {
+            return res.status(403).json({ message: 'Enterprise role required' });
+        }
+        // Fallback for older tokens missing role.
+        const user = await UserModel.findById(req.user._id).select('role').lean();
+        if (!user || user.role !== 'ENTERPRISE') {
+            return res.status(403).json({ message: 'Enterprise role required' });
+        }
+        // Cache so downstream middleware/handlers don't re-query.
+        req.user.role = user.role;
+        return next();
+    } catch (err) {
+        console.error('requireEnterprise lookup failed:', err);
+        return res.status(500).json({ message: 'Server error' });
+    }
+};
+
+module.exports = { verifyToken, requireEnterprise };

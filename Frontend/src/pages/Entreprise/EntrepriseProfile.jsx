@@ -1,21 +1,24 @@
 import { useEffect, useState, useRef } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { toast } from "react-toastify";
 import PublicLayout from "../../layouts/PublicLayout";
+import WizardDrawer from "../JobWizard/components/WizardDrawer";
 import "./EntrepriseProfile.css";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { 
-  faTrashCan, faBuilding, faIndustry, 
-  faLocationDot, faGlobe, faFileLines, 
-  faPeopleGroup, faEdit, faSave, faTimes, 
-  faBriefcase, faCamera, faPlus, faMinus, 
-  faPlusCircle, faCalendarAlt, faVideo, faBoxArchive, faRotateLeft,
+import {
+  faTrashCan, faBuilding, faIndustry,
+  faLocationDot, faGlobe, faFileLines,
+  faPeopleGroup, faEdit, faSave, faTimes,
+  faBriefcase, faCamera, faPlus,
+  faCalendarAlt, faVideo, faBoxArchive, faRotateLeft,
   faEnvelope, faLock, faKey, faBell
 } from "@fortawesome/free-solid-svg-icons";
 
 const EntrepriseProfile = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [enterprise, setEnterprise] = useState(null);
   const [userEmail, setUserEmail] = useState("");
   const [enterpriseJobs, setEnterpriseJobs] = useState([]);
@@ -25,7 +28,6 @@ const EntrepriseProfile = () => {
   const [selectedFile, setSelectedFile] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editedEnterprise, setEditedEnterprise] = useState({});
-  const [showJobForm, setShowJobForm] = useState(false);
   const [editingJobCardId, setEditingJobCardId] = useState(null);
   const [editingJobCardData, setEditingJobCardData] = useState({
     title: "",
@@ -81,35 +83,12 @@ const EntrepriseProfile = () => {
   const [recruiterNotifications, setRecruiterNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
 
-  const [newJob, setNewJob] = useState({
-    title: "",
-    description: "",
-    location: "",
-    salary: "",
-    languages: "",
-    skills: "",
-  });
-  const [languageInput, setLanguageInput] = useState("");
-  const [skillInput, setSkillInput] = useState("");
-  const [selectedLanguages, setSelectedLanguages] = useState([]);
-  const [selectedSkills, setSelectedSkills] = useState([]);
-
-  const languageSuggestions = [
-    "Arabic", "English", "French", "German", "Spanish", "Italian", "Portuguese", "Turkish"
-  ];
-
-  const skillSuggestions = [
-    "React", "Angular", "Vue", "JavaScript", "TypeScript", "Node.js", "Express", "MongoDB",
-    "SQL", "PostgreSQL", "MySQL", "Python", "Java", "C#", "Docker", "Kubernetes", "AWS",
-    "Azure", "Git", "REST API", "GraphQL", "Figma", "UI/UX", "Machine Learning"
-  ];
-
   const fileInputRef = useRef(null);
   const totalApplications = Object.values(applicationCounts).reduce(
     (sum, count) => sum + (Number(count) || 0),
     0
   );
-  const activeJobs = enterpriseJobs.filter((job) => job.status !== "CLOSED");
+  const activeJobs = enterpriseJobs.filter((job) => job.status === "OPEN");
   const archivedJobs = enterpriseJobs.filter((job) => job.status === "CLOSED");
   const activeJobsCount = activeJobs.length;
   const archivedJobsCount = archivedJobs.length;
@@ -1271,114 +1250,23 @@ const openApplicationModal = async (jobId) => {
     }
   };
 
-  const handleJobChange = (e) => {
-    const { name, value } = e.target;
-    setNewJob((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const addToken = (field, value) => {
-    const normalizedValue = value.trim();
-    if (!normalizedValue) return;
-
-    if (field === "languages") {
-      setSelectedLanguages((prev) => {
-        if (prev.some((item) => item.toLowerCase() === normalizedValue.toLowerCase())) return prev;
-        const updated = [...prev, normalizedValue];
-        setNewJob((prevJob) => ({ ...prevJob, languages: updated.join(", ") }));
-        return updated;
-      });
-      setLanguageInput("");
-      return;
-    }
-
-    setSelectedSkills((prev) => {
-      if (prev.some((item) => item.toLowerCase() === normalizedValue.toLowerCase())) return prev;
-      const updated = [...prev, normalizedValue];
-      setNewJob((prevJob) => ({ ...prevJob, skills: updated.join(", ") }));
-      return updated;
-    });
-    setSkillInput("");
-  };
-
-  const removeToken = (field, token) => {
-    if (field === "languages") {
-      setSelectedLanguages((prev) => {
-        const updated = prev.filter((item) => item !== token);
-        setNewJob((prevJob) => ({ ...prevJob, languages: updated.join(", ") }));
-        return updated;
-      });
-      return;
-    }
-
-    setSelectedSkills((prev) => {
-      const updated = prev.filter((item) => item !== token);
-      setNewJob((prevJob) => ({ ...prevJob, skills: updated.join(", ") }));
-      return updated;
-    });
-  };
-
-  const handleTokenKeyDown = (event, field) => {
-    if (event.key === "Enter" || event.key === ",") {
-      event.preventDefault();
-      addToken(field, field === "languages" ? languageInput : skillInput);
-    }
-  };
-
-  const filteredLanguageSuggestions = languageSuggestions.filter(
-    (language) =>
-      language.toLowerCase().includes(languageInput.toLowerCase()) &&
-      !selectedLanguages.some((item) => item.toLowerCase() === language.toLowerCase())
-  );
-
-  const filteredSkillSuggestions = skillSuggestions.filter(
-    (skill) =>
-      skill.toLowerCase().includes(skillInput.toLowerCase()) &&
-      !selectedSkills.some((item) => item.toLowerCase() === skill.toLowerCase())
-  );
-
-  const resetJobForm = () => {
-    setNewJob({
-      title: "",
-      description: "",
-      location: "",
-      salary: "",
-      languages: "",
-      skills: "",
-    });
-    setSelectedLanguages([]);
-    setSelectedSkills([]);
-    setLanguageInput("");
-    setSkillInput("");
-    setShowJobForm(false);
-  };
-
-  const handleSubmitJob = async () => {
+  const refetchEnterpriseJobs = async () => {
     try {
-      const payload = {
-        title: newJob.title,
-        description: newJob.description,
-        location: newJob.location,
-        salary: newJob.salary,
-        skills: newJob.skills.split(",").map((skill) => skill.trim()),
-        languages: newJob.languages.split(",").map((lang) => lang.trim()),
-        entrepriseId: id,
-      };
-
-      await axios.post("http://localhost:3001/Frontend/add-job", payload);
-
       const res = await axios.get(`http://localhost:3001/Frontend/jobs-by-entreprise/${id}`);
       setEnterpriseJobs(res.data);
-
-      alert("New job added successfully!");
-      resetJobForm();
     } catch (err) {
-      console.error("Error saving job:", err);
-      alert(err?.response?.data?.message || "Failed to save job.");
+      console.error("Failed to refresh jobs:", err);
     }
   };
 
   return (
     <PublicLayout>
+      <WizardDrawer
+        open={isWizardOpen}
+        onOpenChange={setIsWizardOpen}
+        entrepriseId={id}
+        onPublished={refetchEnterpriseJobs}
+      />
       <div className="entreprise-profile-container">
         <div className="entreprise-profile">
           {loading ? (
@@ -1511,16 +1399,10 @@ const openApplicationModal = async (jobId) => {
 
                   <button
                     className="btn btn-add-job mt-4 w-100"
-                    onClick={() => {
-                      if (showJobForm) {
-                        resetJobForm();
-                      } else {
-                        setShowJobForm(true);
-                      }
-                    }}
+                    onClick={() => setIsWizardOpen(true)}
                   >
-                    <FontAwesomeIcon icon={showJobForm ? faMinus : faPlus} className="me-2" />
-                    {showJobForm ? "Hide" : "Add Job"}
+                    <FontAwesomeIcon icon={faPlus} className="me-2" />
+                    Add Job
                   </button>
                 </div>
 
@@ -1703,165 +1585,6 @@ const openApplicationModal = async (jobId) => {
                 </div>
               </div>
 
-              {showJobForm && (
-                <div className="job-form">
-                  <h4 className="mb-4">
-                    <FontAwesomeIcon icon={faBriefcase} className="me-2" />
-                    New Job Position
-                  </h4>
-                  <div className="mb-3">
-                    <label className="form-label">Job Title</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      name="title"
-                      value={newJob.title}
-                      onChange={handleJobChange}
-                      placeholder="Ex: React Frontend Developer"
-                    />
-                  </div>
-                  <div className="mb-3">
-                    <label className="form-label">Description</label>
-                    <textarea
-                      className="form-control"
-                      name="description"
-                      value={newJob.description}
-                      onChange={handleJobChange}
-                      placeholder="Describe responsibilities and required qualifications"
-                      rows="4"
-                    ></textarea>
-                  </div>
-
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label">Location</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        name="location"
-                        value={newJob.location}
-                        onChange={handleJobChange}
-                        placeholder="Ex: Paris, France"
-                      />
-                    </div>
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label">Salary (€)</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        name="salary"
-                        value={newJob.salary}
-                        onChange={handleJobChange}
-                        placeholder="Ex: 45000"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label">Required Languages</label>
-                      <div className="ticket-input-container">
-                        <div className="ticket-list">
-                          {selectedLanguages.map((language) => (
-                            <span key={language} className="ticket-item">
-                              {language}
-                              <button type="button" onClick={() => removeToken("languages", language)}>×</button>
-                            </span>
-                          ))}
-                          <input
-                            type="text"
-                            className="ticket-input"
-                            value={languageInput}
-                            onChange={(e) => setLanguageInput(e.target.value)}
-                            onKeyDown={(e) => handleTokenKeyDown(e, "languages")}
-                            placeholder="Type and press Enter"
-                          />
-                        </div>
-                        {(languageInput || filteredLanguageSuggestions.length > 0) && (
-                          <div className="suggestions-menu">
-                            {filteredLanguageSuggestions.length > 0 ? (
-                              filteredLanguageSuggestions.map((language) => (
-                                <button
-                                  type="button"
-                                  key={language}
-                                  className="suggestion-item"
-                                  onClick={() => addToken("languages", language)}
-                                >
-                                  {language}
-                                </button>
-                              ))
-                            ) : (
-                              <button
-                                type="button"
-                                className="suggestion-item add-custom"
-                                onClick={() => addToken("languages", languageInput)}
-                              >
-                                Add "{languageInput}"
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label">Required Skills</label>
-                      <div className="ticket-input-container">
-                        <div className="ticket-list">
-                          {selectedSkills.map((skill) => (
-                            <span key={skill} className="ticket-item">
-                              {skill}
-                              <button type="button" onClick={() => removeToken("skills", skill)}>×</button>
-                            </span>
-                          ))}
-                          <input
-                            type="text"
-                            className="ticket-input"
-                            value={skillInput}
-                            onChange={(e) => setSkillInput(e.target.value)}
-                            onKeyDown={(e) => handleTokenKeyDown(e, "skills")}
-                            placeholder="Type and press Enter"
-                          />
-                        </div>
-                        {(skillInput || filteredSkillSuggestions.length > 0) && (
-                          <div className="suggestions-menu">
-                            {filteredSkillSuggestions.length > 0 ? (
-                              filteredSkillSuggestions.map((skill) => (
-                                <button
-                                  type="button"
-                                  key={skill}
-                                  className="suggestion-item"
-                                  onClick={() => addToken("skills", skill)}
-                                >
-                                  {skill}
-                                </button>
-                              ))
-                            ) : (
-                              <button
-                                type="button"
-                                className="suggestion-item add-custom"
-                                onClick={() => addToken("skills", skillInput)}
-                              >
-                                Add "{skillInput}"
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="text-end mt-4">
-                    <button
-                      className="btn btn-success"
-                      onClick={handleSubmitJob}
-                      disabled={!newJob.title || !newJob.description}
-                    >
-                      <FontAwesomeIcon icon={faPlusCircle} className="me-2" />
-                      Add
-                    </button>
-                  </div>
-                </div>
-              )}
             </>
           )}
         </div>

@@ -75,6 +75,14 @@ class InterviewState:
     job_title: str = ""
     job_skills: list[str] = field(default_factory=list)
     job_description: str = ""
+    # Pre-assembled rich job configuration (department, company context,
+    # responsibilities, languages, evaluation criteria, etc.) used to generate
+    # questions dynamically. Built upstream (Node) so the engine stays generic.
+    job_context: str = ""
+    seniority: str = ""
+    # Structured evaluation criteria from the job wizard: [{name, weight}, ...]
+    # weights are percentages that sum to 100. Drives the weighted final score.
+    evaluation_criteria: list[dict[str, Any]] = field(default_factory=list)
     candidate_name: str = ""
     candidate_profile: dict[str, Any] = field(default_factory=dict)
     interview_style: str = "friendly"
@@ -229,6 +237,90 @@ def _report_notes(evaluations: list[TurnEvaluation]) -> tuple[list[str], list[st
     return strengths[:5], concerns[:5]
 
 
+def _criterion_evidence_pool(
+    name: str,
+    hr_evals: list[TurnEvaluation],
+    tech_evals: list[TurnEvaluation],
+    all_evals: list[TurnEvaluation],
+) -> list[TurnEvaluation]:
+    """Map a configured criterion name to the most relevant answer evidence.
+
+    Heuristic, keyword-based, and resilient: technical/problem-solving criteria
+    draw on the technical phase, communication/culture criteria on the HR phase,
+    and anything unrecognized falls back to all answers so a weight is never
+    silently ignored.
+    """
+    n = str(name or "").lower()
+    technical_kw = ("technical", "tech", "coding", "engineering", "skill", "hard skill")
+    problem_kw = ("problem", "solving", "analytic", "reasoning", "debug")
+    comm_kw = ("communication", "clarity", "articul", "presentation", "language")
+    culture_kw = ("culture", "fit", "motivation", "behav", "team", "collaborat", "value", "attitude")
+
+    if any(k in n for k in technical_kw) or any(k in n for k in problem_kw):
+        return tech_evals or all_evals
+    if any(k in n for k in comm_kw) or any(k in n for k in culture_kw):
+        return hr_evals or all_evals
+    return all_evals
+
+
+def build_weighted_criteria_report(
+    evaluations: list[TurnEvaluation],
+    criteria: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], float]:
+    """Compute a per-criterion score breakdown and the weighted overall score.
+
+    Returns (rows, weighted_overall) where weighted_overall is in [0,1].
+    rows: [{criterion, weight, score, answers, weighted_points}]
+    """
+    hr_evals = [e for e in evaluations if e.phase == "intro"]
+    tech_evals = [e for e in evaluations if e.phase == "technical"]
+
+    rows: list[dict[str, Any]] = []
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for crit in criteria or []:
+        name = str(crit.get("name", "") or "").strip()
+        weight = float(crit.get("weight", 0) or 0)
+        if not name or weight <= 0:
+            continue
+        pool = _criterion_evidence_pool(name, hr_evals, tech_evals, evaluations)
+        score = round(_avg([float(e.score) for e in pool]) or 0.0, 3)
+        rows.append({
+            "criterion": name,
+            "weight": round(weight, 2),
+            "score": score,
+            "score_pct": round(score * 100, 1),
+            "answers": len(pool),
+            "weighted_points": round(score * weight, 2),
+        })
+        weighted_sum += score * weight
+        total_weight += weight
+
+    weighted_overall = round(weighted_sum / total_weight, 3) if total_weight > 0 else 0.0
+    return rows, weighted_overall
+
+
+def _hiring_recommendation(weighted_overall: float, answer_count: int) -> dict[str, Any]:
+    """4-tier hiring recommendation from the weighted overall score."""
+    if answer_count == 0:
+        return {
+            "label": "No Hire",
+            "tier": "insufficient_data",
+            "score_pct": 0.0,
+            "summary": "Not enough evaluated answers to make a recommendation.",
+        }
+    pct = round(weighted_overall * 100, 1)
+    if weighted_overall >= 0.78:
+        label, summary = "Strong Hire", "Excellent, consistent evidence against the weighted criteria. Advance with confidence."
+    elif weighted_overall >= 0.62:
+        label, summary = "Hire", "Solid performance on the weighted criteria with minor gaps to verify in later rounds."
+    elif weighted_overall >= 0.45:
+        label, summary = "Maybe", "Mixed signal. Review the weakest weighted criteria before deciding to advance."
+    else:
+        label, summary = "No Hire", "Weighted evidence falls short of the role bar. Do not advance without significant additional validation."
+    return {"label": label, "tier": label.lower().replace(" ", "_"), "score_pct": pct, "summary": summary}
+
+
 def build_final_report(state: InterviewState) -> dict[str, Any]:
     evaluations = list(state.evaluations)
     category_scores = build_category_scores(evaluations)
@@ -236,6 +328,21 @@ def build_final_report(state: InterviewState) -> dict[str, Any]:
     overall_score = float(category_scores["overall"]["score"])
     answer_count = int(category_scores["overall"]["answers"])
     recommendation = _score_recommendation(overall_score, answer_count)
+
+    # ── Weighted report driven by the job's configured evaluation criteria ──
+    criteria_breakdown, weighted_overall = build_weighted_criteria_report(
+        evaluations, state.evaluation_criteria,
+    )
+    # If the job defined criteria, the weighted score is the headline score and
+    # drives the 4-tier hiring recommendation. Otherwise fall back to the flat
+    # average + legacy recommendation so older jobs keep working.
+    if criteria_breakdown:
+        hiring_recommendation = _hiring_recommendation(weighted_overall, answer_count)
+        headline_score = weighted_overall
+    else:
+        weighted_overall = round(overall_score, 3)
+        hiring_recommendation = _hiring_recommendation(overall_score, answer_count)
+        headline_score = overall_score
 
     transcript = [
         {
@@ -264,6 +371,12 @@ def build_final_report(state: InterviewState) -> dict[str, Any]:
         "category_scores": category_scores,
         "skill_breakdown": _skill_breakdown(evaluations),
         "recommendation": recommendation,
+        # ── Weighted scoring from the job's evaluation criteria ──────────────
+        "weighted_overall_score": weighted_overall,
+        "weighted_overall_pct": round(weighted_overall * 100, 1),
+        "headline_score": round(headline_score, 3),
+        "criteria_breakdown": criteria_breakdown,
+        "hiring_recommendation": hiring_recommendation,
         "strengths": strengths,
         "concerns": concerns,
         "evaluations": [item.as_dict() for item in evaluations],
@@ -1235,6 +1348,9 @@ class InterviewEngine:
         interview_style: str = "friendly",
         phase: Phase = "intro",
         preferred_language: str = "en",
+        job_context: str = "",
+        seniority: str = "",
+        evaluation_criteria: list[dict] | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             existing = self._states.get(interview_id)
@@ -1246,6 +1362,9 @@ class InterviewEngine:
                 job_title=job_title,
                 job_skills=[s for s in job_skills if s],
                 job_description=job_description or "",
+                job_context=str(job_context or ""),
+                seniority=str(seniority or ""),
+                evaluation_criteria=list(evaluation_criteria or []),
                 candidate_name=candidate_name,
                 candidate_profile=candidate_profile or {},
                 interview_style=normalize_interview_style(interview_style),
@@ -1843,6 +1962,8 @@ class InterviewEngine:
                 transcript_tail=transcript_tail,
                 asked_questions=asked_questions,
                 answered_topics=answered_topics,
+                job_context=state.job_context,
+                seniority=state.seniority,
             )
         else:
             user = build_user_turn_prompt(
@@ -1863,6 +1984,8 @@ class InterviewEngine:
                 preferred_language=state.preferred_language,
                 asked_questions=asked_questions,
                 answered_topics=answered_topics,
+                job_context=state.job_context,
+                seniority=state.seniority,
             )
 
         system_with_comfort = system + comfort_addendum

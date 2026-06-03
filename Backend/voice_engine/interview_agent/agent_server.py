@@ -98,6 +98,12 @@ class StartRequest(BaseModel):
     interview_style: str = Field("friendly", max_length=40)
     phase: Literal["intro", "technical"] = "intro"
     preferred_language: str = Field("en", max_length=20)
+    # Rich job configuration assembled upstream so every question is generated
+    # dynamically from the full job (company context, seniority, criteria, ...).
+    job_context: str = Field("", max_length=6000)
+    seniority: str = Field("", max_length=40)
+    # Structured evaluation criteria [{name, weight}] for weighted final scoring.
+    evaluation_criteria: list[dict] = Field(default_factory=list)
 
 
 class TurnRequest(BaseModel):
@@ -188,6 +194,9 @@ def session_start(req: StartRequest) -> dict:
             interview_style=req.interview_style,
             phase=req.phase,
             preferred_language=req.preferred_language,
+            job_context=req.job_context,
+            seniority=req.seniority,
+            evaluation_criteria=req.evaluation_criteria,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

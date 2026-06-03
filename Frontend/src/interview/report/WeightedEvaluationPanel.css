@@ -1,0 +1,135 @@
+/* WeightedEvaluationPanel.css — matches the recruiter report light theme */
+
+.we-panel {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.we-panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.we-panel__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0;
+}
+
+.we-panel__subtitle {
+  font-size: 13px;
+  color: #64748b;
+}
+
+/* ── Recommendation banner ── */
+.we-rec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 22px;
+  border: 2px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.we-rec--strong { background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%); border-color: #22c55e; }
+.we-rec--hire   { background: linear-gradient(135deg, #ecfeff 0%, #ffffff 100%); border-color: #06b6d4; }
+.we-rec--maybe  { background: linear-gradient(135deg, #fef3c7 0%, #ffffff 100%); border-color: #f59e0b; }
+.we-rec--no     { background: linear-gradient(135deg, #fef2f2 0%, #ffffff 100%); border-color: #ef4444; }
+
+.we-rec__left { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+.we-rec__label {
+  font-size: 17px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: 0.2px;
+}
+
+.we-rec__summary { font-size: 13px; color: #475569; line-height: 1.45; }
+
+.we-rec__score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.we-rec__score-value { font-size: 28px; font-weight: 800; color: #0f172a; line-height: 1; }
+.we-rec__score-caption { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+
+/* ── Criteria breakdown ── */
+.we-criteria { display: flex; flex-direction: column; gap: 16px; }
+
+.we-crit__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.we-crit__name { font-size: 14px; font-weight: 600; color: #1e293b; flex: 1; min-width: 0; }
+
+.we-crit__weight {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+  background: #eef2f7;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
+.we-crit__score { font-size: 14px; font-weight: 700; color: #0f172a; width: 44px; text-align: right; }
+
+.we-bar {
+  height: 9px;
+  border-radius: 6px;
+  background: #eef2f7;
+  overflow: hidden;
+}
+
+.we-bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease; }
+.we-bar-fill--good { background: linear-gradient(90deg, #22c55e, #16a34a); }
+.we-bar-fill--mid  { background: linear-gradient(90deg, #f59e0b, #d97706); }
+.we-bar-fill--low  { background: linear-gradient(90deg, #ef4444, #dc2626); }
+
+.we-crit__meta { font-size: 11px; color: #94a3b8; margin-top: 5px; }
+
+/* ── Notes ── */
+.we-notes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #e2e8f0;
+}
+
+@media (max-width: 640px) { .we-notes { grid-template-columns: 1fr; } }
+
+.we-notes__title {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.we-notes__title--good { color: #16a34a; }
+.we-notes__title--bad  { color: #dc2626; }
+
+.we-notes__col ul { margin: 0; padding-left: 18px; }
+.we-notes__col li { font-size: 13px; color: #475569; line-height: 1.5; margin-bottom: 4px; }

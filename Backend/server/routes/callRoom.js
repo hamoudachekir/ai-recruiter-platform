@@ -6,7 +6,8 @@ const fs = require("fs");
 const axios = require("axios");
 const CallRoom = require("../models/CallRoom");
 const { verifyToken } = require("../middleware/auth");
-const { UserModel } = require("../models/user");
+const { UserModel, JobModel } = require("../models/user");
+require("../models/department"); // register Department schema for populate
 const interviewAgent = require("../services/interviewAgentService");
 const {
   generateIntegrityReport,
@@ -14,6 +15,7 @@ const {
 const {
   buildRecruiterReport,
   buildMockRecruiterReport,
+  buildWeightedEvaluation,
 } = require("../services/recruiterReportService");
 
 const ANALYSIS_SERVICE_URL =
@@ -367,6 +369,13 @@ router.post("/create", verifyToken, async (req, res) => {
 
     await callRoom.save();
     await callRoom.populate("initiator", "email firstName lastName");
+    if (callRoom.job) {
+      await callRoom.populate({
+        path: "job",
+        select: "title company location status seniorityLevel departmentId",
+        populate: { path: "departmentId", select: "name" },
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -584,7 +593,11 @@ router.get("/rh/my-rooms", verifyToken, async (req, res) => {
       initiator: req.user._id,
     })
       .populate("candidate", "email firstName lastName")
-      .populate("job", "title company")
+      .populate({
+        path: "job",
+        select: "title company location status seniorityLevel departmentId",
+        populate: { path: "departmentId", select: "name" },
+      })
       .sort({ createdAt: -1 });
 
     res.json({
@@ -593,6 +606,69 @@ router.get("/rh/my-rooms", verifyToken, async (req, res) => {
     });
   } catch (error) {
     console.error("Get RH rooms error:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Jobs the recruiter can link a room to (for the "Related Job" picker).
+// Returns the authenticated recruiter's own jobs with the fields the dropdown
+// needs: title, location, department name, and status.
+router.get("/selectable-jobs", verifyToken, async (req, res) => {
+  try {
+    const jobs = await JobModel.find({ entrepriseId: req.user._id })
+      .select("title location status seniorityLevel companyName departmentId")
+      .populate("departmentId", "name")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const items = jobs.map((j) => ({
+      id: String(j._id),
+      title: j.title || "Untitled job",
+      location: j.location || "",
+      department: j.departmentId?.name || "",
+      seniority: j.seniorityLevel || "",
+      status: j.status || "",
+    }));
+
+    res.json({ success: true, jobs: items });
+  } catch (error) {
+    console.error("Get selectable jobs error:", error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Change (or clear) the job a room is linked to.
+// Body: { jobId: "<id>" | null }
+router.patch("/:roomId([0-9a-fA-F]{24})/job", verifyToken, async (req, res) => {
+  try {
+    const { jobId } = req.body || {};
+    const callRoom = await CallRoom.findById(req.params.roomId);
+    if (!callRoom) return res.status(404).json({ message: "Room not found" });
+    if (!callRoom.initiator.equals(req.user._id)) {
+      return res
+        .status(403)
+        .json({ message: "Only the room initiator can change its job link" });
+    }
+
+    if (jobId) {
+      const job = await JobModel.findOne({ _id: jobId, entrepriseId: req.user._id }).select("_id");
+      if (!job) {
+        return res.status(400).json({ message: "Job not found or not owned by this recruiter" });
+      }
+      callRoom.job = jobId;
+    } else {
+      callRoom.job = undefined;
+    }
+    await callRoom.save();
+    await callRoom.populate({
+      path: "job",
+      select: "title company location status seniorityLevel departmentId",
+      populate: { path: "departmentId", select: "name" },
+    });
+
+    res.json({ success: true, room: callRoom });
+  } catch (error) {
+    console.error("Update room job error:", error);
     res.status(500).json({ message: error.message });
   }
 });
@@ -1339,6 +1415,7 @@ function _adaptAnalysisReport(ar, callRoom) {
   }));
 
   return {
+    weightedEvaluation: buildWeightedEvaluation(callRoom),
     candidateInfo: {
       candidateName: ar.candidateName || "Unknown Candidate",
       jobTitle:

@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Tailwind preflight is disabled in tailwind.config.cjs to preserve Bootstrap's
+   resets across the rest of the app. Tailwind utilities like `border` and
+   `border-b` expect `border-style: solid` and `border-width: 0` as defaults,
+   though — without those, no border ever renders.
+
+   We restore only the minimum defaults Tailwind needs, and we scope them to
+   `[data-wizard-scope]` so Bootstrap-styled pages stay untouched. The JobWizard
+   root and the WizardDrawer's Radix portal both set this attribute.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+[data-wizard-scope],
+[data-wizard-scope] *,
+[data-wizard-scope] ::before,
+[data-wizard-scope] ::after {
+  box-sizing: border-box;
+  border-style: solid;
+  border-width: 0;
+  border-color: currentColor;
+}
+
+/* Bootstrap's button reset sets a default text color that fights our themed
+   buttons. Re-baseline buttons inside the wizard to inherit color. */
+[data-wizard-scope] button {
+  background-color: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 100%;
+  line-height: inherit;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Same idea for inputs / textareas / selects — Bootstrap has opinions we
+   don't want inside the dark-themed wizard. */
+[data-wizard-scope] input,
+[data-wizard-scope] textarea,
+[data-wizard-scope] select {
+  font-family: inherit;
+  font-size: 100%;
+  line-height: inherit;
+  margin: 0;
+  color: inherit;
+}

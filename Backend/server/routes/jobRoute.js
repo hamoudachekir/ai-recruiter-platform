@@ -61,7 +61,7 @@ router.get('/jobs', async (req, res) => {
     const jobs = await JobModel.aggregate([
       {
         $match: {
-          status: { $ne: 'CLOSED' }
+          status: 'OPEN'
         }
       },
       {

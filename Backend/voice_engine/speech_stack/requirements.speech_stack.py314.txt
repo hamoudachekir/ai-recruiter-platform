@@ -1,0 +1,22 @@
+# Python 3.14 / CPU-compatible subset of the speech-stack dependencies.
+#
+# The original requirements.speech_stack.txt pins torch==2.5.1, torchaudio==2.5.1,
+# numpy==1.26.4, pandas==1.5.3 and Coqui "TTS" — none of which ship Python 3.14
+# wheels (they predate 3.14 and would need a C/C++ build from source).
+#
+# On this machine the stack doesn't need them:
+#   - STT  -> faster-whisper (CTranslate2 backend, no torch required)
+#   - TTS  -> edge-tts (Microsoft cloud voices, no torch required)
+# transformers/pandas are only used by optional fallback code paths and are
+# intentionally omitted here.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+python-multipart>=0.0.9,<1
+httpx>=0.27
+faster-whisper
+edge-tts
+pydub>=0.25.1
+# Sentiment analysis pipeline (api_server enables it by default). Uses the
+# already-installed CPU torch; transformers itself is pinned-free so pip picks a
+# build with Python 3.14 wheels.
+transformers

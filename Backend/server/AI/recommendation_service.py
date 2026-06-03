@@ -466,7 +466,7 @@ class JobRecommender:
             return
 
         try:
-            jobs = list(db.jobs.find({"status": {"$ne": "CLOSED"}}))
+            jobs = list(db.jobs.find({"status": "OPEN"}))
             print(f"\n[DEBUG] Found {len(jobs)} jobs in database")
 
             if not jobs:

@@ -23,6 +23,7 @@
 const express  = require('express');
 const path     = require('path');
 const fs       = require('fs');
+const { spawn } = require('child_process');
 const CallRoom = require('../models/CallRoom');
 const { verifyToken } = require('../middleware/auth');
 const {
@@ -67,6 +68,76 @@ function findFirstFile(dir, extensions) {
     if (extensions.includes(path.extname(f).toLowerCase())) return f;
   }
   return null;
+}
+
+const FFMPEG_BIN = process.env.FFMPEG_BIN || 'ffmpeg';
+// In-flight remux promises keyed by output path, so concurrent first-load
+// requests don't spawn ffmpeg twice for the same recording.
+const _remuxInFlight = new Map();
+
+/**
+ * ensureSeekableVideo
+ * MediaRecorder-produced WebM has duration=Infinity and no Cues, so the browser
+ * cannot seek it (currentTime snaps back to 0). Remux once with ffmpeg
+ * (stream copy — no re-encode, fast) to write a proper duration + seek cues,
+ * cache it next to the raw file, and serve that instead.
+ *
+ * Returns the seekable file path, or null to fall back to the raw file
+ * (ffmpeg missing / non-webm / remux failed).
+ *
+ * @param {string} videoPath - absolute path to the raw recording
+ * @param {string} rawDir    - directory to write the cached seekable file
+ * @returns {Promise<string|null>}
+ */
+function ensureSeekableVideo(videoPath, rawDir) {
+  if (path.extname(videoPath).toLowerCase() !== '.webm') return Promise.resolve(null);
+
+  const out = path.join(rawDir, 'recording.seekable.webm');
+  try {
+    if (fs.existsSync(out) && fs.statSync(out).size > 0) return Promise.resolve(out);
+  } catch {
+    /* fall through to remux */
+  }
+
+  if (_remuxInFlight.has(out)) return _remuxInFlight.get(out);
+
+  const job = new Promise((resolve) => {
+    // -c copy: rewrite the container only (adds duration + Cues), no re-encode.
+    const ff = spawn(FFMPEG_BIN, ['-y', '-i', videoPath, '-c', 'copy', out], {
+      windowsHide: true,
+    });
+    let stderr = '';
+    ff.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
+    ff.on('error', (err) => {
+      console.warn('[mediaRoute] ffmpeg remux unavailable:', err?.message);
+      resolve(null); // ffmpeg not found → serve raw
+    });
+    ff.on('close', (code) => {
+      let ok = false;
+      try {
+        // -c copy output should be ~the same size as the input. A wildly
+        // smaller file means the source was broken and the remux is garbage —
+        // fall back to the raw file rather than serving a corrupt remux.
+        const inSize = fs.statSync(videoPath).size;
+        const outSize = fs.existsSync(out) ? fs.statSync(out).size : 0;
+        ok = code === 0 && outSize > 0 && outSize >= inSize * 0.5;
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        console.warn('[mediaRoute] ffmpeg remux failed (code %s): %s', code, stderr.slice(-300));
+        try { if (fs.existsSync(out)) fs.unlinkSync(out); } catch { /* ignore */ }
+        resolve(null);
+      } else {
+        resolve(out);
+      }
+    });
+  }).finally(() => _remuxInFlight.delete(out));
+
+  _remuxInFlight.set(out, job);
+  return job;
 }
 
 /**
@@ -229,8 +300,19 @@ router.get(`/:roomId(${ROOM_ID_REGEX})/media/video`, verifyToken, loadRoomAndChe
       return res.status(404).json({ success: false, message: 'Video file not accessible.' });
     }
 
-    const mimeType = getMimeType(videoPath);
-    streamFile(res, videoPath, mimeType, req.headers.range);
+    // Serve a seekable remux when possible so "Watch Answer" / timeline jumps
+    // land on the right moment instead of snapping to 0 (raw MediaRecorder
+    // WebM is not seekable). Falls back to the raw file if ffmpeg is absent.
+    let servePath = videoPath;
+    try {
+      const seekable = await ensureSeekableVideo(videoPath, rawDir);
+      if (seekable) servePath = seekable;
+    } catch (remuxErr) {
+      console.warn('[mediaRoute] seekable remux skipped:', remuxErr?.message);
+    }
+
+    const mimeType = getMimeType(servePath);
+    streamFile(res, servePath, mimeType, req.headers.range);
   } catch (err) {
     console.error('[mediaRoute] /media/video error:', err?.message);
     return res.status(500).json({ success: false, message: 'Failed to stream video.' });

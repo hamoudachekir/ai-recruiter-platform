@@ -346,7 +346,54 @@ function FramesGallery({ roomId, frames, onSeek, duration }) {
   );
 }
 
-function QnAJumpList({ qnaItems, qEvals, onSeek, duration }) {
+/**
+ * Resolve the recording-relative start time (seconds) of a candidate answer.
+ * Tries, in order: an explicit numeric field, the matching transcript segment,
+ * the ISO answer time minus the recording start, then a rough estimate.
+ * Returns { sec, exact } so the UI can show "~" only when it's a guess.
+ */
+function resolveAnswerSeconds(item, idx, total, segments, recordingStartMs, durationSec) {
+  // 1) Explicit numeric recording-relative seconds from the backend.
+  for (const k of ["answerStartSec", "answerStart", "startSec", "answerTimestampSec"]) {
+    const v = Number(item?.[k]);
+    if (Number.isFinite(v) && v >= 0) return { sec: v, exact: true };
+  }
+
+  // 2) Match the answer text to a transcript segment (segment.start is already
+  //    relative to the recording/video start).
+  const answer = String(item?.answerText || "").trim().toLowerCase();
+  if (answer && Array.isArray(segments) && segments.length) {
+    const needle = answer.slice(0, 24);
+    const seg = segments.find((s) => {
+      const t = String(s?.text || "").trim().toLowerCase();
+      return t && (t.includes(needle) || needle.includes(t.slice(0, 24)));
+    });
+    const start = Number(seg?.start);
+    if (Number.isFinite(start) && start >= 0) return { sec: start, exact: true };
+  }
+
+  // 3) ISO answer/asked time minus the recording start.
+  const iso = item?.answeredAt || item?.askedAt;
+  if (iso && recordingStartMs) {
+    const t = new Date(iso).getTime();
+    if (Number.isFinite(t)) {
+      const sec = (t - recordingStartMs) / 1000;
+      if (sec >= 0 && sec < 24 * 3600) return { sec, exact: true };
+    }
+  }
+
+  // 4) No real timing → spread answers evenly across the ACTUAL recording
+  //    length so estimates never exceed the video. (idx+0.5) puts each answer
+  //    at the midpoint of its slice. Falls back to 2 min/question only if the
+  //    duration is unknown.
+  if (Number.isFinite(durationSec) && durationSec > 0 && total > 0) {
+    const sec = ((idx + 0.5) / total) * durationSec;
+    return { sec: Math.max(0, Math.min(sec, durationSec - 0.5)), exact: false };
+  }
+  return { sec: idx * 120 + 15, exact: false };
+}
+
+function QnAJumpList({ qnaItems, qEvals, onSeek, segments, recordingStartMs, duration }) {
   if (!qnaItems || qnaItems.length === 0) return null;
 
   return (
@@ -358,7 +405,14 @@ function QnAJumpList({ qnaItems, qEvals, onSeek, duration }) {
       <div className="imp-qna-jump__list">
         {qnaItems.map((item, idx) => {
           const ev = qEvals?.[idx];
-          const approxTs = idx * 120 + 15; // rough: 2 min per question, answer ~15s after
+          const { sec, exact } = resolveAnswerSeconds(
+            item,
+            idx,
+            qnaItems.length,
+            segments,
+            recordingStartMs,
+            duration,
+          );
           const quality = ev?.answerQuality;
           const score = ev?.score;
 
@@ -379,10 +433,10 @@ function QnAJumpList({ qnaItems, qEvals, onSeek, duration }) {
               </div>
               <button
                 className="imp-qna-row__jump"
-                onClick={() => onSeek(approxTs)}
-                title={`Jump to ~${fmtTime(approxTs)}`}
+                onClick={() => onSeek(sec)}
+                title={`Jump to ${exact ? "" : "~"}${fmtTime(sec)} in the recording`}
               >
-                ▶ Watch Answer
+                ▶ Watch Answer {exact ? `(${fmtTime(sec)})` : `(~${fmtTime(sec)})`}
               </button>
             </div>
           );
@@ -669,10 +723,39 @@ function BehavioralInsightsPanel({
 
 export default function InterviewMediaPanel({ roomId, report, room }) {
   const videoRef = useRef(null);
+  // Holds a seek target requested while the <video> was unmounted (e.g. from
+  // the "Watch Answers" tab). Flushed once the video element is ready.
+  const pendingSeekRef = useRef(null);
 
-  const setVideoRef = useCallback((el) => {
-    videoRef.current = el;
+  const flushPendingSeek = useCallback((el) => {
+    const v = el || videoRef.current;
+    if (!v || pendingSeekRef.current == null) return;
+    // Wait until the element has metadata; otherwise setting currentTime is
+    // ignored and we'd lose the queued target. onLoadedMetadata/onCanPlay retry.
+    if (v.readyState < 1) return;
+    let ts = pendingSeekRef.current;
+    pendingSeekRef.current = null;
+    // Clamp to the real video length so an over-estimate never lands past the
+    // end (which would snap to 0 / show a black frame).
+    const dur = Number(v.duration);
+    if (Number.isFinite(dur) && dur > 0) {
+      ts = Math.max(0, Math.min(ts, dur - 0.5));
+    }
+    try {
+      v.currentTime = ts;
+      v.play().catch(() => {});
+    } catch {
+      /* ignore */
+    }
   }, []);
+
+  const setVideoRef = useCallback(
+    (el) => {
+      videoRef.current = el;
+      if (el) flushPendingSeek(el);
+    },
+    [flushPendingSeek],
+  );
 
   const [media, setMedia] = useState(null);
   const [mediaLoading, setMediaLoading] = useState(false);
@@ -835,11 +918,63 @@ export default function InterviewMediaPanel({ roomId, report, room }) {
     };
   }, [roomId, media?.video?.available]);
 
+  // Probe the recording's duration off-DOM as soon as the blob is available, so
+  // the "Watch Answers" tab knows the real length and spreads its estimated
+  // jump times within it — even before the recruiter opens the Video tab.
+  useEffect(() => {
+    if (!videoBlobUrl || duration > 0) return;
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    probe.muted = true;
+    let done = false;
+    const finish = (d) => {
+      if (!done && Number.isFinite(d) && d > 0) {
+        done = true;
+        setDuration(d);
+      }
+      probe.src = "";
+    };
+    probe.onloadedmetadata = () => {
+      const d = Number(probe.duration);
+      if (Number.isFinite(d) && d > 0) return finish(d);
+      // Raw WebM may report Infinity — force a scrub to compute it.
+      probe.onseeked = () => finish(Number(probe.duration));
+      try {
+        probe.currentTime = 1e9;
+      } catch {
+        probe.src = "";
+      }
+    };
+    probe.onerror = () => {
+      probe.src = "";
+    };
+    probe.src = videoBlobUrl;
+    return () => {
+      probe.onloadedmetadata = null;
+      probe.onseeked = null;
+      probe.onerror = null;
+      probe.src = "";
+    };
+  }, [videoBlobUrl, duration]);
+
   const handleSeek = useCallback((ts) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = ts;
-      videoRef.current.play().catch(() => {});
-      setActiveTab("video");
+    const target = Math.max(0, Number(ts) || 0);
+    // Always switch to the video tab — the <video> only renders there, so a
+    // seek requested from the Frames / Watch-Answers tabs must mount it first.
+    setActiveTab("video");
+    const v = videoRef.current;
+    if (v && v.readyState >= 1) {
+      // Video already mounted and has metadata → seek immediately.
+      try {
+        v.currentTime = target;
+        v.play().catch(() => {});
+      } catch {
+        pendingSeekRef.current = target;
+      }
+    } else {
+      // Video not mounted yet (or still loading) → queue; flushed on
+      // setVideoRef / onLoadedMetadata / onCanPlay.
+      pendingSeekRef.current = target;
     }
   }, []);
 
@@ -858,8 +993,41 @@ export default function InterviewMediaPanel({ roomId, report, room }) {
   const activeBehavioralEvent = showBehavioralInsights
     ? findActiveBehavioralEvent(behavioralEvents, currentTime)
     : null;
-  const qnaItems = report?.interviewQna?.items || [];
-  const qEvals = report?.questionEvaluations || [];
+  // Drop phantom duplicate questions (e.g. the agent greeting re-sent before
+  // the candidate answered) and keep qnaItems / qEvals index-aligned.
+  const _rawQna = report?.interviewQna?.items || [];
+  const _rawEvals = report?.questionEvaluations || [];
+  const _normQ = (t) =>
+    String(t || "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 160);
+  const _answeredQ = new Set(
+    _rawQna
+      .filter((it) => String(it.answerText || "").trim())
+      .map((it) => _normQ(it.questionText)),
+  );
+  const _keepMask = _rawQna.map(
+    (it) =>
+      !!String(it.answerText || "").trim() ||
+      !_answeredQ.has(_normQ(it.questionText)),
+  );
+  const qnaItems = _rawQna.filter((_, i) => _keepMask[i]);
+  const qEvals = _rawEvals.filter((_, i) =>
+    i < _keepMask.length ? _keepMask[i] : true,
+  );
+  // Transcript segments carry recording-relative start times — used to land the
+  // "Watch Answer" jumps on the real moment instead of a fixed estimate.
+  const transcriptSegments = Array.isArray(report?.transcript?.segments)
+    ? report.transcript.segments
+    : Array.isArray(report?.transcript)
+      ? report.transcript
+      : [];
+  const recordingStartMs = (() => {
+    const iso =
+      report?.recordingStartedAt ||
+      room?.recordingStartedAt ||
+      report?.interviewQna?.recordingStartedAt;
+    const t = iso ? new Date(iso).getTime() : NaN;
+    return Number.isFinite(t) ? t : null;
+  })();
 
   if (!roomId) return null;
 
@@ -973,6 +1141,7 @@ export default function InterviewMediaPanel({ roomId, report, room }) {
                         if (Number.isFinite(d) && d > 0) {
                           setDuration(d);
                           setVideoLoading(false);
+                          flushPendingSeek(v);
                           return;
                         }
                         // WebM recordings produced by MediaRecorder commonly
@@ -980,19 +1149,23 @@ export default function InterviewMediaPanel({ roomId, report, room }) {
                         // scrubbed past the end of the file. Force a seek to
                         // a huge timestamp, wait for the resulting `seeked`
                         // event (the real duration is now known), then seek
-                        // back to the start.
+                        // to the queued target (or back to the start).
                         const onSeeked = () => {
                           v.removeEventListener("seeked", onSeeked);
                           const realD = Number(v.duration);
                           if (Number.isFinite(realD) && realD > 0) {
                             setDuration(realD);
                           }
-                          try {
-                            v.currentTime = 0;
-                          } catch (_err) {
-                            /* ignore */
-                          }
                           setVideoLoading(false);
+                          if (pendingSeekRef.current != null) {
+                            flushPendingSeek(v);
+                          } else {
+                            try {
+                              v.currentTime = 0;
+                            } catch (_err) {
+                              /* ignore */
+                            }
+                          }
                         };
                         v.addEventListener("seeked", onSeeked);
                         try {
@@ -1002,6 +1175,7 @@ export default function InterviewMediaPanel({ roomId, report, room }) {
                           setVideoLoading(false);
                         }
                       }}
+                      onCanPlay={(e) => flushPendingSeek(e.target)}
                       onDurationChange={(e) => {
                         const d = Number(e.target.duration);
                         if (Number.isFinite(d) && d > 0) setDuration(d);
@@ -1125,6 +1299,8 @@ export default function InterviewMediaPanel({ roomId, report, room }) {
               qnaItems={qnaItems}
               qEvals={qEvals}
               onSeek={handleSeek}
+              segments={transcriptSegments}
+              recordingStartMs={recordingStartMs}
               duration={duration}
             />
           )}

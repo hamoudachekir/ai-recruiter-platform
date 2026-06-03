@@ -140,19 +140,14 @@ const EnterpriseSchema = new Schema({
     employeeCount: { type: Number },
 }, { _id: false });
 
-// ✅ Job Schema
-const JobSchema = new Schema({
-    title: { type: String, required: true },
-    description: { type: String },
-    location: { type: String },
-    salary: { type: Number },
-    languages: [{ type: String }],
-    skills: [{ type: String }],
-    createdAt: { type: Date, default: Date.now },
-    entrepriseId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    status: { type: String, enum: ['OPEN', 'CLOSED'], default: 'OPEN' },
-});
-const JobModel = mongoose.models.Job || mongoose.model("Job", JobSchema);
+// ✅ Job Model — single source of truth lives in ./job.js (wizard fields,
+// DRAFT/OPEN/CLOSED status, evaluationConfig, departmentId, etc.). We just
+// re-import here so existing consumers of `require('../models/user').JobModel`
+// keep working without each one having to be migrated to import job.js
+// directly. NEVER redefine the Job schema here — Mongoose caches the first
+// registration, and a second schema definition would silently drop every
+// new wizard field on save.
+const JobModel = require('./job');
 
 // ✅ User Schema
 const UserSchema = new Schema({

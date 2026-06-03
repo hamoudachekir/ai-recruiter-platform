@@ -7,8 +7,24 @@ export default function JobMatchAnalysisPanel({ report, job }) {
   const technical = report.technicalEvaluation || {};
   const hr = report.hrEvaluation || {};
 
+  // Communication Fit: prefer the HR/communication evaluation score, but when
+  // it's absent (e.g. no HR-phase score was computed) derive it from the
+  // candidate's answered-question scores so it shows a real value instead of
+  // "N/A". Both are on the same 0-100 scale as Technical Fit.
+  const answeredEvals = (report.questionEvaluations || []).filter((e) =>
+    String(e?.answer || e?.answerText || '').trim(),
+  );
+  const derivedComm = answeredEvals.length
+    ? Math.round(
+        answeredEvals.reduce((sum, e) => sum + (Number(e.score) || 0), 0) /
+          answeredEvals.length,
+      )
+    : 0;
+  const commScore = Number(hr.score) > 0 ? Number(hr.score) : derivedComm;
+  const commGrade = hr.grade || gradeFromScore(commScore);
+
   // Calculate overall fit
-  const overallFit = jobFit.fitLevel || calculateFitLevel(technical.score, hr.score);
+  const overallFit = jobFit.fitLevel || calculateFitLevel(technical.score, commScore);
   const fitPercent = jobFit.confidence === 'high' ? 75 : jobFit.confidence === 'medium' ? 60 : 45;
 
   const matchedSkills = jobFit.matchedSkills || [];
@@ -32,8 +48,8 @@ export default function JobMatchAnalysisPanel({ report, job }) {
         />
         <FitMetric
           label="Communication Fit"
-          score={hr.score || 0}
-          grade={hr.grade || gradeFromScore(hr.score)}
+          score={commScore}
+          grade={commGrade}
         />
       </div>
 
@@ -74,7 +90,7 @@ export default function JobMatchAnalysisPanel({ report, job }) {
         <FollowUpSuggestions
           missingSkills={missingSkills}
           technicalScore={technical.score}
-          hrScore={hr.score}
+          hrScore={commScore}
         />
       </div>
     </section>

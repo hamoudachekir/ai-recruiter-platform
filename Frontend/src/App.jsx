@@ -38,6 +38,7 @@ import CallRoomAvailable from "./interview/CallRoomAvailable";
 import CallRoomActive from "./interview/CallRoomActive";
 import CandidateSelfReview from "./interview/review/CandidateSelfReview";
 import EntrepriseProfile from "./pages/Entreprise/EntrepriseProfile";
+import JobWizard from "./pages/JobWizard/JobWizard";
 import JobInterviewRooms from "./pages/Entreprise/JobInterviewRooms";
 import CandidateComparison from "./pages/Entreprise/CandidateComparison";
 import JoinJobRoom from "./pages/Candidate/JoinJobRoom";
@@ -98,6 +99,8 @@ function App() {
             <Route path="/profile/:id" element={<Profile />} />
             <Route path="/edit-profile/:id" element={<EditProfile />} />
             <Route path="/entreprise/:id" element={<EntrepriseProfile />} />
+            <Route path="/entreprise/:id/jobs/new" element={<JobWizard mode="new" />} />
+            <Route path="/entreprise/:id/jobs/:jobId/edit" element={<JobWizard mode="edit" />} />
             <Route path="/entreprise/:entrepriseId/interview-rooms" element={<JobInterviewRooms />} />
             <Route path="/entreprise/:entrepriseId/interview-rooms/:roomId/compare" element={<CandidateComparison />} />
             <Route path="/join/:slug" element={<JoinJobRoom />} />

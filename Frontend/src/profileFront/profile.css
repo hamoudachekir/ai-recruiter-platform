@@ -368,13 +368,13 @@
 }
 
 .experience-company {
-    color: #ccc;
+    color: #d2dde7;
     font-weight: 400;
 }
 
 .experience-duration {
     font-size: 0.8rem;
-    color: #aaa;
+    color: #c5d3e0;
     margin-bottom: 8px;
     display: flex;
     align-items: center;
@@ -382,7 +382,7 @@
 
 .experience-description {
     font-size: 0.875rem;
-    color: #bbb;
+    color: #d2dde7;
     margin: 0;
     line-height: 1.5;
 }
@@ -394,7 +394,7 @@
     justify-content: center;
     padding: 40px 20px;
     text-align: center;
-    color: #aaa;
+    color: #c5d3e0;
 }
 
 .experience-empty-icon {
@@ -407,12 +407,12 @@
     font-size: 1rem;
     font-weight: 500;
     margin-bottom: 6px;
-    color: #ccc;
+    color: #e6edf3;
 }
 
 .experience-empty span {
     font-size: 0.85rem;
-    color: #888;
+    color: #aebfcf;
 }
 
 .cv-link a {
@@ -530,4 +530,614 @@
         padding: 8px 15px;
         font-size: 14px;
     }
+}
+
+/* ============================================================
+   Tab content redesign  (Infos · Experience · CV · Applications)
+   ============================================================ */
+
+/* Smooth fade/slide-in whenever a tab's content mounts */
+.profile-card {
+    animation: tab-fade-in 0.35s ease both;
+}
+
+@keyframes tab-fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Refined tab bar — active tab lifts a touch */
+.tab {
+    padding: 9px 18px;
+    border: 1px solid transparent;
+}
+
+.tab.active {
+    transform: translateY(-1px);
+}
+
+.tab:not(.active):hover {
+    border-color: rgba(54, 209, 220, 0.35);
+}
+
+/* Shared section heading for CV / Applications panes */
+.pane-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(54, 209, 220, 0.15);
+}
+
+.pane-heading h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: 0.3px;
+}
+
+.pane-heading-icon {
+    font-size: 1.1rem;
+    color: #36d1dc;
+}
+
+.pane-count {
+    margin-left: auto;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 13px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #0b0c2a;
+    background: linear-gradient(135deg, #5b86e5, #36d1dc);
+}
+
+/* ---- Infos: two-column responsive grid ---- */
+.infos-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.infos-grid .profile-detail {
+    margin-bottom: 0;
+}
+
+.profile-detail--full {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+    .infos-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ---- CV pane ---- */
+.cv-ready-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 20px;
+    border-radius: 14px;
+    background: rgba(11, 12, 42, 0.6);
+    border: 1px solid rgba(54, 209, 220, 0.25);
+}
+
+.cv-ready-icon {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    font-size: 1.4rem;
+    color: #36d1dc;
+    background: rgba(54, 209, 220, 0.12);
+}
+
+.cv-ready-info {
+    display: flex;
+    flex-direction: column;
+    margin-right: auto;
+}
+
+.cv-ready-title {
+    font-weight: 700;
+    color: #ffffff;
+}
+
+.cv-ready-sub {
+    font-size: 0.82rem;
+    color: #cdd9e5;
+}
+
+.cv-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 10px;
+    padding: 38px 24px;
+    border-radius: 14px;
+    border: 2px dashed rgba(54, 209, 220, 0.35);
+    background: rgba(11, 12, 42, 0.45);
+    transition: border-color 0.25s ease, background 0.25s ease;
+}
+
+.cv-dropzone:hover {
+    border-color: rgba(54, 209, 220, 0.6);
+    background: rgba(91, 134, 229, 0.08);
+}
+
+.cv-dropzone-icon {
+    font-size: 2.6rem;
+    color: rgba(54, 209, 220, 0.55);
+}
+
+.cv-dropzone-title {
+    margin: 0;
+    font-weight: 600;
+    color: #e6edf3;
+}
+
+.cv-dropzone-sub {
+    font-size: 0.82rem;
+    color: #c5d3e0;
+    max-width: 360px;
+}
+
+.cv-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 16px 0 0;
+    font-weight: 600;
+}
+
+/* ---- Applications pane ---- */
+.applications-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.application-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+    border-radius: 14px;
+    background: rgba(11, 12, 42, 0.6);
+    border: 1px solid rgba(54, 209, 220, 0.12);
+    border-left: 3px solid #36d1dc;
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.application-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(54, 209, 220, 0.4);
+    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.35);
+}
+
+.application-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.application-job {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+}
+
+.application-job-icon {
+    color: #36d1dc;
+    flex-shrink: 0;
+}
+
+.application-job-title {
+    font-weight: 700;
+    color: #ffffff;
+    font-size: 1.02rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.status-pill {
+    flex-shrink: 0;
+    padding: 4px 11px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    border: 1px solid transparent;
+}
+
+.status-pill--pending {
+    color: #fcd34d;
+    background: rgba(252, 211, 77, 0.12);
+    border-color: rgba(252, 211, 77, 0.35);
+}
+
+.status-pill--interview {
+    color: #6ee7b7;
+    background: rgba(110, 231, 183, 0.12);
+    border-color: rgba(110, 231, 183, 0.35);
+}
+
+.status-pill--rejected {
+    color: #fca5a5;
+    background: rgba(252, 165, 165, 0.12);
+    border-color: rgba(252, 165, 165, 0.35);
+}
+
+.application-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.meta-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.84rem;
+    color: #dbe6f0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.meta-chip svg {
+    color: #5b86e5;
+    flex-shrink: 0;
+    font-size: 0.8rem;
+}
+
+.application-quiz {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.quiz-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #36d1dc;
+}
+
+.quiz-bar {
+    position: relative;
+    height: 22px;
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+}
+
+.quiz-bar-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 11px;
+    background: linear-gradient(135deg, #5b86e5, #36d1dc);
+    transition: width 0.5s ease;
+}
+
+.quiz-bar-value {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: #ffffff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.quiz-not-taken {
+    font-size: 0.84rem;
+    color: #c5d3e0;
+    font-style: italic;
+}
+
+.application-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 2px;
+}
+
+.app-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 14px;
+    border-radius: 9px;
+    font-size: 0.84rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.app-action--view {
+    color: #36d1dc;
+    background: rgba(54, 209, 220, 0.1);
+    border-color: rgba(54, 209, 220, 0.3);
+}
+
+.app-action--view:hover {
+    background: rgba(54, 209, 220, 0.2);
+    transform: translateY(-2px);
+}
+
+.app-action--delete {
+    color: #fca5a5;
+    background: rgba(252, 165, 165, 0.08);
+    border-color: rgba(252, 165, 165, 0.28);
+    margin-left: auto;
+}
+
+.app-action--delete:hover {
+    background: rgba(238, 82, 83, 0.2);
+    color: #fff;
+    transform: translateY(-2px);
+}
+
+.applications-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 44px 20px;
+    color: #cdd9e5;
+}
+
+.applications-empty-icon {
+    font-size: 2.6rem;
+    color: rgba(54, 209, 220, 0.3);
+    margin-bottom: 12px;
+}
+
+.applications-empty p {
+    margin: 0 0 6px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #cdd9e5;
+}
+
+.applications-empty span {
+    font-size: 0.85rem;
+    color: #b8c7d6;
+}
+
+/* ============================================================
+   LIGHT CONTENT THEME — black/dark text on a light card
+   (requested: make the profile content text black & readable).
+   Sidebar (photo, name) and the tab bar stay on the dark theme;
+   only the content card below the tabs turns light.
+   ============================================================ */
+
+.profile-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+    backdrop-filter: none;
+}
+
+/* Section headings + accent labels */
+.pane-heading h3 {
+    color: #0f172a;
+}
+
+.pane-heading {
+    border-bottom-color: #e2e8f0;
+}
+
+.detail-content label,
+.quiz-label {
+    color: #0e7490;            /* darker teal — readable on white */
+}
+
+/* Primary body text -> near-black */
+.detail-content p,
+.application-job-title,
+.cv-ready-title,
+.cv-dropzone-title,
+.experience-header {
+    color: #111827;
+}
+
+/* Secondary text -> dark slate */
+.meta-chip,
+.experience-company,
+.experience-description,
+.experience-duration,
+.cv-ready-sub,
+.cv-dropzone-sub,
+.quiz-not-taken {
+    color: #374151;
+}
+
+.meta-chip svg {
+    color: #2563eb;
+}
+
+/* Info detail tiles */
+.profile-detail {
+    background: #f1f5f9;
+    border-left-color: transparent;
+}
+
+.profile-detail:hover {
+    background: #e6eef7;
+    border-left-color: #2563eb;
+}
+
+.detail-icon {
+    color: #0e7490;
+}
+
+/* Skill / language badges on a light surface */
+.skill-badge {
+    background: rgba(37, 99, 235, 0.12);
+    color: #1d4ed8;
+    border: 1px solid rgba(37, 99, 235, 0.32);
+}
+
+.language-badge {
+    background: rgba(13, 148, 136, 0.12);
+    color: #0f766e;
+    border: 1px solid rgba(13, 148, 136, 0.32);
+}
+
+/* Experience cards */
+.experience-card {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+}
+
+.experience-card:hover {
+    border-color: #94a3b8;
+}
+
+.experience-title {
+    color: #0e7490;
+}
+
+.experience-empty {
+    color: #475569;
+}
+
+.experience-empty p {
+    color: #1f2937;
+}
+
+.experience-empty span {
+    color: #64748b;
+}
+
+.experience-empty-icon {
+    color: rgba(14, 116, 144, 0.35);
+}
+
+/* CV pane */
+.cv-ready-card,
+.cv-dropzone {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+}
+
+.cv-ready-icon {
+    background: rgba(14, 116, 144, 0.12);
+    color: #0e7490;
+}
+
+.cv-dropzone-icon {
+    color: rgba(14, 116, 144, 0.45);
+}
+
+.upload-button {
+    background: rgba(37, 99, 235, 0.12);
+    color: #1d4ed8;
+    font-weight: 600;
+}
+
+.upload-button:hover {
+    background: rgba(37, 99, 235, 0.2);
+}
+
+/* Applications */
+.application-card {
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-left: 3px solid #0e7490;
+}
+
+.application-card:hover {
+    border-color: #94a3b8;
+    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.15);
+}
+
+.application-job-icon {
+    color: #0e7490;
+}
+
+.quiz-bar {
+    background: #dbe3ec;
+}
+
+/* Status pills — darker text so they read on the light card */
+.status-pill--pending {
+    color: #92600a;
+    background: rgba(252, 211, 77, 0.25);
+    border-color: rgba(180, 130, 10, 0.4);
+}
+
+.status-pill--interview {
+    color: #065f46;
+    background: rgba(16, 185, 129, 0.18);
+    border-color: rgba(6, 95, 70, 0.38);
+}
+
+.status-pill--rejected {
+    color: #991b1b;
+    background: rgba(239, 68, 68, 0.14);
+    border-color: rgba(153, 27, 27, 0.38);
+}
+
+/* Action buttons */
+.app-action--view {
+    color: #0e7490;
+    background: rgba(14, 116, 144, 0.1);
+    border-color: rgba(14, 116, 144, 0.32);
+}
+
+.app-action--view:hover {
+    background: rgba(14, 116, 144, 0.18);
+}
+
+.app-action--delete {
+    color: #b91c1c;
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(185, 28, 28, 0.3);
+}
+
+.app-action--delete:hover {
+    background: rgba(220, 38, 38, 0.18);
+    color: #ffffff;
+}
+
+/* Applications empty state */
+.applications-empty {
+    color: #475569;
+}
+
+.applications-empty p {
+    color: #1f2937;
+}
+
+.applications-empty span {
+    color: #64748b;
+}
+
+.applications-empty-icon {
+    color: rgba(14, 116, 144, 0.3);
 }

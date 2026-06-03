@@ -11,6 +11,18 @@ if (-not (Test-Path $venvPython)) {
     throw "Python venv not found at $venvPython"
 }
 
+# The .venv python.exe lives at C:\Python314 but its standard library +
+# site-packages are at the proper install below. Without PYTHONHOME the venv
+# python fails with "Could not find platform independent libraries" and
+# "No module named uvicorn". Set it here so every service this script spawns
+# works regardless of whether the launching shell had it. Child processes
+# (Start-Process / cmd start) inherit this environment variable.
+if (-not $env:PYTHONHOME -or -not (Test-Path (Join-Path $env:PYTHONHOME 'Lib\os.py'))) {
+    $env:PYTHONHOME = 'C:\Users\wh\AppData\Local\Programs\Python\Python314'
+}
+$env:PYTHONUTF8 = '1'
+Write-Host "[OK] PYTHONHOME=$($env:PYTHONHOME)"
+
 function Stop-PortProcess {
     param([int]$Port)
     $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -85,11 +97,13 @@ Start-Detached `
     -ArgumentList @('/c', 'node index.js') `
     -WorkingDirectory (Join-Path $repoRoot 'Backend\server') | Out-Null
 
-# 2) Frontend Vite
+# 2) Frontend Vite — invoke vite directly via node. Going through `npm run dev`
+#    spawns vite as an npm grandchild that doesn't bind the port reliably when
+#    launched in a detached/minimized window; calling vite.js directly avoids it.
 Start-Detached `
     -Name 'Frontend Vite (5173)' `
     -FilePath 'cmd.exe' `
-    -ArgumentList @('/c', 'npm run dev') `
+    -ArgumentList @('/c', 'node node_modules\vite\bin\vite.js --port 5173 --host') `
     -WorkingDirectory (Join-Path $repoRoot 'Frontend') | Out-Null
 
 # 3) Speech stack + Interview agent (8012/8013)
@@ -109,32 +123,39 @@ $analysisLogDir = Join-Path $analysisDir '.launch-logs'
 if (-not (Test-Path $analysisLogDir)) { New-Item -ItemType Directory -Path $analysisLogDir | Out-Null }
 $analysisOutLog = Join-Path $analysisLogDir 'analysis-service-8090.out.log'
 $analysisErrLog = Join-Path $analysisLogDir 'analysis-service-8090.err.log'
-$analysisCmd = "`"$venvPython`" -m uvicorn app.main:app --host 127.0.0.1 --port 8090 > `"$analysisOutLog`" 2> `"$analysisErrLog`""
+$analysisCmd = "set PYTHONUTF8=1&& `"$venvPython`" -m uvicorn app.main:app --app-dir `"$analysisDir`" --host 127.0.0.1 --port 8090 > `"$analysisOutLog`" 2> `"$analysisErrLog`""
 Start-Process `
     -FilePath 'cmd.exe' `
     -ArgumentList @('/c', 'start', '"Analysis service (8090)"', '/MIN', '/D', "`"$analysisDir`"", 'cmd.exe', '/c', $analysisCmd) `
     -WindowStyle Hidden | Out-Null
 Write-Host "[STARTED] Analysis service (8090) -- logs at $analysisOutLog"
 
-# 5) YOLO service (8001)
+# 5) YOLO service (8001) — use the repo .venv (ultralytics installed there).
+#    The bundled Backend\yolo-service\venv was created on another machine and
+#    points to a missing Python, so we run app.py with the shared venv instead.
 $yoloDir = Join-Path $repoRoot 'Backend\yolo-service'
 Start-Process `
     -FilePath 'powershell.exe' `
     -ArgumentList @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
-        '-Command', 'cd Backend\yolo-service; .\venv\Scripts\python -m uvicorn app:app --host 0.0.0.0 --port 8001'
+        '-Command', "`$env:PYTHONUTF8='1'; `$env:PORT='8001'; & `"$venvPython`" app.py"
     ) `
-    -WorkingDirectory $repoRoot `
+    -WorkingDirectory $yoloDir `
     -WindowStyle Minimized | Out-Null
 Write-Host "[STARTED] YOLO service (8001)"
 
-# 6) Face verification service (8011) — uses its own start.ps1 (installs deps + launches flask)
+# 6) Face verification service (8011) — run app.py with the repo .venv
+#    (insightface/onnxruntime already installed). The bundled start.ps1 hardcodes
+#    another machine's Python paths and re-installs deps, so we skip it.
 $faceDir  = (Join-Path $repoRoot 'Backend\face_verification_service')
-$faceScript = Join-Path $faceDir 'start.ps1'
 Start-Process `
     -FilePath 'powershell.exe' `
-    -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $faceScript) `
+    -ArgumentList @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-Command', "`$env:PYTHONUTF8='1'; & `"$venvPython`" app.py"
+    ) `
     -WorkingDirectory $faceDir `
     -WindowStyle Minimized | Out-Null
 Write-Host "[STARTED] Face verification service (8011)"

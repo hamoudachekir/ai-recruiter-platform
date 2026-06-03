@@ -35,7 +35,13 @@ Rules:
 - Never repeat an asked question or already answered topic.
 - Rephrase only when the whole candidate message clearly asks to repeat.
 - Never say "Of course. Let me rephrase" unless they ask to repeat.
-- Use job title, skills, recent conversation, asked questions, and last answer.
+- Generate every question dynamically from JOB_CONTEXT: job title, required skills,
+  seniority, company context, responsibilities, and the evaluation criteria. Never
+  use a fixed/static question bank.
+- Adapt depth to SENIORITY: Intern/Junior -> fundamentals and learning mindset;
+  Mid -> real project experience and design; Senior/Lead -> architecture, tradeoffs,
+  leadership, and mentoring.
+- Weight your focus and scoring toward the highest-weighted evaluation criteria.
 - Avoid protected-class topics and do not reveal scores or rubric notes.
 - If the answer describes fixing STT, transcript, or interview-flow stability, ask how they tested reliability.
 
@@ -369,6 +375,8 @@ def build_user_turn_prompt(
     preferred_language: str = "en",
     asked_questions: list[str] | None = None,
     answered_topics: list[str] | None = None,
+    job_context: str = "",
+    seniority: str = "",
 ) -> str:
     sentiment_str = "n/a"
     if last_sentiment:
@@ -426,14 +434,21 @@ def build_user_turn_prompt(
     candidate_facts_text = _extract_candidate_facts(transcript_tail)
     language_label = "French" if str(preferred_language or "").lower().startswith("fr") else "English"
 
+    seniority_line = f"SENIORITY: {seniority}\n" if str(seniority or "").strip() else ""
+    job_context_block = (
+        f"JOB_CONTEXT (single source of truth — generate questions from this):\n\"\"\"{str(job_context).strip()}\"\"\"\n"
+        if str(job_context or "").strip()
+        else ""
+    )
+
     return f"""{opener_note}PHASE: {phase}
 RESPONSE_LANGUAGE: {language_label}
 LANGUAGE_RULE: Write next_question in {language_label}. If the candidate asks to switch language, acknowledge briefly and continue the interview in that language.
 JOB_TITLE: {job_title}
 JOB_SKILLS: {', '.join(job_skills) if job_skills else '(none provided)'}
-JOB_DESCRIPTION:
+{seniority_line}JOB_DESCRIPTION:
 \"\"\"{job_desc_block}\"\"\"
-CANDIDATE_NAME: {candidate_name or 'candidate'}
+{job_context_block}CANDIDATE_NAME: {candidate_name or 'candidate'}
 CANDIDATE_PROFILE:
 {profile_block}
 CURRENT_THETA: {theta:.2f}
@@ -476,6 +491,8 @@ def build_compact_user_turn_prompt(
     asked_questions: list[str] | None = None,
     answered_topics: list[str] | None = None,
     candidate_profile: dict | None = None,
+    job_context: str = "",
+    seniority: str = "",
 ) -> str:
     profile_summary = str((candidate_profile or {}).get("short_description") or "").strip()
     profile_skills = [
@@ -510,13 +527,20 @@ def build_compact_user_turn_prompt(
         seen_topics.add(key)
         topics.append(f"- {text[:80]}")
 
+    seniority_line = f"SENIORITY: {seniority}\n" if str(seniority or "").strip() else ""
+    job_context_block = (
+        f"JOB_CONTEXT (single source of truth — generate questions from this):\n{str(job_context).strip()}\n\n"
+        if str(job_context or "").strip()
+        else ""
+    )
+
     return f"""PHASE: {phase}
 JOB_TITLE: {job_title or "candidate role"}
 JOB_SKILLS: {", ".join(job_skills[:10]) if job_skills else "(none)"}
-CANDIDATE: {candidate_name or "candidate"}
+{seniority_line}CANDIDATE: {candidate_name or "candidate"}
 PROFILE: {profile_summary or "(none)"}; skills={", ".join(profile_skills) if profile_skills else "(none)"}
 
-ASKED_QUESTIONS:
+{job_context_block}ASKED_QUESTIONS:
 {chr(10).join(asked_lines) if asked_lines else "(none)"}
 
 ANSWERED_TOPICS:

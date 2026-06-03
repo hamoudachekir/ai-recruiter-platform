@@ -168,7 +168,22 @@ export default function QuestionEvaluationPanel({ report }) {
   if (!report) return null;
 
   const qna = report.interviewQna || {};
-  const evaluations = report.questionEvaluations || [];
+  const rawEvaluations = report.questionEvaluations || [];
+
+  // Drop phantom duplicates: an unanswered question whose identical text is
+  // answered by another entry (e.g. the agent's greeting re-sent before the
+  // candidate replied → a "No answer recorded" Q1 plus the answered Q2).
+  const normQ = (t) =>
+    String(t || "").trim().toLowerCase().replace(/\s+/g, " ").slice(0, 160);
+  const answeredQuestions = new Set(
+    rawEvaluations
+      .filter((e) => String(e.answer || "").trim())
+      .map((e) => normQ(e.question || e.questionText)),
+  );
+  const evaluations = rawEvaluations.filter((e) => {
+    if (String(e.answer || "").trim()) return true;
+    return !answeredQuestions.has(normQ(e.question || e.questionText));
+  });
 
   // Q&A unavailable
   if (!qna.available && evaluations.length === 0) {

@@ -627,6 +627,38 @@ function buildFinalRecommendation(scores, visionMetrics, room) {
 
 // ─── Main builder ─────────────────────────────────────────────────────────────
 
+// Surface the agent's weighted evaluation (from the job's configured criteria)
+// for the recruiter UI. Returns null when the interview produced no criteria
+// breakdown so the panel can hide itself.
+function buildWeightedEvaluation(room) {
+  const report = room?.agentSnapshot?.report || {};
+  const breakdown = Array.isArray(report.criteria_breakdown) ? report.criteria_breakdown : [];
+  if (!breakdown.length) return null;
+
+  const rec = report.hiring_recommendation || {};
+  const pct = (c) =>
+    c.score_pct != null ? Number(c.score_pct) : Math.round((Number(c.score) || 0) * 100);
+
+  return {
+    overallPct: Number(report.weighted_overall_pct) || 0,
+    recommendation: {
+      label: str(rec.label, 'Maybe'),
+      tier: str(rec.tier, 'maybe'),
+      scorePct: Number(rec.score_pct) || Number(report.weighted_overall_pct) || 0,
+      summary: str(rec.summary, ''),
+    },
+    criteria: breakdown.map((c) => ({
+      name: str(c.criterion),
+      weight: Number(c.weight) || 0,
+      scorePct: pct(c),
+      answers: Number(c.answers) || 0,
+      weightedPoints: Number(c.weighted_points) || 0,
+    })),
+    strengths: Array.isArray(report.strengths) ? report.strengths.slice(0, 5) : [],
+    concerns: Array.isArray(report.concerns) ? report.concerns.slice(0, 5) : [],
+  };
+}
+
 function buildRecruiterReport(room) {
   if (!room) throw new Error('room is required');
 
@@ -677,6 +709,7 @@ function buildRecruiterReport(room) {
       flaggedMoments: visionMetrics.flaggedMoments,
     },
     aiInterviewerNotes: aiNotes,
+    weightedEvaluation: buildWeightedEvaluation(room),
     recruiterDecision: room.recruiterDecision || {
       status: 'pending',
       notes: '',
@@ -788,4 +821,5 @@ function buildMockRecruiterReport() {
 module.exports = {
   buildRecruiterReport,
   buildMockRecruiterReport,
+  buildWeightedEvaluation,
 };

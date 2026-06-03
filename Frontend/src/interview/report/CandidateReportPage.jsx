@@ -15,6 +15,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import AIRecommendationCard from './AIRecommendationCard';
+import WeightedEvaluationPanel from './WeightedEvaluationPanel';
 import ReportQualityCard from './ReportQualityCard';
 import ScoreBreakdownCards from './ScoreBreakdownCards';
 import TechnicalSkillMatch from './TechnicalSkillMatch';
@@ -153,7 +154,7 @@ export default function CandidateReportPage({ roomId, room, apiBase, token, onCl
 
   const { candidateInfo, finalRecommendation, reportQuality, scoreBreakdown, questionEvaluations,
           technicalAnalysis, communicationAnalysis, visionIntegrityReport,
-          aiInterviewerNotes, recruiterDecision, evidence } = report;
+          aiInterviewerNotes, recruiterDecision, evidence, weightedEvaluation } = report;
 
   const visionEvents = room?.integrityEvents || room?.visionMonitoring?.events || [];
 
@@ -212,6 +213,7 @@ export default function CandidateReportPage({ roomId, room, apiBase, token, onCl
           {activeSection === 'overview' && (
             <div className="crp-section">
               <AIRecommendationCard recommendation={finalRecommendation} candidateInfo={candidateInfo} />
+              <WeightedEvaluationPanel data={weightedEvaluation} />
               <ReportQualityCard quality={reportQuality} />
 
               {/* Candidate info card */}

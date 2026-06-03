@@ -61,6 +61,9 @@ async function startSession({
   interviewStyle = 'friendly',
   phase = 'intro',
   preferredLanguage = 'en',
+  jobContext = '',
+  seniority = '',
+  evaluationCriteria = [],
 }) {
   return agentRequest('/session/start', {
     interview_id: interviewId,
@@ -72,6 +75,9 @@ async function startSession({
     interview_style: interviewStyle || 'friendly',
     phase,
     preferred_language: preferredLanguage || 'en',
+    job_context: jobContext || '',
+    seniority: seniority || '',
+    evaluation_criteria: Array.isArray(evaluationCriteria) ? evaluationCriteria : [],
   });
 }
 

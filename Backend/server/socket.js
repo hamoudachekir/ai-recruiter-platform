@@ -549,7 +549,18 @@ const setupSocket = (server) => {
 
         const query = roomDbId ? { _id: roomDbId } : { roomId };
         const room = await CallRoom.findOne(query)
-          .populate('job', 'title skills description')
+          .populate({
+            // Load the full job configuration so the interview agent can
+            // generate questions dynamically from every wizard field, and
+            // resolve the department + company-context references to names.
+            path: 'job',
+            select:
+              'title skills description seniorityLevel employmentType workspaceType languages interviewLanguage companyName departmentId companyContextId evaluationConfig',
+            populate: [
+              { path: 'departmentId', select: 'name description' },
+              { path: 'companyContextId', select: 'name industry description website' },
+            ],
+          })
           .populate('candidate', 'name email profile domain linkedin')
           .populate('initiator', 'name email domain enterprise');
 
@@ -602,6 +613,54 @@ const setupSocket = (server) => {
         const jobDescription = [room.job?.description || '', enterpriseContext ? `Enterprise context: ${enterpriseContext}` : '']
           .filter(Boolean)
           .join('\n');
+
+        // ── Assemble the full job configuration the interview agent uses to
+        //    generate every question dynamically (single source of truth). ──
+        const job = room.job || {};
+        const seniority = String(job.seniorityLevel || '').trim();
+        // Structured criteria drive the weighted final score in the agent report.
+        const evaluationCriteria = Array.isArray(job.evaluationConfig?.criteria)
+          ? job.evaluationConfig.criteria
+              .map((c) => ({ name: String(c?.name || '').trim(), weight: Number(c?.weight) || 0 }))
+              .filter((c) => c.name && c.weight > 0)
+          : [];
+        // Human-readable version folded into the question-generation context.
+        const evalCriteria = evaluationCriteria.map((c) => `${c.name} ${c.weight}%`);
+        const jobContext = [
+          job.title ? `Job Title: ${job.title}` : '',
+          seniority ? `Seniority: ${seniority}` : '',
+          job.departmentId?.name ? `Department: ${job.departmentId.name}` : '',
+          job.companyName || job.companyContextId?.name
+            ? `Company: ${job.companyName || job.companyContextId?.name}`
+            : '',
+          job.companyContextId?.industry ? `Industry: ${job.companyContextId.industry}` : '',
+          job.companyContextId?.description
+            ? `Company context: ${job.companyContextId.description}`
+            : '',
+          job.employmentType ? `Employment type: ${job.employmentType}` : '',
+          job.workspaceType ? `Workspace: ${job.workspaceType}` : '',
+          Array.isArray(job.languages) && job.languages.length
+            ? `Languages: ${job.languages.join(', ')}`
+            : '',
+          Array.isArray(job.skills) && job.skills.length
+            ? `Required skills: ${job.skills.join(', ')}`
+            : '',
+          job.description ? `Responsibilities / description:\n${job.description}` : '',
+          evalCriteria.length
+            ? `Evaluation criteria (focus & score weighting):\n- ${evalCriteria.join('\n- ')}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+
+        // Interview language from the job config (French/English only).
+        const interviewLanguage = String(job.interviewLanguage || '').trim().toLowerCase();
+        const preferredLanguage = interviewLanguage.startsWith('fr')
+          || interviewLanguage.includes('français')
+          || interviewLanguage.includes('francais')
+          ? 'fr'
+          : 'en';
+
         const candidateName = room.candidate?.name || room.candidate?.email || '';
 
         const profile = room.candidate?.profile || {};
@@ -652,6 +711,10 @@ const setupSocket = (server) => {
           candidateProfile,
           interviewStyle: normalizedInterviewStyle,
           phase,
+          jobContext,
+          seniority,
+          preferredLanguage,
+          evaluationCriteria,
         });
 
         const introPayload = {

@@ -149,12 +149,12 @@ def transcribe_audio(
         }
 
     try:
-        model = WhisperModel(model_name, device=device, compute_type=compute_type)
-
-        # Run model.transcribe in a thread so we can apply a hard timeout.
-        # Without this, a slow model download or large audio file can hang
-        # the background task indefinitely at progress=65%.
+        # Load the model AND transcribe inside the timed thread. Model
+        # construction can itself block (first-run download from HuggingFace,
+        # CUDA init), so keeping it inside the hard timeout prevents the
+        # background task from hanging indefinitely at progress=65%.
         def _run_transcribe():
+            model = WhisperModel(model_name, device=device, compute_type=compute_type)
             return model.transcribe(
                 str(audio_path),
                 vad_filter=True,

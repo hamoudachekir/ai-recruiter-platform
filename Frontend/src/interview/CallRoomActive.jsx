@@ -46,8 +46,8 @@ const MIN_AUDIO_BLOB_BYTES = 2048;
 const VAD_POLL_INTERVAL_MS = 40;
 const VAD_RMS_THRESHOLD = 0.015; // normalized mic energy above → voice
 const VAD_START_RMS_THRESHOLD = 0.02; // slightly higher to arm recording
-const VAD_SILENCE_MS = 700; // silence needed to end an utterance
-const VAD_MIN_UTTERANCE_MS = 600; // min voice duration to bother sending
+const VAD_SILENCE_MS = 550; // silence needed to end an utterance (snappier turn-taking)
+const VAD_MIN_UTTERANCE_MS = 400; // min voice duration to bother sending
 const VAD_MAX_UTTERANCE_MS = 30000; // hard cap to avoid runaway blobs
 
 // Short merge window on top of VAD so breath-pauses between clauses get
@@ -700,6 +700,11 @@ const CallRoomActive = () => {
   // VAD-based utterance recorder (per-utterance, not per-slice)
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
+  // Dedicated clone of the mic track for the VAD analyser. It is never muted,
+  // so toggling the main track's .enabled for TTS can't leave the analyser
+  // stuck reading silence (a known Chromium MediaStreamAudioSourceNode bug).
+  const vadAnalyserTrackRef = useRef(null);
+  const vadLogAtRef = useRef(0);
   const vadTimerRef = useRef(null);
   const utteranceRecorderRef = useRef(null);
   const utteranceChunksRef = useRef([]);
@@ -2491,7 +2496,12 @@ const CallRoomActive = () => {
     // Don't arm a new utterance while the AI is speaking or composing — its
     // TTS would be captured and misread as the candidate's answer. The post-
     // TTS dead zone covers the speaker tail / room reverb after audio ends.
-    const gated = !canAcceptSttNow().ok;
+    // Also gate while the MAIN mic is muted (TTS mute or user mute) — the
+    // analyser reads its own always-live capture, but we must not arm an
+    // utterance the per-utterance recorder (main stream) would record as silence.
+    const micTrack = streamRef.current?.getAudioTracks?.()[0];
+    const micLive = micTrack ? micTrack.enabled !== false : true;
+    const gated = !canAcceptSttNow().ok || !micLive;
 
     const buf = new Float32Array(analyser.fftSize);
     analyser.getFloatTimeDomainData(buf);
@@ -2500,6 +2510,15 @@ const CallRoomActive = () => {
     const rms = Math.sqrt(sumSq / buf.length);
 
     const now = Date.now();
+
+    // Throttled mic-energy diagnostic (~1/s) so we can see whether the analyser
+    // is actually receiving samples when the candidate speaks.
+    if (now - vadLogAtRef.current > 1000) {
+      vadLogAtRef.current = now;
+      console.log(
+        `[VAD] rms=${rms.toFixed(4)} gated=${gated} inUtterance=${isInUtteranceRef.current} (start≥${VAD_START_RMS_THRESHOLD})`,
+      );
+    }
 
     if (!isInUtteranceRef.current) {
       if (!gated && rms >= VAD_START_RMS_THRESHOLD) {
@@ -2529,7 +2548,7 @@ const CallRoomActive = () => {
     vadTimerRef.current = setTimeout(vadTick, VAD_POLL_INTERVAL_MS);
   };
 
-  const startVad = () => {
+  const startVad = async () => {
     if (!streamRef.current || vadTimerRef.current) return;
 
     const AudioCtx = globalThis.AudioContext || globalThis.webkitAudioContext;
@@ -2542,19 +2561,44 @@ const CallRoomActive = () => {
       return;
     }
 
-    // CRITICAL: the MediaStreamAudioSourceNode caches the audio track state at
-    // construction time in Chromium-based browsers. If `setMicEnabled(false)`
-    // already ran on streamRef.current before this, the analyser will keep
-    // reading silence even after the track is re-enabled — which is why STT
-    // appeared dead for the first candidate responses. Force-enable the
-    // audio tracks here so the source is wired against a live track, then
-    // re-mute later through setMicEnabled() as usual.
     streamRef.current.getAudioTracks().forEach((track) => {
       track.enabled = true;
     });
 
+    // CRITICAL FIX: the VAD analyser must read from an INDEPENDENT mic capture,
+    // not the main interview stream. The main stream's track gets muted
+    // (track.enabled=false) while the agent speaks/thinks; on Chromium that
+    // silences the analyser's MediaStreamAudioSourceNode — and even a clone of
+    // the track — permanently (it keeps reading 0 after re-enable). A second
+    // getUserMedia() session is its own capture and is never muted, so the
+    // analyser always hears the candidate. We instead gate *arming an utterance*
+    // on the main mic's enabled state + canAcceptSttNow() below.
+    let analyserStream;
+    try {
+      analyserStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+      });
+      vadAnalyserTrackRef.current = analyserStream.getAudioTracks()[0] || null;
+    } catch (err) {
+      console.warn(
+        "[VAD] dedicated mic capture failed; using main stream (may go deaf after mute):",
+        err?.message || err,
+      );
+      if (!streamRef.current) return;
+      analyserStream = streamRef.current;
+    }
+    if (vadTimerRef.current) {
+      // startVad was called again while awaiting — abort this duplicate.
+      return;
+    }
+
     const audioContext = new AudioCtx();
-    const source = audioContext.createMediaStreamSource(streamRef.current);
+    const source = audioContext.createMediaStreamSource(analyserStream);
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.4;
@@ -2591,6 +2635,14 @@ const CallRoomActive = () => {
         /* noop */
       }
       audioContextRef.current = null;
+    }
+    if (vadAnalyserTrackRef.current) {
+      try {
+        vadAnalyserTrackRef.current.stop();
+      } catch (err) {
+        /* noop */
+      }
+      vadAnalyserTrackRef.current = null;
     }
     analyserRef.current = null;
     isInUtteranceRef.current = false;

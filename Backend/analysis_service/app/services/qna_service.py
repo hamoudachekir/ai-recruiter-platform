@@ -316,7 +316,31 @@ def _extract_from_messages(messages: list, source: str = "stored_conversation") 
         else:
             i += 1
 
-    return items
+    # ── Dedupe re-sent questions ──────────────────────────────────────────────
+    # The agent's opening greeting (and occasionally a question) can be stored
+    # twice when it is re-emitted before the candidate answers, producing a
+    # phantom "no answer recorded" Q followed by the real answered one. Drop an
+    # empty-answer item when the SAME question text is answered by another item.
+    def _norm_q(text: str) -> str:
+        return " ".join(str(text or "").lower().split())[:160]
+
+    answered_questions = {
+        _norm_q(it.get("questionText"))
+        for it in items
+        if str(it.get("answerText") or "").strip()
+    }
+    deduped = []
+    for it in items:
+        has_answer = bool(str(it.get("answerText") or "").strip())
+        if not has_answer and _norm_q(it.get("questionText")) in answered_questions:
+            continue  # phantom duplicate of an answered question — skip it
+        deduped.append(it)
+
+    # Renumber questionIds so the report shows Q1, Q2, … contiguously.
+    for n, it in enumerate(deduped, start=1):
+        it["questionId"] = f"q{n}"
+
+    return deduped
 
 
 def load_interview_qa(interview_id: str, call_room: Optional[dict] = None) -> dict:

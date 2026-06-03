@@ -19,6 +19,32 @@ if (-not (Test-Path $venvPython)) {
     throw "Python venv not found at $venvPython"
 }
 
+# The .venv python needs PYTHONHOME pointing at the proper install (its stdlib +
+# site-packages live there). Without it the speech stack / agent fail with
+# "Could not find platform independent libraries" / "No module named uvicorn".
+if (-not $env:PYTHONHOME -or -not (Test-Path (Join-Path $env:PYTHONHOME 'Lib\os.py'))) {
+    $env:PYTHONHOME = 'C:\Users\wh\AppData\Local\Programs\Python\Python314'
+}
+
+# ── Whisper device selection ──────────────────────────────────────────────────
+# The repo bundles CUDA DLLs, but their presence does NOT guarantee a usable
+# GPU. Probe CTranslate2 (faster-whisper's backend) for real CUDA devices; if
+# none, run on CPU. Note int8_float16 is GPU-only and fails to initialize on
+# CPU, so the CPU path uses int8.
+$cudaDllDir = Join-Path $backendRoot 'third_party\nvidia_cuda12'
+if (Test-Path (Join-Path $cudaDllDir 'cublas64_12.dll')) {
+    $env:PATH = "$cudaDllDir;$($env:PATH)"
+}
+$cudaCount = & $venvPython -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())" 2>$null
+if (-not $cudaCount) { $cudaCount = '0' }
+if (([int]$cudaCount) -gt 0) {
+    $fwDevice = 'cuda'; $fwCompute = 'int8_float16'
+    Write-Host "[OK] CUDA GPU detected ($cudaCount device(s)) -> GPU inference"
+} else {
+    $fwDevice = 'cpu'; $fwCompute = 'int8'
+    Write-Host "[WARN] No usable CUDA GPU -> CPU inference (device=cpu compute_type=int8)"
+}
+
 $speechHealthUrl = "http://$SpeechHost`:$SpeechPort/health"
 $agentHealthUrl = "http://$AgentHost`:$AgentPort/health"
 $launchLogDir = Join-Path $voiceEngineRoot '.launch-logs'
@@ -136,6 +162,8 @@ $speechDefaults = @{
     FW_PRELOAD_TTS = '1'
     FW_BEAM_SIZE = '1'
     FW_TTS_SPEED = '1.12'
+    FW_DEVICE = $fwDevice
+    FW_COMPUTE_TYPE = $fwCompute
 }
 
 $agentDefaults = @{

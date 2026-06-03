@@ -126,7 +126,11 @@ def _write_report_to_mongo(report: dict) -> None:
 
         client = pymongo.MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
         db = client[db_name]
-        db["interview_reports"].insert_one(report)
+        # insert_one() mutates the passed dict in place by adding an ObjectId
+        # "_id". The caller returns this same `report` dict over the API, where
+        # an ObjectId is not JSON-serializable — so insert a copy and leave the
+        # returned report clean.
+        db["interview_reports"].insert_one(dict(report))
         client.close()
         logger.info("[interview_service] Report written to MongoDB for room %s", report.get("room_id"))
     except Exception as exc:

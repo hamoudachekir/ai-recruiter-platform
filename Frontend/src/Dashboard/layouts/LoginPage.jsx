@@ -22,19 +22,37 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const res = await fetch("http://localhost:3001/api/users");
-      if (!res.ok) throw new Error("Could not reach server");
-      const body = await res.json();
-      const users = body.data || body;
-      const admin = users.find((u) => u.role === "ADMIN");
-      if (!admin) throw new Error("No admin account found");
-
-      if (email === admin.email && password === admin.password) {
-        localStorage.setItem("admin", JSON.stringify(admin));
-        navigate("/dashboard");
-      } else {
-        setError("Invalid email or password.");
+      // Authenticate against the secure backend route (bcrypt + ADMIN-only).
+      const res = await fetch("http://localhost:3001/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.status) {
+        setError(data.message || "Invalid email or password.");
+        return;
       }
+
+      localStorage.setItem("token", data.token);
+
+      // Pull the full admin profile so the dashboard has name/email/picture.
+      let adminObj = { _id: data.userId, email, role: "ADMIN" };
+      try {
+        const ures = await fetch("http://localhost:3001/api/users");
+        if (ures.ok) {
+          const body = await ures.json();
+          const users = body.data || body;
+          const found = users.find(
+            (u) => u._id === data.userId || u.email === email
+          );
+          if (found) adminObj = found;
+        }
+      } catch {
+        /* non-fatal: fall back to the minimal admin object */
+      }
+      localStorage.setItem("admin", JSON.stringify(adminObj));
+      navigate("/dashboard");
     } catch (err) {
       setError(err.message || "Login failed");
     } finally {

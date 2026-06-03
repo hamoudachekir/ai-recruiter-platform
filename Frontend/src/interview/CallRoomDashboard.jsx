@@ -62,6 +62,13 @@ const CallRoomDashboard = () => {
   });
   const [notification, setNotification] = useState(null); // { type: 'info'|'success'|'error', msg }
   const [socketClient, setSocketClient] = useState(null);
+  // ── Related Job: room-creation picker + list filter ──────────────────────
+  const [showJobPicker, setShowJobPicker] = useState(false);
+  const [selectableJobs, setSelectableJobs] = useState([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobSearch, setJobSearch] = useState("");
+  const [creatingRoom, setCreatingRoom] = useState(false);
+  const [jobFilter, setJobFilter] = useState("all"); // "all" | jobId | "none"
   const socketRef = useRef(null);
   const notifyTimerRef = useRef(null);
   const location = useLocation();
@@ -70,6 +77,27 @@ const CallRoomDashboard = () => {
 
   // selectedRoom is always fresh — derived from rooms state
   const selectedRoom = rooms.find((r) => r._id === selectedRoomId) || null;
+
+  // ── Related Job: filter dropdown options + filtered list ──────────────────
+  const roomJobOptions = Array.from(
+    new Map(
+      rooms
+        .filter((r) => r.job)
+        .map((r) => [String(r.job._id || r.job), r.job.title || "Untitled job"]),
+    ).entries(),
+  ).map(([id, title]) => ({ id, title }));
+
+  const filteredRooms = rooms.filter((r) => {
+    if (jobFilter === "all") return true;
+    if (jobFilter === "none") return !r.job;
+    return String(r.job?._id || r.job || "") === jobFilter;
+  });
+
+  const formatJobMeta = (job) =>
+    [job?.departmentId?.name, job?.location, job?.status]
+      .map((v) => String(v || "").trim())
+      .filter(Boolean)
+      .join(" • ");
 
   const notify = useCallback((msg, type = "info") => {
     setNotification({ msg, type });
@@ -344,7 +372,31 @@ const CallRoomDashboard = () => {
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
+  // Load the recruiter's jobs to populate the "Related Job" picker.
+  const loadSelectableJobs = useCallback(async () => {
+    setJobsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/call-rooms/selectable-jobs`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      setSelectableJobs(Array.isArray(data.jobs) ? data.jobs : []);
+    } catch (error) {
+      console.error("Failed to load jobs:", error);
+      notify("Failed to load jobs", "error");
+    } finally {
+      setJobsLoading(false);
+    }
+  }, [token, notify]);
+
+  const openJobPicker = () => {
+    setJobSearch("");
+    setShowJobPicker(true);
+    loadSelectableJobs();
+  };
+
   const createRoom = async (jobId = null) => {
+    setCreatingRoom(true);
     try {
       const response = await fetch(`${API_BASE}/api/call-rooms/create`, {
         method: "POST",
@@ -362,11 +414,46 @@ const CallRoomDashboard = () => {
           roomId: data.room.roomId,
           room: data.room,
         });
-        notify(`Room created: ${data.room.roomId}`, "success");
+        const linked = data.room.job?.title ? ` · linked to ${data.room.job.title}` : "";
+        notify(`Room created: ${data.room.roomId}${linked}`, "success");
+        setShowJobPicker(false);
+      } else {
+        notify(data.message || "Failed to create room", "error");
       }
     } catch (error) {
       console.error("Failed to create room:", error);
       notify("Failed to create room", "error");
+    } finally {
+      setCreatingRoom(false);
+    }
+  };
+
+  // Change (or clear) the job a room is linked to.
+  const updateRoomJob = async (roomId, jobId) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/call-rooms/${roomId}/job`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ jobId: jobId || null }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setRooms((prev) => prev.map((r) => (r._id === roomId ? data.room : r)));
+        notify(
+          data.room.job?.title
+            ? `Room linked to ${data.room.job.title}`
+            : "Room job link cleared",
+          "success",
+        );
+      } else {
+        notify(data.message || "Failed to update job link", "error");
+      }
+    } catch (error) {
+      console.error("Failed to update room job:", error);
+      notify("Failed to update job link", "error");
     }
   };
 
@@ -1364,6 +1451,94 @@ const CallRoomDashboard = () => {
           </div>
         )}
 
+        {/* ── Related Job picker modal ── */}
+        {showJobPicker && (
+          <div
+            className="job-picker-overlay"
+            onClick={() => !creatingRoom && setShowJobPicker(false)}
+          >
+            <div className="job-picker" onClick={(e) => e.stopPropagation()}>
+              <div className="job-picker__head">
+                <h3>Create New Room</h3>
+                <button
+                  className="job-picker__close"
+                  onClick={() => setShowJobPicker(false)}
+                  disabled={creatingRoom}
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
+              <p className="job-picker__hint">
+                Link this room to a job so the AI interviewer uses its skills,
+                seniority, language, and evaluation criteria automatically.
+              </p>
+
+              <input
+                className="job-picker__search"
+                type="text"
+                placeholder="Search jobs by title, department, or location…"
+                value={jobSearch}
+                onChange={(e) => setJobSearch(e.target.value)}
+                autoFocus
+              />
+
+              <div className="job-picker__list">
+                {jobsLoading ? (
+                  <p className="job-picker__empty">Loading your jobs…</p>
+                ) : (
+                  (() => {
+                    const q = jobSearch.trim().toLowerCase();
+                    const matches = selectableJobs.filter((j) =>
+                      !q
+                        ? true
+                        : `${j.title} ${j.department} ${j.location} ${j.seniority}`
+                            .toLowerCase()
+                            .includes(q),
+                    );
+                    if (selectableJobs.length === 0) {
+                      return (
+                        <p className="job-picker__empty">
+                          You have no jobs yet. Create a job first, or create a
+                          room without a job below.
+                        </p>
+                      );
+                    }
+                    if (matches.length === 0) {
+                      return <p className="job-picker__empty">No jobs match “{jobSearch}”.</p>;
+                    }
+                    return matches.map((j) => (
+                      <button
+                        key={j.id}
+                        className="job-option"
+                        disabled={creatingRoom}
+                        onClick={() => createRoom(j.id)}
+                      >
+                        <span className="job-option__title">{j.title}</span>
+                        <span className="job-option__meta">
+                          {[j.department, j.location, j.seniority, j.status]
+                            .filter(Boolean)
+                            .join(" • ") || "—"}
+                        </span>
+                      </button>
+                    ));
+                  })()
+                )}
+              </div>
+
+              <div className="job-picker__footer">
+                <button
+                  className="btn-secondary"
+                  disabled={creatingRoom}
+                  onClick={() => createRoom(null)}
+                >
+                  Create without a job
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="dashboard-header">
           <h1>Interview Call Rooms</h1>
           <div className="dashboard-header__actions">
@@ -1374,7 +1549,7 @@ const CallRoomDashboard = () => {
             >
               Reset tab preferences
             </button>
-            <button className="btn-primary" onClick={() => createRoom()}>
+            <button className="btn-primary" onClick={openJobPicker}>
               + Create New Room
             </button>
           </div>
@@ -1383,14 +1558,32 @@ const CallRoomDashboard = () => {
         <div className="dashboard-content">
           {/* Room List Panel */}
           <div className="room-list-panel">
-            <h2>Your Rooms</h2>
+            <div className="room-list-header">
+              <h2>Your Rooms</h2>
+              {roomJobOptions.length > 0 && (
+                <select
+                  className="room-job-filter"
+                  value={jobFilter}
+                  onChange={(e) => setJobFilter(e.target.value)}
+                  title="Filter rooms by related job"
+                >
+                  <option value="all">All jobs</option>
+                  <option value="none">No job linked</option>
+                  {roomJobOptions.map((j) => (
+                    <option key={j.id} value={j.id}>{j.title}</option>
+                  ))}
+                </select>
+              )}
+            </div>
             <div className="rooms-container">
               {rooms.length === 0 ? (
                 <p className="empty-state">
                   No rooms yet. Create one to get started!
                 </p>
+              ) : filteredRooms.length === 0 ? (
+                <p className="empty-state">No rooms match this job filter.</p>
               ) : (
-                rooms.map((room) => (
+                filteredRooms.map((room) => (
                   <div
                     key={room._id}
                     className={`room-item ${selectedRoomId === room._id ? "active" : ""} ${room.status === "waiting_confirmation" && room.candidate ? "room-item--has-request" : ""}`}
@@ -1420,9 +1613,19 @@ const CallRoomDashboard = () => {
                           <strong>Candidate</strong> {room.candidate.email}
                         </p>
                       )}
-                      {room.job && (
-                        <p>
-                          <strong>Job</strong> {room.job.title}
+                      {room.job ? (
+                        <p className="room-related-job">
+                          <strong>Related Job</strong> {room.job.title}
+                          {formatJobMeta(room.job) && (
+                            <span className="room-related-job__meta">
+                              {formatJobMeta(room.job)}
+                            </span>
+                          )}
+                        </p>
+                      ) : (
+                        <p className="room-related-job room-related-job--none">
+                          <strong>Related Job</strong>
+                          <span className="room-related-job__meta">Not linked</span>
                         </p>
                       )}
                       <p className="created-time">
@@ -1473,6 +1676,41 @@ const CallRoomDashboard = () => {
                 >
                   ×
                 </button>
+              </div>
+
+              {/* Related Job — link / change association */}
+              <div className="room-job-link">
+                <span className="room-job-link__label">Related Job</span>
+                <select
+                  className="room-job-link__select"
+                  value={String(selectedRoom.job?._id || selectedRoom.job || "")}
+                  onFocus={() => {
+                    if (selectableJobs.length === 0) loadSelectableJobs();
+                  }}
+                  onChange={(e) => updateRoomJob(selectedRoom._id, e.target.value || null)}
+                  disabled={selectedRoom.status === "ended"}
+                  title={
+                    selectedRoom.status === "ended"
+                      ? "Cannot change the job after the interview ended"
+                      : "Link this room to a job"
+                  }
+                >
+                  <option value="">— No job linked —</option>
+                  {selectedRoom.job &&
+                    !selectableJobs.some(
+                      (j) => j.id === String(selectedRoom.job._id || selectedRoom.job),
+                    ) && (
+                      <option value={String(selectedRoom.job._id || selectedRoom.job)}>
+                        {selectedRoom.job.title}
+                      </option>
+                    )}
+                  {selectableJobs.map((j) => (
+                    <option key={j.id} value={j.id}>
+                      {j.title}
+                      {j.location ? ` — ${j.location}` : ""}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Download Toolbar — visible for ended rooms */}

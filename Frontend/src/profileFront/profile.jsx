@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader } from "./card";
 import { Avatar } from "./avatar";
 import { Skeleton } from "./skeleton";
-import { FaCamera, FaCheckCircle, FaTimesCircle, FaUpload, FaFilePdf, FaCog, FaUser, FaEnvelope, FaPhone, FaGlobe, FaBriefcase, FaLinkedinIn } from "react-icons/fa";
+import { FaCamera, FaCheckCircle, FaTimesCircle, FaUpload, FaFilePdf, FaCog, FaUser, FaEnvelope, FaPhone, FaGlobe, FaBriefcase, FaLinkedinIn, FaCalendarAlt, FaTrashAlt, FaCloudUploadAlt, FaExternalLinkAlt } from "react-icons/fa";
 import { useNavigate, useParams } from "react-router-dom";
 import Navbar from "../components/Navbar/Navbar";
 import Footer from "../components/Footer/Footer";
@@ -324,7 +324,7 @@ const Profile = () => {
 
             <div className="profile-card">
               {activeTab === "infos" && (
-                <>
+                <div className="infos-grid">
                   {user.role === "ENTERPRISE" && user.enterprise && (
                     <>
                       <div className="profile-detail">
@@ -391,7 +391,7 @@ const Profile = () => {
                         </div>
                       </div>
 
-                      <div className="profile-detail">
+                      <div className="profile-detail profile-detail--full">
                         <FaUser className="detail-icon" />
                         <div className="detail-content">
                           <label>About</label>
@@ -399,7 +399,7 @@ const Profile = () => {
                         </div>
                       </div>
 
-                      <div className="profile-detail">
+                      <div className="profile-detail profile-detail--full">
                         <div className="detail-icon">
                           <FaBriefcase />
                         </div>
@@ -415,7 +415,7 @@ const Profile = () => {
                         </div>
                       </div>
 
-                      <div className="profile-detail">
+                      <div className="profile-detail profile-detail--full">
                         <div className="detail-icon">
                           <FaGlobe />
                         </div>
@@ -432,7 +432,7 @@ const Profile = () => {
                       </div>
                     </>
                   )}
-                </>
+                </div>
               )}
 
               {activeTab === "experience" && (
@@ -476,33 +476,54 @@ const Profile = () => {
               )}
 
               {activeTab === "cv" && (
-                <div className="profile-detail">
-                  <div className="detail-icon">
-                    <FaFilePdf />
+                <div className="cv-pane">
+                  <div className="pane-heading">
+                    <FaFilePdf className="pane-heading-icon" />
+                    <h3>Resume / CV</h3>
                   </div>
-                  <div className="detail-content">
-                    <label>Resume</label>
-                    {resumeUrl ? (
-                      <p className="cv-link">
-                        <a href={`http://localhost:3001${resumeUrl}`} target="_blank" rel="noopener noreferrer">
-                          <FaFilePdf /> View Resume
-                        </a>
-                      </p>
-                    ) : (
-                      <>
-                        <label className="upload-button">
-                          <input type="file" onChange={handleFileChange} accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,image/png,image/jpeg" hidden />
-                          <FaUpload /> Add Resume
-                        </label>
-                        {file && (
-                          <button className="upload-btn" onClick={handleFileUpload}>
-                            <FaUpload /> Upload
-                          </button>
-                        )}
-                      </>
-                    )}
-                    {uploadStatus && <p className={uploadStatus.includes("success") ? "text-success" : "text-danger"}>{uploadStatus}</p>}
-                  </div>
+
+                  {resumeUrl ? (
+                    <div className="cv-ready-card">
+                      <div className="cv-ready-icon">
+                        <FaFilePdf />
+                      </div>
+                      <div className="cv-ready-info">
+                        <span className="cv-ready-title">Resume uploaded</span>
+                        <span className="cv-ready-sub">Your CV is attached to your profile.</span>
+                      </div>
+                      <a
+                        href={`http://localhost:3001${resumeUrl}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="app-action app-action--view"
+                      >
+                        <FaExternalLinkAlt /> View
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="cv-dropzone">
+                      <FaCloudUploadAlt className="cv-dropzone-icon" />
+                      <p className="cv-dropzone-title">No resume uploaded yet</p>
+                      <span className="cv-dropzone-sub">
+                        PDF, DOC, DOCX or image — upload your CV to auto-extract your experience.
+                      </span>
+                      <label className="upload-button">
+                        <input type="file" onChange={handleFileChange} accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,image/png,image/jpeg" hidden />
+                        <FaUpload /> Choose file
+                      </label>
+                      {file && (
+                        <button className="upload-btn" onClick={handleFileUpload}>
+                          <FaCloudUploadAlt /> Upload “{file.name}”
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {uploadStatus && (
+                    <p className={`cv-status ${uploadStatus.includes("success") ? "text-success" : "text-danger"}`}>
+                      {uploadStatus.includes("success") ? <FaCheckCircle /> : <FaTimesCircle />} {uploadStatus}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -520,42 +541,84 @@ const Profile = () => {
               )}
 
               {activeTab === "candidatures" && (
-                <div className="profile-detail">
-                  <div className="detail-icon">
-                    <FaEnvelope />
-                  </div>
-                  <div className="detail-content">
-                    <label>My Applications</label>
-                    {applications.length > 0 ? (
-                      applications.map((app, i) => (
-                        <div key={i} className="application-box">
-                          <p><strong>Position:</strong> {app.jobId?.title}</p>
-                          <p><strong>Email:</strong> {app.email}</p>
-                          <p><strong>Phone:</strong> {app.phone}</p>
-                          <p><strong>Date:</strong> {new Date(app.appliedAt).toLocaleDateString()}</p>
-                          <p><strong>Quiz Score:</strong> {app.quizScore !== undefined ? `${app.quizScore} / 10` : "Not taken"}</p>
-
-                          {app.cv && (
-                            <p>
-                              <a href={`http://localhost:3001${app.cv}`} target="_blank" rel="noopener noreferrer" className="cv-link">
-                                <FaFilePdf /> View CV
-                              </a>
-                            </p>
-                          )}
-
-                          <button
-                            className="btn btn-danger"
-                            onClick={() => handleDeleteApplication(app._id)}
-                          >
-                            Delete Application
-                          </button>
-                          <hr />
-                        </div>
-                      ))
-                    ) : (
-                      <p>No applications submitted yet.</p>
+                <div className="applications-pane">
+                  <div className="pane-heading">
+                    <FaEnvelope className="pane-heading-icon" />
+                    <h3>My Applications</h3>
+                    {applications.length > 0 && (
+                      <span className="pane-count">{applications.length}</span>
                     )}
                   </div>
+
+                  {applications.length > 0 ? (
+                    <div className="applications-grid">
+                      {applications.map((app, i) => {
+                        const decision = (app.recruiterDecision || "PENDING").toUpperCase();
+                        const hasScore = app.quizScore !== undefined && app.quizScore !== null;
+                        const scorePct = hasScore ? Math.max(0, Math.min(100, (app.quizScore / 10) * 100)) : 0;
+                        return (
+                          <div key={i} className="application-card">
+                            <div className="application-card-top">
+                              <div className="application-job">
+                                <FaBriefcase className="application-job-icon" />
+                                <span className="application-job-title">
+                                  {app.jobId?.title || "Untitled position"}
+                                </span>
+                              </div>
+                              <span className={`status-pill status-pill--${decision.toLowerCase()}`}>
+                                {decision}
+                              </span>
+                            </div>
+
+                            <div className="application-meta">
+                              <span className="meta-chip"><FaEnvelope /> {app.email || "—"}</span>
+                              <span className="meta-chip"><FaPhone /> {app.phone || "—"}</span>
+                              <span className="meta-chip">
+                                <FaCalendarAlt /> {app.appliedAt ? new Date(app.appliedAt).toLocaleDateString() : "—"}
+                              </span>
+                            </div>
+
+                            <div className="application-quiz">
+                              <span className="quiz-label">Quiz score</span>
+                              {hasScore ? (
+                                <div className="quiz-bar">
+                                  <div className="quiz-bar-fill" style={{ width: `${scorePct}%` }} />
+                                  <span className="quiz-bar-value">{app.quizScore} / 10</span>
+                                </div>
+                              ) : (
+                                <span className="quiz-not-taken">Not taken</span>
+                              )}
+                            </div>
+
+                            <div className="application-actions">
+                              {app.cv && (
+                                <a
+                                  href={`http://localhost:3001${app.cv}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="app-action app-action--view"
+                                >
+                                  <FaFilePdf /> View CV
+                                </a>
+                              )}
+                              <button
+                                className="app-action app-action--delete"
+                                onClick={() => handleDeleteApplication(app._id)}
+                              >
+                                <FaTrashAlt /> Delete
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="applications-empty">
+                      <FaEnvelope className="applications-empty-icon" />
+                      <p>No applications submitted yet.</p>
+                      <span>When you apply to jobs, they’ll show up here.</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

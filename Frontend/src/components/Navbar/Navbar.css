@@ -403,6 +403,37 @@
   margin: 0 4px;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Menu container — replaces Bootstrap's `.collapse .navbar-collapse`.
+
+   We don't use Bootstrap's collapse plugin here because the SCSS-compiled
+   Bootstrap pulled in by Dashboard/_styles/index.scss loads after the prebuilt
+   bootstrap.min.css and the resulting cascade can leave the menu permanently
+   hidden. Instead we drive open/close with a React state and a plain CSS class.
+   ───────────────────────────────────────────────────────────────────────── */
+.futuristic-navbar-menu {
+  display: flex;
+  flex-basis: auto;
+  flex-grow: 1;
+  align-items: center;
+}
+
+@media (max-width: 991.98px) {
+  .futuristic-navbar .navbar-toggler { display: inline-block; }
+  .futuristic-navbar-menu {
+    display: none;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    margin-top: 8px;
+  }
+  .futuristic-navbar-menu.is-open { display: flex; }
+}
+
+@media (min-width: 992px) {
+  .futuristic-navbar .navbar-toggler { display: none; }
+}
+
 /* Stack zones vertically on collapsed mobile menu */
 @media (max-width: 991.98px) {
   .nav-group-public,

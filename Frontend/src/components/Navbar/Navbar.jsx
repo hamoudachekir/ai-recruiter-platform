@@ -177,26 +177,30 @@ const Navbar = () => {
 
   const profilePath = userRole === "ENTERPRISE" ? `/entreprise/${userId}` : `/profile/${userId}`;
 
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
   return (
     <nav className="futuristic-navbar navbar navbar-expand-lg">
       <div className="container-fluid">
         <Link className="navbar-brand futuristic-brand" to="/">
           <span>NEXTHIRE</span>
         </Link>
-  
+
         <button
           className="navbar-toggler futuristic-toggler"
           type="button"
-          data-bs-toggle="collapse"
-          data-bs-target="#navbarSupportedContent"
           aria-controls="navbarSupportedContent"
-          aria-expanded="false"
+          aria-expanded={isMobileMenuOpen}
           aria-label="Toggle navigation"
+          onClick={() => setIsMobileMenuOpen((open) => !open)}
         >
           <span className="navbar-toggler-icon"></span>
         </button>
-  
-        <div className="collapse navbar-collapse" id="navbarSupportedContent">
+
+        <div
+          className={`futuristic-navbar-menu${isMobileMenuOpen ? ' is-open' : ''}`}
+          id="navbarSupportedContent"
+        >
           {/* Left zone: public / marketing navigation */}
           <ul className="navbar-nav nav-group-public me-auto align-items-center">
             <li className="nav-item">

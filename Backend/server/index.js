@@ -3103,7 +3103,7 @@ app.post("/auth/google", async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user._id, email: user.email },
+      { id: user._id, email: user.email, role: user.role },
       process.env.JWT_SECRET_KEY,
       { expiresIn: "7d" },
     );
@@ -3141,6 +3141,9 @@ const SCHEDULING_SERVICE_TIMEOUT = Number(
 
 app.use("/api", userRoutes);
 app.use("/api", jobRoutes);
+app.use("/api/departments", require("./routes/departmentRoute"));
+app.use("/api/company-contexts", require("./routes/companyContextRoute"));
+app.use("/api/wizard/jobs", require("./routes/jobWizardRoute"));
 app.use("/api/interviews/:roomId/face-verify", require("./routes/faceVerify"));
 app.use("/api/interviews", interviewRoutes);
 app.use("/api/call-rooms", callRoomRoutes);
@@ -3406,7 +3409,7 @@ app.post("/Frontend/login", async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user._id, email: user.email },
+      { id: user._id, email: user.email, role: user.role },
       process.env.JWT_SECRET_KEY,
       { expiresIn: "7d" },
     );
@@ -4445,7 +4448,7 @@ app.post("/Frontend/add-job", async (req, res) => {
 
 app.get("/Frontend/jobs", async (req, res) => {
   try {
-    const jobs = await JobModel.find({ status: { $ne: "CLOSED" } })
+    const jobs = await JobModel.find({ status: "OPEN" })
       .populate({
         path: "entrepriseId",
         select: "enterprise.name name picture",
@@ -5100,6 +5103,14 @@ app.put(
             let autoConfirmError = null;
             let confirmData = null;
 
+            // Declared before the conditional below because platformRoomUrl is
+            // also read afterwards (application.interviewSchedule.meetingLink at
+            // the end of this handler). Keeping it inside the if-block caused
+            // "platformRoomUrl is not defined" whenever the scheduling service
+            // returned no interview_schedule_id (the if was skipped).
+            const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+            let platformRoomUrl = `${FRONTEND_URL}/call-room/available`;
+
             if (
               schedulingData.interview_schedule_id &&
               suggestedSlots.length > 0
@@ -5107,8 +5118,6 @@ app.put(
               const firstSlot = suggestedSlots[0];
 
               // Create a platform call room so the candidate gets a direct link
-              const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-              let platformRoomUrl = `${FRONTEND_URL}/call-room/available`;
               try {
                 const roomId = `room-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
