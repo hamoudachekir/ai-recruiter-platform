@@ -1,0 +1,38 @@
+\chapter*{ANNEXES}
+\markboth{\MakeUppercase{ANNEXES}}{}
+\addcontentsline{toc}{chapter}{ANNEXES}
+\adjustmtc
+\thispagestyle{MyStyle}
+
+%% add to table of contents : Annexe.1
+\makeatletter\renewcommand\thesection{A.\@arabic\c@section}\makeatother
+
+%add spacing in the table of figures
+\addtocontents{lof}{\vspace{0.3cm}}
+
+\appendix
+\renewcommand{\thefigure}{A.\arabic{figure}}
+\setcounter{figure}{0}
+\section{TITRE ANNEXE 1}
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed non risus. Suspendisse lectus tortor, dignissim sit amet, adipiscing nec, ultricies sed, dolor. Cras elementum ultrices diam. Maecenas ligula massa, varius a, semper congue, euismod non, mi. Proin porttitor, orci nec nonummy molestie, enim est eleifend mi, non fermentum diam nisl sit amet erat. Duis semper. Duis arcu massa, scelerisque vitae, consequat in, pretium a, enim.\par
+\begin{figure}[H]%
+    \center%
+    \setlength{\fboxsep}{5pt}%
+    \setlength{\fboxrule}{0.5pt}%
+    \fbox{
+    \includegraphics[width=6.5cm,height=9cm]{images/your_image.png}%
+    }
+    \caption{Titre de figure annexe 1}%
+\end{figure}
+
+\section{TITRE ANNEXE 2}
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed non risus. Suspendisse lectus tortor, dignissim sit amet, adipiscing nec, ultricies sed, dolor. Cras elementum ultrices diam. Maecenas ligula massa, varius a, semper congue, euismod non, mi. Proin porttitor, orci nec nonummy molestie, enim est eleifend mi, non fermentum diam nisl sit amet erat. Duis semper. Duis arcu massa, scelerisque vitae, consequat in, pretium a, enim. Pellentesque congue. Ut in risus volutpat libero pharetra tempor.\par
+\begin{figure}[H]%
+    \center%
+    \setlength{\fboxsep}{5pt}%
+    \setlength{\fboxrule}{0.5pt}%
+    \fbox{
+    \includegraphics[width=6.5cm,height=9cm]{images/your_image.png}%
+    }
+    \caption{Titre de figure annexe 2}%
+\end{figure}

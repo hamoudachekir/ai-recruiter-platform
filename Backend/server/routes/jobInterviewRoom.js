@@ -905,7 +905,7 @@ router.get("/:id/candidates", verifyToken, async (req, res) => {
     }
     const room = await JobInterviewRoom.findById(req.params.id).populate(
       "job",
-      "title description skills languages",
+      "title description skills languages evaluationConfig seniorityLevel",
     );
     if (!room) return res.status(404).json({ message: "Room not found" });
     if (String(room.company) !== String(req.user._id)) {
@@ -1084,7 +1084,7 @@ router.get("/:id/comparison/pdf", (req, res, next) => {
   try {
     const room = await JobInterviewRoom.findById(req.params.id).populate(
       "job",
-      "title description skills languages",
+      "title description skills languages evaluationConfig seniorityLevel",
     );
     if (!room) return res.status(404).json({ message: "Room not found" });
     if (String(room.company) !== String(req.user._id)) {

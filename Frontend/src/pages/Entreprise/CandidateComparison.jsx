@@ -138,6 +138,47 @@ const RADAR_DIMS = [
   { key: "hr_fit", label: "HR Fit" },
 ];
 
+const DIM_KEYS = RADAR_DIMS.map((d) => d.key);
+const EQUAL_WEIGHTS = () =>
+  Object.fromEntries(DIM_KEYS.map((k) => [k, Math.round(100 / DIM_KEYS.length)]));
+
+// Map a job's Step-7 evaluation criteria onto the 7 comparison dimensions so the
+// weighting sliders default to what the recruiter said matters for THIS job.
+const deriveWeightsFromCriteria = (criteria) => {
+  const w = Object.fromEntries(DIM_KEYS.map((k) => [k, 0]));
+  const list = Array.isArray(criteria) ? criteria : [];
+  let matched = false;
+  for (const c of list) {
+    const n = String(c?.name || "").toLowerCase();
+    const wt = Number(c?.weight) || 0;
+    if (!wt) continue;
+    let key = "technical";
+    if (/(problem|solv|analy|reason)/.test(n)) key = "problem_solving";
+    else if (/(communicat|clarity|present|articul|language)/.test(n)) key = "communication";
+    else if (/(culture|fit|behav|team|collab|value|motivation|attitude|\bhr\b)/.test(n)) key = "hr_fit";
+    else if (/(design|architect|system)/.test(n)) key = "system_design";
+    else if (/(resilience|stress|composure|pressure)/.test(n)) key = "resilience";
+    else if (/(technical|tech|coding|engineering|skill)/.test(n)) key = "technical";
+    w[key] += wt;
+    matched = true;
+  }
+  return matched ? w : EQUAL_WEIGHTS();
+};
+
+// Weighted composite (0-100) for a candidate from the recruiter's chosen weights.
+const computeWeightedScore = (candidate, weights) => {
+  const bd = candidate?.aiRank?.compositeBreakdown || {};
+  let num = 0;
+  let den = 0;
+  for (const k of DIM_KEYS) {
+    const wt = Number(weights?.[k]) || 0;
+    if (wt <= 0) continue;
+    num += (Number(bd[k]) || 0) * wt;
+    den += wt;
+  }
+  return den > 0 ? num / den : 0;
+};
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const CandidateComparison = () => {
@@ -160,6 +201,40 @@ const CandidateComparison = () => {
   const [sortBy, setSortBy] = useState("ai");
   const [filter, setFilter] = useState("");
   const [runError, setRunError] = useState(null);
+
+  // ─── Recruiter-adjustable weighting (live re-rank) ──────────────────────────
+  const [weights, setWeights] = useState(() => EQUAL_WEIGHTS());
+  const [weightsTouched, setWeightsTouched] = useState(false);
+
+  // Default the sliders to the job's own evaluation criteria once the room loads
+  // (until the recruiter starts dragging, then we stop overriding their choices).
+  useEffect(() => {
+    if (weightsTouched) return;
+    setWeights(deriveWeightsFromCriteria(room?.job?.evaluationConfig?.criteria));
+  }, [room, weightsTouched]);
+
+  const setWeight = useCallback((key, value) => {
+    setWeightsTouched(true);
+    setWeights((prev) => ({ ...prev, [key]: Math.max(0, Math.min(100, Number(value) || 0)) }));
+  }, []);
+
+  const resetWeightsToJob = useCallback(() => {
+    setWeightsTouched(false);
+    setWeights(deriveWeightsFromCriteria(room?.job?.evaluationConfig?.criteria));
+  }, [room]);
+
+  const weightedScore = useCallback((c) => computeWeightedScore(c, weights), [weights]);
+
+  // Rank (1-based) of each session under the current custom weighting.
+  const weightedRankMap = useMemo(() => {
+    const ranked = candidates
+      .filter((c) => c.aiRank?.compositeBreakdown)
+      .map((c) => ({ id: c.sessionId, s: computeWeightedScore(c, weights) }))
+      .sort((a, b) => b.s - a.s);
+    const map = {};
+    ranked.forEach((r, i) => { map[r.id] = i + 1; });
+    return map;
+  }, [candidates, weights]);
 
   // winner-pick controls
   const [reasonText, setReasonText] = useState("");
@@ -318,6 +393,8 @@ const CandidateComparison = () => {
     );
     return [...list].sort((a, b) => {
       if (sortBy === "name") return a.candidateName.localeCompare(b.candidateName);
+      if (sortBy === "weighted")
+        return computeWeightedScore(b, weights) - computeWeightedScore(a, weights);
       if (sortBy === "theta")
         return (b.metrics?.technicalTheta ?? -999) - (a.metrics?.technicalTheta ?? -999);
       if (sortBy === "hr")
@@ -329,7 +406,7 @@ const CandidateComparison = () => {
       if (ar !== br) return ar - br;
       return (b.aiRank?.suitabilityScore ?? -1) - (a.aiRank?.suitabilityScore ?? -1);
     });
-  }, [candidates, sortBy, filter]);
+  }, [candidates, sortBy, filter, weights]);
 
   const compareList = useMemo(() => {
     if (selectedSessionIds.length === 0) return sortedCandidates;
@@ -461,6 +538,13 @@ const CandidateComparison = () => {
             filter={filter}
             metricCards={metricCards}
             radarData={radarData}
+            weights={weights}
+            onWeightChange={setWeight}
+            onResetWeights={resetWeightsToJob}
+            weightsTouched={weightsTouched}
+            weightedScore={weightedScore}
+            weightedRankMap={weightedRankMap}
+            hasJobCriteria={Boolean(room?.job?.evaluationConfig?.criteria?.length)}
             reasonText={reasonText}
             reasonForSessionId={reasonForSessionId}
             onSortChange={setSortBy}
@@ -628,7 +712,11 @@ const ResultsView = ({
   onSortChange, onFilterChange, onToggleSelect, onClearSelection,
   onRunRanking, onSelectWinner, onClearWinner, onExportPdf, onBackToSelect,
   onReasonChange, onSetReasonFor, navigate,
+  weights, onWeightChange, onResetWeights, weightsTouched,
+  weightedScore, weightedRankMap, hasJobCriteria,
 }) => {
+  const [showWeights, setShowWeights] = useState(false);
+  const weightTotal = DIM_KEYS.reduce((s, k) => s + (Number(weights?.[k]) || 0), 0);
   const recommendedCandidate = candidates.find(
     (c) => c.sessionId === comparison?.recommendedCandidateId
   );
@@ -790,11 +878,20 @@ const ResultsView = ({
         />
         <select value={sortBy} onChange={(e) => onSortChange(e.target.value)}>
           <option value="ai">AI rank</option>
+          <option value="weighted">Custom weighting</option>
           <option value="composite">Composite score</option>
           <option value="theta">Technical θ</option>
           <option value="hr">HR score</option>
           <option value="name">Name</option>
         </select>
+        <button
+          type="button"
+          className={`cc-btn ghost tiny${showWeights ? " active" : ""}`}
+          onClick={() => setShowWeights((s) => !s)}
+          title="Adjust how each dimension is weighted, then re-rank"
+        >
+          ⚖ Adjust weighting
+        </button>
         {selectedSessionIds.length > 0 && (
           <>
             <span className="cc-selected-count">{selectedSessionIds.length} selected</span>
@@ -804,11 +901,69 @@ const ResultsView = ({
           </>
         )}
       </div>
+
+      {/* ── Adjustable weighting panel (live re-rank, client-side) ─────────── */}
+      {showWeights && (
+        <div className="cc-weights">
+          <div className="cc-weights__head">
+            <div>
+              <strong>Weighted ranking</strong>
+              <span className="cc-weights__sub">
+                {weightsTouched
+                  ? "Custom weights — drag to re-prioritize"
+                  : hasJobCriteria
+                    ? "Defaulted to this job's evaluation criteria"
+                    : "Defaulted to equal weights (no job criteria set)"}
+              </span>
+            </div>
+            <div className="cc-weights__actions">
+              {sortBy !== "weighted" && (
+                <button
+                  type="button"
+                  className="cc-btn primary tiny"
+                  onClick={() => onSortChange("weighted")}
+                >
+                  Rank by these weights
+                </button>
+              )}
+              <button type="button" className="cc-btn ghost tiny" onClick={onResetWeights}>
+                Reset to job criteria
+              </button>
+            </div>
+          </div>
+          <div className="cc-weights__grid">
+            {RADAR_DIMS.map(({ key, label }) => {
+              const v = Number(weights?.[key]) || 0;
+              const pct = weightTotal > 0 ? Math.round((v / weightTotal) * 100) : 0;
+              return (
+                <div className="cc-weight-row" key={key}>
+                  <span className="cc-weight-row__label">{label}</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={v}
+                    onChange={(e) => onWeightChange(key, e.target.value)}
+                    className="cc-weight-row__slider"
+                  />
+                  <span className="cc-weight-row__pct">{pct}%</span>
+                </div>
+              );
+            })}
+          </div>
+          {weightTotal === 0 && (
+            <p className="cc-weights__warn">All weights are zero — raise at least one dimension.</p>
+          )}
+        </div>
+      )}
       <div className="cc-roster">
         {sortedCandidates.map((c) => {
           const isWinner = c.sessionId === winnerSessionId;
           const isSelected = selectedSessionIds.includes(c.sessionId);
           const isRec = c.sessionId === comparison?.recommendedCandidateId;
+          const weighted = sortBy === "weighted";
+          const wRank = weightedRankMap?.[c.sessionId];
           return (
             <button
               type="button"
@@ -817,16 +972,25 @@ const ResultsView = ({
               onClick={() => onToggleSelect(c.sessionId)}
             >
               <div className="cc-roster-rank">
-                {c.aiRank?.rank ? `#${c.aiRank.rank}` : "—"}
+                {weighted
+                  ? (wRank ? `#${wRank}` : "—")
+                  : (c.aiRank?.rank ? `#${c.aiRank.rank}` : "—")}
               </div>
               <div className="cc-roster-name">
                 <strong>{getDisplayName(c)}</strong>
                 <span>{c.candidate?.email}</span>
               </div>
-              <div className="cc-roster-metric">
-                <span>Composite</span>
-                <strong>{fmtScore(c.aiRank?.compositeScore, 0)}</strong>
-              </div>
+              {weighted ? (
+                <div className="cc-roster-metric cc-roster-metric--weighted">
+                  <span>Weighted</span>
+                  <strong>{fmtScore(weightedScore(c), 0)}</strong>
+                </div>
+              ) : (
+                <div className="cc-roster-metric">
+                  <span>Composite</span>
+                  <strong>{fmtScore(c.aiRank?.compositeScore, 0)}</strong>
+                </div>
+              )}
               <div className="cc-roster-metric">
                 <span>AI</span>
                 <strong>{fmtScore(c.aiRank?.suitabilityScore, 0)}</strong>
@@ -839,6 +1003,7 @@ const ResultsView = ({
                 <span>HR</span>
                 <strong>{fmtScore(c.metrics?.hrScore, 0)}</strong>
               </div>
+              {weighted && wRank === 1 && <span className="cc-winner-chip">Top weighted</span>}
               {isWinner && <span className="cc-winner-chip">Pick</span>}
               {isRec && !isWinner && <span className="cc-ai-chip">AI Pick</span>}
             </button>

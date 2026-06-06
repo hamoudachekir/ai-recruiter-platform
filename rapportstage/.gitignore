@@ -1,0 +1,60 @@
+# LaTeX build artifacts — all of these are regenerated on every compile.
+# Source files (*.tex, *.bib, *.cls, .latexmkrc, images/) are NOT ignored.
+
+## Build output directory (all generated files + PDF now land here)
+build/
+
+## Official ESPRIT cover page PDF (binary, keep the source Word/PDF separately)
+cover.pdf
+
+## Core auxiliary files
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+
+## latexmk
+*.fls
+*.fdb_latexmk
+
+## minitoc (per-chapter mini tables of contents)
+*.mtc
+*.mtc[0-9]*
+*.maf
+*.ptc
+
+## SyncTeX (PDF <-> source navigation cache)
+*.synctex
+*.synctex.gz
+*.synctex(busy)
+
+## Bibliography
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+
+## Index / glossary / acronyms
+*.idx
+*.ind
+*.ilg
+*.glo
+*.gls
+*.acn
+*.acr
+*.alg
+
+## Beamer / misc
+*.nav
+*.snm
+*.vrb
+
+## minted (cached highlighted code — also requires -shell-escape)
+_minted*/
+*.pyg
+
+## Compiled output — ignored by default since it is regenerated.
+## If you WANT to commit the final PDF, delete the next line or add:  !main.pdf
+*.pdf

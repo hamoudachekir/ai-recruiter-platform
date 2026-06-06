@@ -1,0 +1,99 @@
+% Définition de la classe de document utilisée pour le rapport de PFE
+\documentclass[12pt, oneside, a4paper]{pfe-report}
+
+% Définition du chemin des images
+\graphicspath{{images/}}
+
+% Inclusion des packages nécessaires
+\usepackage[french]{babel}  % Support de la langue française
+\usepackage{hyphenat}       % Gestion des césures
+\usepackage{hyperref}       % Gestion des liens hypertexte
+\usepackage{utfsym}         % Symboles Unicode
+\usepackage{tabularx}       % Tableaux avancés
+\usepackage{amsmath}        % Formules mathématiques avancées
+\usepackage{pdfpages}       % Inclusion de fichiers PDF
+\usepackage{longtable}      % Tableaux sur plusieurs pages
+\usepackage{caption}        % Gestion des légendes
+\usepackage{ragged2e}       % Alignement du texte justifié
+\justifying                % Justification du texte dans tout le document
+\include{Commands}          % Inclusion d'un fichier contenant des commandes personnalisées
+
+% Configuration des métadonnées du PDF généré
+\hypersetup{
+  pdftitle={\reportTitle~-~\reportSubject},  % Titre du document
+  pdfauthor={\reportAuthor},                % Auteur du document
+  pdfsubject={\reportSubject},              % Sujet du rapport
+  pdfkeywords={report} {internship} {pfe}  
+}
+
+% Activation des mini-tables des matières pour chaque chapitre
+\dominitoc
+
+% Début du document
+\begin{document}
+
+    % ---------------------------------------------------------------
+    % PAGE DE GARDE — incluse depuis cover.pdf (modèle officiel ESPRIT)
+    % La page est insérée sans en-tête ni pied de page et n'est pas
+    % comptée dans la pagination (pagecommand={} + noautoscale).
+    % ---------------------------------------------------------------
+    \includepdf[pages=1, fitpaper=true, pagecommand={\thispagestyle{empty}}]{cover.pdf}
+
+    % Interligne 1,15 (consigne ESPRIT « Forme du rapport »)
+    \setstretch{1.15}
+
+    % Numérotation des pages en chiffres romains pour les préliminaires
+    \pagenumbering{roman}
+
+    % Inclusion des sections préliminaires (pages liminaires)
+    \input{chapitre/01-Dedication}  % Page de dédicace
+    \input{chapitre/02-Remerciement}  % Page de remerciements
+
+    % Configuration de la table des matières
+    \addtocontents{toc}{\protect\thispagestyle{MyStyle}}  % Application du style personnalisé
+    \renewcommand*\contentsname{TABLE DES MATIÈRES}  % Changement du titre de la table des matières
+    \begin{spacing}{1}
+    \tableofcontents  % Génération de la table des matières
+    \end{spacing}
+
+    % Configuration de la liste des figures
+    \addtocontents{lof}{\protect\thispagestyle{MyStyle}}
+    \renewcommand{\listfigurename}{LISTE DES FIGURES}  % Changement du titre de la liste des figures
+    \begin{spacing}{1}
+    \listoffigures  % Génération de la liste des figures
+    \end{spacing}
+    \addcontentsline{toc}{chapter}{\listfigurename}  % Ajout de la liste des figures dans la table des matières
+    \adjustmtc  % Ajustement des mini-tables des matières
+
+    % Configuration de la liste des tableaux
+    \addtocontents{lof}{\protect\thispagestyle{MyStyle}}
+    \renewcommand{\listtablename}{LISTE DES TABLEAUX}  % Changement du titre de la liste des tableaux
+    \begin{spacing}{1}
+    \listoftables  % Génération de la liste des tableaux
+    \end{spacing}
+    \addcontentsline{toc}{chapter}{\listtablename}  % Ajout de la liste des tableaux dans la table des matières
+    \adjustmtc  % Ajustement des mini-tables des matières
+
+    % Inclusion des autres sections du rapport
+    \input{chapitre/03-ListeDesAbr}  % Liste des abréviations
+    \input{chapitre/04-IntroductionGeneral}  % Introduction générale
+
+    % Passage à la numérotation arabe pour le corps du document
+    \pagenumbering{arabic}
+
+    % Maintien de l'interligne 1,15 pour le corps du document
+    \setstretch{1.15}
+
+    % Inclusion des chapitres du rapport
+    \input{chapitre/05-Chapitre1}
+    \input{chapitre/06-Chapitre2}
+    \input{chapitre/07-Chapitre3}
+    \input{chapitre/08-Chapitre4}
+    
+    % Conclusion du rapport
+    \input{chapitre/11-ConclusionGenerale}  
+    
+    % Bibliographie
+    \input{chapitre/09-Bibliographie}  
+
+\end{document}

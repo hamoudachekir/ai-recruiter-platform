@@ -1,0 +1,231 @@
+\chapter[Chapitre 2 : État de l'art et choix technologiques]{Chapitre 2 : État de l'art\\et choix technologiques}
+\begin{spacing}{1.2}
+\minitoc
+\thispagestyle{MyStyle}
+\end{spacing}
+\clearpage
+
+\section{Introduction}
+
+Ce chapitre dresse un panorama des travaux académiques et des solutions industrielles en matière de recrutement assisté par l'IA, identifie les domaines de recherche qui fondent la conception de notre plateforme, et présente les technologies et \textit{frameworks} retenus pour chaque service. L'objectif est de justifier les choix techniques effectués et de situer le projet par rapport à l'état de l'art.
+
+\section{État de l'art}
+
+Le recrutement assisté par l'intelligence artificielle n'est pas un domaine nouveau, mais il a considérablement évolué ces dernières années avec l'avènement des grands modèles de langage et de l'analyse multimodale. Cette section fait le point sur les travaux et les outils existants dans les quatre domaines qui touchent directement notre plateforme : l'IA appliquée au recrutement, les modèles de langage et les \textit{workflows} agentiques, le traitement de la parole, et la vision par ordinateur. Pour chaque domaine, nous situons les approches courantes et nous indiquons le positionnement retenu dans le projet.
+
+\subsection{L'intelligence artificielle dans le recrutement}
+
+\subsubsection{Analyse automatique des CV et matching candidat-poste}
+
+Les premiers systèmes de présélection automatique, les \textit{ATS} (\textit{Applicant Tracking Systems}), reposaient sur la recherche de mots-clés : le CV était comparé à une liste de termes attendus pour le poste. Ces outils ont réduit le travail manuel, mais au prix d'une grande rigidité — un candidat compétent qui n'employait pas exactement le vocabulaire de l'offre se trouvait écarté sans que personne ne le remarque.
+
+L'arrivée des représentations vectorielles de mots, telles que Word2Vec puis GloVe, a permis de mesurer une proximité sémantique entre deux textes et de dépasser en partie ce problème de vocabulaire. Plus récemment, des modèles à base de \textit{transformers} tels que BERT ont été spécialisés pour la mise en correspondance entre un CV et une description de poste, en tenant compte du contexte des deux côtés. Notre plateforme s'inscrit dans cette lignée : le \textit{matching} ne se fait pas sur des mots-clés bruts, mais sur des \textit{embeddings} produits par des modèles de type Sentence-Transformers, indexés avec FAISS pour permettre une recherche rapide de proximité sémantique.
+
+Une autre approche s'appuie sur les graphes de connaissances. Des plateformes comme Eightfold.ai relient compétences, intitulés de poste et secteurs d'activité pour déduire des qualifications implicites : un candidat qui mentionne « PyTorch » possède vraisemblablement des bases en \textit{deep learning}, même si l'expression n'apparaît pas explicitement dans son CV.
+
+Le biais algorithmique reste un point sensible : un modèle entraîné sur des données de recrutement historiques risque de reproduire les biais de genre ou d'origine présents dans ces données. Notre plateforme limite ce risque en évaluant les candidats par rapport à une grille de critères dérivée de l'offre elle-même, et non d'historiques d'embauche antérieurs.
+
+\subsubsection{IA conversationnelle pour l'entretien automatisé}
+
+Les premiers systèmes d'entretien automatisé utilisaient des \textit{chatbots} à script, incapables de réagir à une réponse inattendue. Les grands modèles de langage ont changé la donne : il est désormais possible de mener un échange ouvert et adaptatif, d'ajuster la difficulté des questions, de relancer sur une réponse incomplète et de maintenir une conversation cohérente sur plusieurs tours.
+
+Des plateformes commerciales comme HireVue ou Interviewer.ai font passer des entretiens vidéo en différé et notent les candidats à partir d'indices textuels et audio-visuels. Ces systèmes diffusent toutefois des questions préenregistrées et ne dialoguent pas en temps réel. C'est précisément là que se situe l'apport de notre solution, qui conduit un entretien synchrone, en direct, où l'agent réagit aux réponses du candidat.
+
+Les architectures dites agentiques vont plus loin en découpant l'entretien en plusieurs phases coordonnées par une machine à états. Notre plateforme suit ce principe : une machine à états développée sur mesure pilote la progression, depuis la phase RH comportementale menée par l'agent conversationnel jusqu'à la phase technique, où les questions sont sélectionnées par un moteur adaptatif de type IRT/CAT.
+
+\subsubsection{Évaluation multimodale du candidat}
+
+Au-delà du texte, plusieurs travaux étudient les signaux audio et vidéo comme indicateurs de la qualité de communication d'un candidat. Des campagnes d'évaluation telles qu'AVEC ont montré que certaines caractéristiques paralinguistiques — débit de parole, hésitations, variations de hauteur de voix — et les unités d'action faciales sont corrélées, faiblement mais de façon constante, avec les notes attribuées par des recruteurs humains.
+
+Les approches récentes combinent transcription, indices audio et \textit{embeddings} d'images vidéo pour produire un score global du candidat. Notre plateforme intègre ces signaux multimodaux à travers l'analyse de sentiment vocal et l'analyse des expressions faciales, en les traitant comme des indices complémentaires plutôt que comme la base de la décision finale, qui reste sous contrôle humain.
+
+\subsubsection{Surveillance automatisée et contrôle d'intégrité}
+
+Avec le passage au recrutement à distance, l'intégrité des évaluations en ligne est devenue un enjeu à la fois technique et éthique. Les solutions de surveillance se rangent en trois catégories : la \textbf{vérification d'identité}, qui confirme que la personne évaluée est bien le candidat attendu ; le \textbf{suivi de l'attention}, qui repère les déviations du regard, les changements de posture et de fenêtre ; et le \textbf{contrôle de l'environnement}, qui détecte des ressources non autorisées.
+
+Des plateformes telles que Proctorio combinent flux caméra, verrouillage du navigateur et analyse de frappe. Les recherches ont toutefois signalé un taux de faux positifs préoccupant, en particulier lorsque la détection de visage perd en précision selon la couleur de peau. Notre plateforme répond à ce risque en croisant plusieurs signaux de détection — changement de fenêtre, détection d'objets par vision par ordinateur, vérification d'identité faciale — plutôt qu'en s'appuyant sur un seul indicateur. Aucune violation ne déclenche une disqualification automatique : toutes sont remontées au recruteur sous forme d'un rapport horodaté, qui tranche.
+
+\subsection{Grands modèles de langage et \textit{workflows} agentiques}
+
+\subsubsection{Modèles de langage à base de \textit{transformers}}
+
+L'architecture \textit{transformer}, introduite par Vaswani \textit{et al.} en 2017, a remplacé les réseaux récurrents par un mécanisme d'auto-attention qui calcule en parallèle les relations entre tous les jetons d'une séquence. Ce choix a rendu possible l'entraînement sur des corpus bien plus volumineux qu'auparavant et a donné naissance au paradigme des modèles de langage pré-entraînés.
+
+BERT a montré qu'un modèle pré-entraîné sur la prédiction de mots masqués pouvait ensuite être spécialisé sur des tâches précises avec très peu de données annotées supplémentaires. La famille GPT a exploré la voie autorégressive, en augmentant la taille de modèles décodeurs jusqu'à des centaines de milliards de paramètres et en faisant apparaître des capacités d'apprentissage à partir de quelques exemples seulement.
+
+Pour notre plateforme, le moteur de dialogue repose sur le modèle \texttt{openai/gpt-oss-120b} servi via Groq, un modèle de type \textit{mixture-of-experts} de 117 milliards de paramètres. Sa capacité à suivre des instructions, son temps de réponse réduit et sa prise en charge des sorties structurées en JSON en font un choix adapté pour orchestrer un entretien à plusieurs tours et produire des grilles d'évaluation directement exploitables par le reste du système.
+
+\subsubsection{\textit{Prompt engineering} et \textit{instruction tuning}}
+
+Le \textit{prompt engineering} consiste à composer le contexte textuel fourni au modèle pour obtenir le comportement voulu, sans modifier ses poids. Plusieurs techniques sont utilisées dans notre plateforme :
+
+\begin{itemize}
+  \item \textbf{\textit{System prompts} :} un message prioritaire placé en tête de chaque conversation, qui fixe le rôle du modèle, ses contraintes et le format de sortie attendu. C'est par ce biais qu'est définie la personnalité de l'agent RH « Nour ».
+  \item \textbf{Exemples \textit{few-shot} :} quelques paires entrée-sortie insérées dans le prompt pour orienter le style des réponses.
+  \item \textbf{\textit{Chain-of-thought} :} le modèle est invité à produire un raisonnement explicite avant sa réponse finale, ce qui améliore la précision sur les tâches d'évaluation complexes.
+  \item \textbf{Sortie structurée :} le modèle est contraint à répondre en JSON, ce qui permet aux étapes suivantes du système de consommer sa réponse de façon programmatique, sans analyse de chaîne de caractères fragile.
+\end{itemize}
+
+L'\textit{instruction tuning} — un réglage supervisé sur un jeu de paires instruction-réponse, suivi d'un apprentissage par renforcement à partir de retours humains (RLHF) — aligne le modèle de base sur les préférences humaines. C'est ce procédé qui produit les variantes optimisées pour le dialogue employées dans notre solution.
+
+\subsubsection{\textit{Frameworks} agentiques et machines à états}
+
+Au sens des LLM, un agent est un système qui utilise un modèle de langage comme moteur de raisonnement pour décider des actions à mener, les exécuter via des appels d'outils ou d'API, puis recommencer jusqu'à atteindre un objectif. Le paradigme ReAct (\textit{Reason + Act}) formalise cette boucle : le modèle alterne entre produire une réflexion, déclencher une action, observer le résultat, puis recommencer.
+
+Des bibliothèques telles que LangChain et LangGraph proposent des briques réutilisables pour construire de tels agents : gabarits de \textit{prompts}, parseurs de sortie, et graphes d'exécution où les nœuds représentent les étapes de l'agent et les arêtes les transitions conditionnelles. Plutôt que de dépendre d'un de ces \textit{frameworks}, notre plateforme implémente sa propre machine à états, légère et entièrement maîtrisée, mieux adaptée aux contraintes de latence d'un entretien en direct.
+
+Notre solution repose ainsi sur un agent conversationnel unique, « Nour », dont le comportement est piloté par cette machine à états plutôt que par une coordination entre plusieurs modèles distincts. Son fonctionnement s'articule autour de trois mécanismes :
+
+\begin{itemize}
+  \item deux \textbf{phases d'entretien} — une phase RH comportementale puis une phase technique — chacune dotée de son propre \textit{prompt} système ;
+  \item une \textbf{sélection adaptative} des questions techniques fondée sur la théorie de réponse à l'item (IRT) ;
+  \item des \textbf{modes de comportement} qui s'ajustent au niveau de stress détecté chez le candidat (normal, chaleureux, rassurant), afin de préserver son confort sans changer d'interlocuteur.
+\end{itemize}
+
+Ce choix d'une implémentation sur mesure maintient un contrôle explicite du flux et des contextes courts, tout en évitant la complexité d'un \textit{framework} agentique externe.
+
+\subsection{Traitement de la parole}
+
+\subsubsection{Reconnaissance automatique de la parole}
+
+La reconnaissance automatique de la parole (ASR) transforme un signal audio brut en transcription textuelle. Les systèmes classiques associaient des modèles de Markov cachés (HMM) pour la modélisation temporelle à des mélanges de gaussiennes (GMM) pour la modélisation acoustique, et nécessitaient un lexique de prononciation et un modèle de langage distincts.
+
+L'apprentissage profond a fait basculer ce domaine vers des modèles de bout en bout, qui apprennent directement la correspondance entre l'audio et le texte. La fonction de coût CTC (\textit{Connectionist Temporal Classification}) a permis un entraînement séquence à séquence sans alignement explicite, et les architectures encodeur-décodeur à attention comme LAS (\textit{Listen, Attend and Spell}) ont encore amélioré la précision. Le modèle wav2vec 2.0 a montré qu'un pré-entraînement auto-supervisé sur de l'audio brut pouvait atteindre des taux d'erreur compétitifs avec seulement quelques heures de données annotées.
+
+Whisper, développé par OpenAI, est un modèle entraîné de façon faiblement supervisée sur des centaines de milliers d'heures d'audio multilingue. Son architecture encodeur-décodeur traite des spectrogrammes log-mel et atteint une précision proche de celle d'un humain en anglais, tout en restant performant sur de nombreuses langues. Notre plateforme utilise Faster-Whisper, une réimplémentation optimisée de Whisper qui réduit fortement le temps de transcription et la consommation mémoire — ce qui est indispensable pour transcrire les réponses du candidat au fil de l'entretien en temps réel.
+
+\subsubsection{Synthèse vocale neuronale}
+
+La synthèse vocale (TTS, \textit{Text-To-Speech}) transforme un texte écrit en parole. Les premiers systèmes reposaient sur la sélection d'unités (assemblage de segments de phonèmes préenregistrés) ou sur la synthèse par formants, et produisaient une voix intelligible mais artificielle.
+
+WaveNet, un modèle génératif travaillant directement sur la forme d'onde au moyen de convolutions causales dilatées, a montré pour la première fois qu'une voix synthétique pouvait être difficile à distinguer d'une voix humaine. Les systèmes suivants, comme Tacotron 2 ou FastSpeech, ont séparé la prédiction du spectrogramme de la génération de la forme d'onde, ce qui a accéléré l'inférence. Les approches récentes (VITS, StyleTTS 2) savent moduler la prosodie et le débit, et reproduire une voix à partir d'un court extrait.
+
+Pour la voix de l'agent conversationnel, notre plateforme s'appuie sur EdgeTTS, qui donne accès aux voix neuronales de Microsoft sans coût d'API. Ce choix s'inscrit dans la contrainte du projet de privilégier des outils gratuits ou exécutables localement. EdgeTTS fonctionne en \textit{streaming} : il commence à renvoyer des fragments audio avant la fin de la synthèse, ce qui limite le délai perçu et contribue à la fluidité de l'échange pendant l'entretien.
+
+\subsubsection{ASR en contexte multilingue}
+
+L'entretien se déroule principalement en français et en anglais, deux langues pour lesquelles Whisper offre une précision élevée sans adaptation particulière. Le choix de Faster-Whisper repose en grande partie sur cette couverture multilingue : un même modèle gère les deux langues d'entretien sans qu'il soit nécessaire de basculer entre plusieurs systèmes ASR.
+
+Le dialecte tunisien (darija) constitue toutefois un cas difficile : il mêle l'arabe classique à des emprunts au français, à l'italien et au berbère, et n'a pas de forme écrite normalisée. Les systèmes entraînés sur l'arabe standard moderne y sont peu performants. Plusieurs pistes existent pour ces langues peu dotées — apprentissage par transfert, modèles multilingues partageant un même espace acoustique, augmentation de données par synthèse vocale — et leur intégration figure parmi les perspectives d'évolution de la plateforme.
+
+\subsection{Vision par ordinateur pour le contrôle d'intégrité}
+
+\subsubsection{Détection et suivi de visage}
+
+La détection de visage consiste à localiser les visages humains dans une image ou une trame vidéo. L'algorithme de Viola-Jones (2001) a introduit le premier détecteur temps réel fondé sur des caractéristiques de type Haar et un classificateur en cascade. Les réseaux de neurones convolutifs profonds ont ensuite dominé les \textit{benchmarks} de détection de visage : MTCNN (\textit{Multi-task Cascaded Convolutional Networks}) et RetinaFace atteignent un rappel élevé même en cas d'occlusion, de variation d'éclairage ou de pose extrême.
+
+Pour la réidentification d'identité, FaceNet a introduit une fonction de coût par triplets qui projette chaque image de visage dans un espace d'embeddings compact de 128 ou 512 dimensions, de sorte que la distance entre les \textit{embeddings} d'une même personne est minimisée et celle entre personnes différentes est maximisée. Cet espace permet une vérification d'identité en un seul exemple (\textit{one-shot}) sans réentraîner le modèle pour chaque nouvelle identité.
+
+Google MediaPipe BlazeFace est un détecteur de visage léger et optimisé pour les appareils mobiles : il restitue six points-clés faciaux en plus de la boîte englobante, et tourne à plus de 200 images par seconde sur un GPU mobile. Ces caractéristiques en font un choix adapté au traitement trame par trame à faible latence requis par le module de détection de fraude de notre plateforme.
+
+\subsubsection{Estimation du regard et suivi oculaire}
+
+L'estimation du regard prédit l'endroit où une personne dirige son attention, soit comme un vecteur de direction 3D, soit comme un point d'intérêt 2D sur un écran. Les méthodes basées sur l'apparence régressent le regard à partir d'une image du visage entier ou d'un recadrage des yeux, à l'aide de CNN entraînés sur des jeux de données de regard tels que MPIIGaze ou GazeCapture.
+
+L'EAR (\textit{Eye Aspect Ratio}) est une heuristique légère dérivée de six points de repère faciaux autour de chaque œil : elle quantifie le degré d'ouverture des yeux et est utilisée pour la détection des clignements et de la somnolence. Notre plateforme combine l'analyse par EAR avec le maillage facial 3D à 468 points de MediaPipe pour déterminer à la fois le taux de clignement et la direction du regard, et signaler tout regard hors écran prolongé comme une violation potentielle d'intégrité.
+
+\subsubsection{Détection d'objets en environnement contrôlé}
+
+La détection d'objets identifie et localise toutes les instances d'un ensemble de classes cibles dans une image. Les détecteurs à deux étapes (R-CNN, Faster R-CNN) génèrent d'abord des propositions de régions, puis classifient chaque région ; ils offrent une haute précision mais sont coûteux en calcul pour les applications temps réel.
+
+Les détecteurs à une étape, comme la famille YOLO (\textit{You Only Look Once}), prédisent les probabilités de classe et les boîtes englobantes en une seule passe, ce qui permet une inférence en temps réel. YOLOv8 (Ultralytics) atteint des performances état de l'art sur le \textit{benchmark} COCO à des vitesses d'inférence supérieures à 100 images par seconde sur des GPU modernes. Il repose sur un \textit{backbone} CSPDarknet, un \textit{neck} PANet pour l'agrégation de caractéristiques multi-échelle et une tête de détection sans ancres (\textit{anchor-free}). Notre plateforme déploie la variante YOLOv8n (nano) pour identifier les objets interdits — téléphone mobile, écran secondaire, notes écrites, personne supplémentaire — dans le flux de la webcam du candidat pendant l'entretien.
+
+\section{Technologies et \textit{frameworks} retenus}
+
+Cette section décrit les technologies retenues pour la réalisation de notre plateforme. Pour chacune, nous précisons son rôle dans le système et la raison du choix.
+
+% ── 2.3.1 ────────────────────────────────────────────────────────────────────
+\subsection{\textit{Back-end} et couche API}
+
+\subsubsection{FastAPI}
+
+FastAPI (Python) porte les services liés à l'IA : le moteur d'entretien, l'analyse multimodale et la détection de fraude. Il expose des points d'accès WebSocket pour la communication bidirectionnelle en temps réel pendant l'entretien, servis par le \textit{runtime} ASGI Uvicorn. La documentation OpenAPI générée automatiquement, la validation des requêtes via Pydantic et la prise en charge native de \texttt{async}/\texttt{await} en font un choix adapté pour des services sensibles à la latence et fortement liés aux entrées-sorties, comme le traitement audio en flux.
+
+\subsubsection{Node.js et Express}
+
+Le service métier principal — gestion des utilisateurs, des offres d'emploi, des candidatures et des entretiens — est développé en Node.js avec le \textit{framework} Express. L'accès à la base de données passe par Mongoose, qui fournit une couche de modélisation au-dessus de MongoDB et permet de définir des schémas, des validations et des relations entre documents. Ce service expose l'API REST consommée par le \textit{front-end} React.
+
+\subsubsection{MongoDB}
+
+MongoDB est la base de données principale de la plateforme. Le projet utilise une base unique, \texttt{ai\_recruiter}, qui regroupe les entités candidats, recruteurs, offres, étapes de recrutement, entretiens, paires question-réponse et rapports de violation. Le choix d'une base NoSQL orientée documents se justifie par la nature des données manipulées : des objets imbriqués et de structure variable (transcriptions, résultats d'analyse, sessions d'entretien) qui s'expriment mal dans un schéma relationnel rigide. Cette base a fait l'objet d'une consolidation : trois bases distinctes ont été fusionnées en une seule pour simplifier l'accès aux données et les requêtes inter-collections.
+
+\subsubsection{Redis}
+
+Redis assure le stockage en mémoire de l'état de session du moteur d'entretien. Le contexte de l'entretien — question en cours, historique d'évaluation, sujets déjà abordés — y est conservé, ce qui lui permet de survivre à une coupure passagère de la connexion WebSocket sans obliger le client à retransmettre l'ensemble de l'état. Sa rapidité d'accès est adaptée à un usage où la latence est critique.
+
+\subsubsection{Stockage local structuré}
+
+Les fichiers volumineux — CV des candidats et enregistrements vidéo des entretiens — sont conservés sur le système de fichiers local du serveur, organisé en deux répertoires distincts : \texttt{uploads/} pour les CV et \texttt{recordings/} pour les vidéos. L'accès s'effectue via une route dédiée paramétrée par un identifiant de \texttt{bucket}, ce qui maintient une abstraction légère entre le code applicatif et l'emplacement physique des fichiers, tout en laissant la porte ouverte à une migration vers un stockage objet distribué.
+
+% ── 2.3.2 ────────────────────────────────────────────────────────────────────
+\subsection{Pile IA et modèles de langage}
+
+\subsubsection{Groq — moteur d'inférence LLM}
+
+Le moteur de dialogue de la plateforme repose sur le modèle \texttt{openai/gpt-oss-120b}, un modèle \textit{mixture-of-experts} de 117 milliards de paramètres, servi via l'API Groq. Groq exécute les modèles sur des puces LPU (\textit{Language Processing Unit}) spécialisées qui atteignent des débits de sortie nettement supérieurs à ceux des GPU classiques, ce qui réduit la latence perçue pendant l'entretien. Ce modèle assure la génération dynamique des questions, l'évaluation des réponses du candidat et l'orchestration du flux d'entretien ; sa prise en charge native des sorties structurées en JSON permet aux nœuds agents aval de consommer ses résultats directement.
+
+\subsubsection{Moteur d'orchestration de l'entretien}
+
+L'enchaînement de l'entretien n'est pas délégué à un \textit{framework} agentique externe, mais à une machine à états développée sur mesure en Python. Une structure \texttt{InterviewState} transporte l'ensemble du contexte de la session — phase courante, historique des évaluations, métadonnées de la dernière question — tandis qu'une énumération de phases distingue la phase RH comportementale de la phase technique, chacune associée à son propre \textit{prompt} système. À chaque tour, le moteur interroge le LLM (via Groq) pour générer la question suivante ou évaluer la réponse du candidat, sélectionne les questions techniques au moyen du moteur IRT, et ajuste le mode de comportement de l'agent selon le stress détecté. Ce contrôle explicite du flux, sans dépendance externe, facilite le débogage et garantit des temps de réponse compatibles avec un entretien en direct.
+
+\subsubsection{EdgeTTS et ElevenLabs — synthèse vocale}
+
+La synthèse vocale de l'agent repose sur deux fournisseurs. EdgeTTS, qui donne accès aux voix neuronales de Microsoft sans clé ni coût d'API, constitue le fournisseur par défaut : il fonctionne en \textit{streaming} et garantit le fonctionnement de la plateforme dans tous les environnements, sans configuration. ElevenLabs est proposé comme option premium, activée uniquement lorsqu'une clé API est explicitement configurée ; son API de \textit{streaming} émet les premiers fragments audio avant la fin de la synthèse, pour une latence au premier octet réduite. Ce choix s'inscrit dans la contrainte du projet de privilégier des outils gratuits ou exécutables localement, tout en laissant la possibilité d'une voix de meilleure qualité.
+
+\subsubsection{Faster-Whisper — reconnaissance automatique de la parole}
+
+Faster-Whisper est une réimplémentation optimisée du modèle Whisper d'OpenAI, utilisant le moteur CTranslate2 pour réduire la consommation mémoire et accélérer la transcription. Il est déployé localement dans le \textit{speech stack} et transcrit les réponses audio du candidat en temps réel. Le fournisseur ASR peut être sélectionné dynamiquement selon la langue configurée pour la session.
+
+% ── 2.3.3 ────────────────────────────────────────────────────────────────────
+\subsection{Vision par ordinateur et apprentissage automatique}
+
+\subsubsection{OpenCV}
+
+OpenCV 4.x est utilisé par le module de détection de fraude pour le décodage des trames, le prétraitement des images et les transformations géométriques appliquées aux flux webcam encodés en base64. Son noyau C++ accessible via des liaisons Python gère efficacement les opérations de traitement d'images à haute cadence, trame par trame.
+
+\subsubsection{MediaPipe}
+
+Google MediaPipe fournit la détection de maillage facial en temps réel, restituant 468 points de repère faciaux 3D par trame. Le module de surveillance utilise cette solution pour calculer l'\textit{Eye Aspect Ratio} (EAR) pour la détection des clignements et pour estimer la pose de la tête ainsi que la direction du regard dans le cadre de la surveillance de l'attention.
+
+\subsubsection{YOLOv8 — Ultralytics}
+
+YOLOv8 (Ultralytics) effectue la détection d'objets en temps réel pour identifier les éléments interdits — téléphones mobiles, écrans secondaires, livres et notes — ainsi que les personnes supplémentaires présentes dans l'environnement du candidat. La variante nano (\texttt{YOLOv8n}) a été retenue afin d'équilibrer précision et latence sur des cibles de déploiement sans GPU.
+
+\subsubsection{PyTorch}
+
+PyTorch sert de \textit{runtime} d'apprentissage profond pour le détecteur YOLO et le module de vérification d'identité. Son graphe de calcul dynamique et son support CUDA natif facilitent le chargement des modèles et l'inférence en temps réel.
+
+\subsubsection{InsightFace — vérification d'identité}
+
+InsightFace, avec le pack de modèles \texttt{buffalo\_l}, calcule un \textit{embedding} de 512 dimensions pour chaque visage détecté. La distance cosinus entre l'\textit{embedding} de référence — calculé à partir de la photo de profil du candidat lors de l'inscription — et chaque \textit{embedding} détecté en cours d'entretien permet d'identifier les tentatives d'usurpation d'identité. Le modèle est téléchargé automatiquement au premier lancement.
+
+% ── 2.3.4 ────────────────────────────────────────────────────────────────────
+\subsection{\textit{Front-end} et technologies client}
+
+\subsubsection{React 19 et Vite}
+
+L'interface utilisateur est développée avec React 19, en utilisant Vite 6 comme outil de construction et de développement. Vite offre un démarrage quasi instantané du serveur de développement et un rechargement à chaud des modules (\textit{HMR}), ce qui accélère sensiblement le cycle de développement. React Router DOM assure la navigation côté client, et Socket.IO Client gère la connexion WebSocket temps réel avec le \textit{speech stack} et le moteur d'entretien.
+
+\subsubsection{Three.js, React Three Fiber et Drei}
+
+L'avatar 3D de l'agent conversationnel est rendu dans le navigateur à l'aide de Three.js, avec React Three Fiber comme couche d'intégration déclarative dans React, et Drei pour les composants utilitaires (caméra, éclairage, contrôles orbitaux). La synchronisation labiale (\textit{lip-sync}) est assurée en associant les phonèmes du flux audio TTS aux \textit{morph targets} du maillage facial de l'avatar, pour un rendu naturel et synchronisé.
+
+\subsubsection{Tailwind CSS et Radix UI}
+
+Tailwind CSS fournit un système de styles utilitaires qui évite la prolifération de fichiers CSS séparés et maintient la cohérence visuelle de l'interface. Les composants d'interface accessibles — menus déroulants, boîtes de dialogue, onglets, infobulles — sont issus de la bibliothèque Radix UI, dont les primitives non stylisées sont entièrement compatibles avec les classes Tailwind.
+
+% ── 2.3.5 ────────────────────────────────────────────────────────────────────
+\subsection{Infrastructure et DevOps}
+
+\subsubsection{Docker et Docker Compose}
+
+Les services IA (moteur d'entretien, service d'analyse, service YOLO, service de vérification faciale) sont conteneurisés avec Docker. Docker Compose orchestre les dépendances entre services lors du déploiement local et en environnement de test : chaque service dispose de son propre \textit{Dockerfile}, et des variantes CPU et GPU sont prévues pour les services d'inférence lourde.
+
+\subsubsection{WebSocket et Socket.IO}
+
+La communication temps réel entre le \textit{front-end} et les services Python repose sur deux protocoles complémentaires. Socket.IO assure la signalisation entre le navigateur et le serveur Node.js (notifications, état de la salle d'entretien, mises à jour de score). Les connexions WebSocket natives, gérées par FastAPI/Uvicorn, transportent les flux audio et les réponses de l'agent pendant l'entretien, en minimisant la surcharge de protocole pour les données à haute fréquence.
+
+\section{Conclusion}
+
+Ce chapitre a dressé un panorama de l'état de l'art en matière de recrutement assisté par l'IA, de traitement automatique de la parole et de surveillance par vision par ordinateur, et a présenté les choix technologiques retenus pour chaque couche de notre plateforme. La littérature confirme que les entretiens agentiques pilotés par LLM, la synthèse vocale neuronale, la transcription multilingue par Whisper et la détection d'objets par YOLOv8 représentent l'état de l'art dans leurs domaines respectifs. La pile technologique retenue — Groq/LangGraph pour l'orchestration des agents, Faster-Whisper et ElevenLabs/EdgeTTS pour le traitement de la parole, InsightFace et MediaPipe pour la surveillance, et React/Three.js pour l'interface — équilibre productivité de développement, capacité IA et flexibilité opérationnelle. Le chapitre suivant détaille l'architecture du système et les décisions de conception qui intègrent ces technologies en une plateforme cohérente.
+
