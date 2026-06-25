@@ -2,8 +2,9 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "r
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faBell } from "@fortawesome/free-solid-svg-icons";
+import { faBell, faSun, faMoon } from "@fortawesome/free-solid-svg-icons";
 import AuthContext from "../../context/AuthContext";
+import { useTheme } from "../../context/ThemeContext";
 import "./Navbar.css";
 
 const NOTIFICATION_API_BASE = "http://localhost:3001/Frontend/notifications";
@@ -25,6 +26,7 @@ const Navbar = () => {
   const userRole = (localStorage.getItem("role") || "").toUpperCase();
 
   const { isAuthenticated, logout } = useContext(AuthContext);
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
   const [notifications, setNotifications] = useState([]);
@@ -347,6 +349,18 @@ const Navbar = () => {
                 <li className="nav-item">
                   <button className="btn logout-btn" onClick={handleLogout}>
                     Logout
+                  </button>
+                </li>
+
+                <li className="nav-item">
+                  <button
+                    type="button"
+                    className="btn theme-toggle-btn"
+                    onClick={toggleTheme}
+                    aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+                    title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+                  >
+                    <FontAwesomeIcon icon={theme === "dark" ? faSun : faMoon} />
                   </button>
                 </li>
               </>

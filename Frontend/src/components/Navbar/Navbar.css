@@ -397,6 +397,27 @@
   box-shadow: 0 4px 14px rgba(91, 134, 229, 0.35) !important;
 }
 
+/* Theme toggle — sits directly under Logout in the auth nav group */
+.theme-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--accent);
+  font-size: 14px;
+  margin-left: 6px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.theme-toggle-btn:hover {
+  background: var(--surface);
+  color: var(--accent-2);
+}
+
 /* Bell sits at the right edge — keep its dropdown right-anchored so it
    never overflows the viewport on wide screens */
 .nav-group-user .notification-nav-item {
@@ -447,6 +468,12 @@
   }
   .logout-btn {
     width: 100%;
+    margin-left: 0;
+    margin-top: 6px;
+  }
+  .theme-toggle-btn {
+    width: 100%;
+    border-radius: 10px;
     margin-left: 0;
     margin-top: 6px;
   }
