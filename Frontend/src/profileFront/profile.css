@@ -1,12 +1,12 @@
 .profile-container {
-    background-color: #131c26;
+    background-color: var(--bg);
     padding: 30px;
     min-height: 100vh;
 }
 
 .profile-content {
-    background: #0b0c2a;
-    color: #ffffff;
+    background: var(--surface);
+    color: var(--text);
     border-radius: 16px;
     padding: 40px;
     max-width: 1000px;
@@ -83,7 +83,7 @@
     grid-template-columns: auto 1fr;
     align-items: center;
     gap: 10px;
-    color: #ffffff;
+    color: var(--text);
     font-size: 0.8rem;
     font-weight: 700;
 }
@@ -156,7 +156,7 @@
 .name {
     font-size: 1.6rem;
     font-weight: 700;
-    color: #ffffff;
+    color: var(--text);
     margin-top: 15px;
     text-align: center;
 }
@@ -226,13 +226,13 @@
 
 .tab {
     padding: 10px 20px;
-    background-color: rgba(19, 28, 38, 0.5);
+    background-color: var(--surface-2);
     border-radius: 20px;
     font-weight: bold;
     cursor: pointer;
     border: none;
     transition: all 0.3s ease;
-    color: #ffffff;
+    color: var(--text);
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1140,4 +1140,150 @@
 
 .applications-empty-icon {
     color: rgba(14, 116, 144, 0.3);
+}
+
+/* ============================================================
+   PROFILE INFO BLOCK — force a clean WHITE background so the
+   Email / Phone / About / Skills / Languages content is clearly
+   readable. Higher-specificity selectors so these win over the
+   earlier dark + light-theme rules regardless of source order.
+   ============================================================ */
+.profile-card {
+    background: #ffffff;
+}
+
+.profile-card .infos-grid {
+    background: #ffffff;
+}
+
+.profile-card .infos-grid .profile-detail {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-left: 3px solid transparent;
+}
+
+.profile-card .infos-grid .profile-detail:hover {
+    background: #f8fafc;
+    border-left-color: #2563eb;
+}
+
+/* Labels (EMAIL, PHONE, ABOUT, …) and body text stay dark/readable */
+.profile-card .infos-grid .detail-content label {
+    color: #0e7490;
+}
+
+.profile-card .infos-grid .detail-content p,
+.profile-card .infos-grid .detail-content a {
+    color: #111827;
+}
+
+/* Skill / language chips on the white surface (darker text for crisp contrast) */
+.profile-card .infos-grid .skill-badge {
+    background: rgba(37, 99, 235, 0.1);
+    color: #1e3a8a;
+    border: 1px solid rgba(37, 99, 235, 0.32);
+}
+
+.profile-card .infos-grid .language-badge {
+    background: rgba(13, 148, 136, 0.1);
+    color: #115e59;
+    border: 1px solid rgba(13, 148, 136, 0.32);
+}
+
+/* ============================================================
+   EXPERIENCE SECTION — same clean WHITE background so each
+   experience entry (title / company / duration / description)
+   is clearly readable.
+   ============================================================ */
+.profile-card .description-detail {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-left: 3px solid transparent;
+}
+
+.profile-card .description-detail .detail-content label {
+    color: #0e7490;
+}
+
+.profile-card .experience-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+}
+
+.profile-card .experience-card:hover {
+    border-color: #94a3b8;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+}
+
+.profile-card .experience-title {
+    color: #0e7490;
+}
+
+.profile-card .experience-header,
+.profile-card .experience-company {
+    color: #111827;
+}
+
+.profile-card .experience-duration,
+.profile-card .experience-description {
+    color: #1f2937;
+}
+
+/* Empty state on the white surface */
+.profile-card .experience-empty p {
+    color: #1f2937;
+}
+
+.profile-card .experience-empty span {
+    color: #475569;
+}
+
+/* ============================================================
+   LINKEDIN SECTION — keep it on a clean WHITE background even
+   when the OS is in dark mode. The LinkedInSection component
+   ships a `prefers-color-scheme: dark` block that darkens it;
+   these higher-specificity rules (scoped to .profile-card) win
+   over that media query so the content stays readable.
+   ============================================================ */
+.profile-card .linkedin-section {
+    background: #ffffff;
+}
+
+.profile-card .section-header h3,
+.profile-card .linkedin-posts-title,
+.profile-card .linkedin-post-content {
+    color: #1f2937;
+}
+
+.profile-card .linkedin-profile-card,
+.profile-card .no-profile-card,
+.profile-card .url-form,
+.profile-card .profile-info {
+    background: #ffffff;
+    border-color: #e2e8f0;
+}
+
+.profile-card .linkedin-post-card {
+    background: #ffffff;
+    border-color: #e2e8f0;
+}
+
+.profile-card .info-row,
+.profile-card .info-row .label,
+.profile-card .info-row .value,
+.profile-card .form-group label {
+    border-color: #e2e8f0;
+    color: #1f2937;
+}
+
+.profile-card .form-group input {
+    background-color: #ffffff;
+    border-color: #cbd5e1;
+    color: #111827;
+}
+
+.profile-card .linkedin-posts-empty,
+.profile-card .form-group small,
+.profile-card .no-profile-card p {
+    color: #6c757d;
 }
