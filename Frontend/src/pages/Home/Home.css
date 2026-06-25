@@ -220,7 +220,7 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    background-color: rgba(30, 30, 40, 0.8); /* Slightly darker/more solid */
+    background-color: var(--surface);
     backdrop-filter: blur(12px);
     border-radius: 16px !important;
     padding: 1.5rem !important;
@@ -228,9 +228,9 @@
     height: 100% !important;
     min-height: 280px; /* Enforce min height for consistency */
     box-sizing: border-box;
-    color: #ffffff;
+    color: var(--text);
     position: relative;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border);
     transition: all 0.3s ease;
     overflow: hidden; /* For badge */
 }
@@ -323,7 +323,7 @@
 .company-name {
     font-size: 1rem;
     font-weight: 600;
-    color: #ffffff;
+    color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -335,7 +335,7 @@
     display: flex;
     align-items: center;
     font-size: 0.85rem;
-    color: #a0a0b0;
+    color: var(--text-muted);
     margin-top: 2px;
 }
 
@@ -353,7 +353,7 @@
 .job-title {
     font-size: 1.15rem;
     font-weight: 700;
-    color: #ffffff;
+    color: var(--text);
     margin-bottom: 0.8rem;
     white-space: nowrap;
     overflow: hidden;
@@ -364,7 +364,7 @@
 .job-description {
     margin-bottom: 1rem;
     font-size: 0.9rem;
-    color: #e0e0e0;
+    color: var(--text-muted);
     line-height: 1.5;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -388,8 +388,8 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    background: rgba(255, 255, 255, 0.08);
-    color: #ffffff;
+    background: var(--surface-2);
+    color: var(--text);
     border-radius: 50px;
     padding: 8px 14px;
     font-size: 0.78rem;
@@ -425,7 +425,7 @@
 .job-tag:hover {
     transform: translateY(-2px) scale(1.03);
     box-shadow: 0 6px 14px rgba(91, 134, 229, 0.3);
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--surface);
 }
 
 .job-content-wrapper {
@@ -452,7 +452,7 @@
 
 .job-salary-period {
     font-size: 0.9rem;
-    color: #ccc;
+    color: var(--text-muted);
     font-weight: 500;
 }
 

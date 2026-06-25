@@ -1,14 +1,14 @@
 @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap");
 
 .futuristic-footer {
-  background: linear-gradient(135deg, #0f1923 0%, #2e2f3e 100%);
-  color: #fff;
+  background: var(--bg);
+  color: var(--text);
   position: relative;
   overflow: hidden;
 }
 
 .futuristic-footer-top {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--surface);
   backdrop-filter: blur(8px);
   padding: 40px 0;
 }
@@ -18,7 +18,7 @@
   font-size: 1.2rem;
   font-weight: 600;
   margin-bottom: 15px;
-  color: #36d1dc;
+  color: var(--accent);
 }
 
 /* Contact Links, Social Icons */
@@ -26,13 +26,13 @@
   display: flex;
   align-items: center;
   margin-bottom: 10px;
-  color: #fff;
+  color: var(--text);
   text-decoration: none;
   transition: color 0.3s;
 }
 
 .contact_link_box a:hover {
-  color: #36d1dc;
+  color: var(--accent);
 }
 
 .contact_link_box i {
@@ -42,32 +42,33 @@
 .info_social a {
   display: inline-block;
   margin-right: 10px;
-  color: #fff;
+  color: var(--text);
   transition: transform 0.3s;
 }
 
 .info_social a:hover {
   transform: scale(1.1);
-  color: #36d1dc;
+  color: var(--accent);
 }
 
 /* Info Details */
 .info_col p {
   font-size: 0.9rem;
   line-height: 1.6;
+  color: var(--text);
 }
 
 /* Quick Links */
 .info_links a {
   display: block;
-  color: #fff;
+  color: var(--text);
   margin-bottom: 8px;
   text-decoration: none;
   transition: color 0.3s;
 }
 
 .info_links a:hover {
-  color: #36d1dc;
+  color: var(--accent);
 }
 
 /* Subscribe Form */
@@ -80,21 +81,21 @@
 .subscribe-form input {
   padding: 8px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .subscribe-form input::placeholder {
-  color: #ccc;
+  color: var(--text-muted);
 }
 
 .subscribe-form button {
-  background: linear-gradient(135deg, #5b86e5 0%, #36d1dc 100%);
+  background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 100%);
   border: none;
   padding: 10px;
   border-radius: 6px;
-  color: #fff;
+  color: var(--bg);
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.3s ease;
@@ -107,18 +108,18 @@
 
 /* Footer Bottom */
 .futuristic-footer-bottom {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--surface-2);
   padding: 20px 0;
   text-align: center;
 }
 
 .futuristic-footer-bottom p {
-  color: #ccc;
+  color: var(--text-muted);
   margin: 0;
 }
 
 .futuristic-footer-bottom a {
-  color: #5b86e5;
+  color: var(--accent-2);
   text-decoration: none;
   margin-left: 5px;
 }
