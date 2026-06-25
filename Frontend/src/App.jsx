@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-
 import "bootstrap/dist/css/bootstrap.min.css";
 import "react-toastify/dist/ReactToastify.css";
 import { AuthProvider } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { ToastContainer } from "react-toastify";
 
@@ -67,6 +68,7 @@ const DashboardLayoutWrapper = () => (
 
 function App() {
   return (
+    <ThemeProvider>
     <GoogleOAuthProvider clientId={CLIENT_ID}>
       <AuthProvider>
         <ToastContainer
@@ -133,6 +135,7 @@ function App() {
         </Router>
       </AuthProvider>
     </GoogleOAuthProvider>
+    </ThemeProvider>
   );
 }
 
