@@ -1,7 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap");
 .home-container {
-    background: linear-gradient(135deg, #0f1923 0%, #2e2f3e 100%);
-    color: #ffffff;
+    background: var(--bg);
+    color: var(--text);
     font-family: "Poppins", sans-serif;
 }
 
@@ -91,14 +91,14 @@
 .carousel_section {
     padding: 60px 20px;
     text-align: center;
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--surface);
     backdrop-filter: blur(10px);
 }
 
 .carousel_section .section-title {
     font-size: 2rem;
     margin-bottom: 30px;
-    color: #36d1dc;
+    color: var(--accent);
 }
 
 .slide_item {
@@ -141,13 +141,14 @@
 
 .features_section {
     padding: 60px 20px;
+    background: var(--bg);
 }
 
 .features_section .section-title {
     font-size: 2rem;
     margin-bottom: 30px;
     text-align: center;
-    color: #36d1dc;
+    color: var(--accent);
 }
 
 .features_grid {
@@ -196,15 +197,15 @@
 
 .jobs_section {
     padding: 3rem 2rem;
-    background: linear-gradient(135deg, #0f1923 0%, #2e2f3e 100%);
-    color: #ffffff;
+    background: var(--bg);
+    color: var(--text);
 }
 
 .section-title {
     text-align: center;
     font-size: 2rem;
     margin-bottom: 2rem;
-    color: #36d1dc;
+    color: var(--accent);
 }
 
 .job-list {
@@ -592,10 +593,10 @@
     position: relative;
     width: 100%;
     padding: 120px 30px;
-    background: linear-gradient(135deg, #0f1923 0%, #2e2f3e 100%);
+    background: var(--bg);
     overflow: hidden;
     box-sizing: border-box;
-    color: #fff;
+    color: var(--text);
     z-index: 1;
 }
 
@@ -633,7 +634,7 @@
 
 .hero_subtext {
     font-size: 1.2rem;
-    color: #cfd3dc;
+    color: var(--text-muted);
     margin-bottom: 30px;
     max-width: 600px;
 }
@@ -800,7 +801,7 @@
 .section-title.clean {
     font-size: 2.4rem;
     font-weight: 700;
-    color: #ffffff;
+    color: var(--text);
     margin-bottom: 20px;
 }
 
@@ -942,7 +943,7 @@
 
 .loading-text {
     font-size: 1rem;
-    color: #36d1dc;
+    color: var(--accent);
     font-weight: 400;
 }
 
@@ -998,9 +999,9 @@
     grid-column: 1 / -1;
     text-align: center;
     padding: 40px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface);
     border-radius: 10px;
-    color: #aaa;
+    color: var(--text-muted);
     font-size: 1.1rem;
 }
 
@@ -1031,7 +1032,7 @@
 /* --- Candidates Section Updates --- */
 .candidates_section {
   padding: 60px 0;
-  background: linear-gradient(135deg, #0f1923 0%, #2e2f3e 100%);
+  background: var(--bg);
   position: relative;
   overflow: hidden;
 }
@@ -1053,9 +1054,9 @@
   margin-bottom: 2.5rem;
   text-align: center;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text);
   position: relative;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  text-shadow: 0 2px 10px var(--shadow);
 }
 
 .candidates_section .section-title::after {
