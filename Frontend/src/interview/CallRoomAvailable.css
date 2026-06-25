@@ -3,10 +3,10 @@
 /* ── Root ─────────────────────────────────────────── */
 .call-room-available {
   min-height: calc(100vh - 180px);
-  background: radial-gradient(ellipse at 15% 10%, #1f3b63 0%, #0f172a 55%, #020617 100%);
+  background: var(--bg);
   padding: 48px 24px;
   font-family: 'Poppins', sans-serif;
-  color: #e2e8f0;
+  color: var(--text);
 }
 
 /* ── Header ───────────────────────────────────────── */
@@ -28,7 +28,7 @@
 
 .header p {
   font-size: 15px;
-  color: #94a3b8;
+  color: var(--text-muted);
   margin: 0;
 }
 
@@ -43,7 +43,7 @@
 
 /* ── Room Card ────────────────────────────────────── */
 .room-card {
-  background: rgba(15, 23, 42, 0.8);
+  background: var(--surface);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(91, 134, 229, 0.18);
@@ -73,7 +73,7 @@
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--text);
 }
 
 .room-id-badge {
@@ -96,7 +96,7 @@
 }
 
 .job-info {
-  background: rgba(30, 41, 59, 0.7);
+  background: var(--surface-2);
   border: 1px solid rgba(148, 163, 184, 0.08);
   border-left: 3px solid #36d1dc;
   padding: 12px 14px;
@@ -106,7 +106,7 @@
 .job-info p {
   margin: 4px 0;
   font-size: 13px;
-  color: #e2e8f0;
+  color: var(--text);
 }
 
 .job-info strong {
@@ -116,7 +116,7 @@
 }
 
 .rh-info {
-  background: rgba(30, 41, 59, 0.7);
+  background: var(--surface-2);
   border: 1px solid rgba(148, 163, 184, 0.08);
   border-left: 3px solid #5b86e5;
   padding: 12px 14px;
@@ -126,7 +126,7 @@
 .rh-info p {
   margin: 4px 0;
   font-size: 13px;
-  color: #e2e8f0;
+  color: var(--text);
 }
 
 .rh-info strong {
@@ -137,14 +137,14 @@
 
 .created-time {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-muted);
   text-align: right;
 }
 
 .room-card-footer {
   padding: 14px 20px;
   border-top: 1px solid rgba(148, 163, 184, 0.07);
-  background: rgba(2, 6, 23, 0.28);
+  background: var(--surface-2);
 }
 
 /* ── Buttons ──────────────────────────────────────── */
@@ -196,7 +196,7 @@
 /* ── Empty State ──────────────────────────────────── */
 .empty-state {
   text-align: center;
-  background: rgba(15, 23, 42, 0.75);
+  background: var(--surface);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(91, 134, 229, 0.14);
@@ -209,13 +209,13 @@
 .empty-state p {
   margin: 12px 0;
   font-size: 15px;
-  color: #64748b;
+  color: var(--text-muted);
 }
 
 .empty-state p:first-child {
   font-size: 18px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--text);
 }
 
 /* ── Loading ──────────────────────────────────────── */
@@ -224,10 +224,10 @@
   justify-content: center;
   align-items: center;
   min-height: calc(100vh - 180px);
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 15px;
   font-family: 'Poppins', sans-serif;
-  background: radial-gradient(ellipse at 15% 10%, #1f3b63 0%, #0f172a 55%, #020617 100%);
+  background: var(--bg);
 }
 
 /* ── Per-room inline message ──────────────────────── */
@@ -259,9 +259,9 @@
   border-radius: 20px;
   font-size: 12px;
   font-weight: 600;
-  background: #1e293b;
+  background: var(--surface-2);
   border: 1px solid rgba(100, 116, 139, 0.45);
-  color: #e2e8f0;
+  color: var(--text);
 }
 
 /* ── Responsive ───────────────────────────────────── */
