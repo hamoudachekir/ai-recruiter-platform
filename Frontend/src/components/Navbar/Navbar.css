@@ -1,12 +1,12 @@
 @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap");
 
 .futuristic-navbar {
-  background-color: #0b0c2a !important;  /* example dark background */
-  color: white !important;
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
 }
 
 .futuristic-brand {
-  color: #fff !important;
+  color: var(--text) !important;
   font-weight: 700;
   font-size: 1.2rem;
   text-transform: uppercase;
@@ -14,16 +14,19 @@
 }
 
 .futuristic-brand span {
-  color: #36d1dc;
+  color: var(--accent);
 }
 
 .futuristic-brand:hover {
-  color: #36d1dc !important;
+  color: var(--accent) !important;
 }
 
 /* Toggler */
 .navbar-toggler.futuristic-toggler {
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--border);
+}
+[data-theme="light"] .navbar-toggler-icon {
+  background-image: url("data:image/svg+xml;charset=UTF8,<svg viewBox='0 0 30 30' width='30' height='30' xmlns='http://www.w3.org/2000/svg'><path stroke='rgba(26,31,54,0.9)' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M4 7h22M4 15h22M4 23h22'/></svg>");
 }
 .navbar-toggler-icon {
   background-image: url("data:image/svg+xml;charset=UTF8,<svg viewBox='0 0 30 30' width='30' height='30' xmlns='http://www.w3.org/2000/svg'><path stroke='rgba(255,255,255,0.9)' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M4 7h22M4 15h22M4 23h22'/></svg>");
@@ -31,7 +34,7 @@
 
 /* Navigation Links */
 .futuristic-nav-link {
-  color: #ffffff !important;
+  color: var(--text) !important;
   margin: 0 8px;
   transition: color 0.3s ease;
   position: relative;
@@ -42,7 +45,7 @@
   display: block;
   width: 0;
   height: 2px;
-  background: linear-gradient(135deg, #5b86e5 0%, #36d1dc 100%);
+  background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 100%);
   transition: width 0.3s;
   position: absolute;
   bottom: -4px;
@@ -53,14 +56,14 @@
   width: 100%;
 }
 .futuristic-nav-link:hover {
-  color: #36d1dc !important;
+  color: var(--accent) !important;
 }
 
 /* Search Button (if you still use it) */
 .nav_search-btn {
   background: transparent;
   border: none;
-  color: #fff;
+  color: var(--text);
   transition: transform 0.3s ease;
 }
 .nav_search-btn:hover {
@@ -70,22 +73,22 @@
 /* Sign In & Sign Up Buttons */
 .btn.signin-btn {
   background: transparent;
-  border: 2px solid #5b86e5;
-  color: #5b86e5;
+  border: 2px solid var(--accent-2);
+  color: var(--accent-2);
   font-weight: 600;
   border-radius: 25px;
   transition: all 0.3s ease;
 }
 
 .btn.signin-btn:hover {
-  background: #3f64c5;
-  color: #f8fbff;
+  background: var(--accent-2);
+  color: var(--bg-elevated);
 }
 
 .btn.signup-btn {
-  background: linear-gradient(135deg, #5b86e5 0%, #36d1dc 100%);
+  background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent) 100%);
   border: none;
-  color: #062342;
+  color: var(--bg);
   font-weight: 600;
   border-radius: 25px;
   transition: transform 0.3s ease;
@@ -104,7 +107,7 @@
 .notification-toggle {
   border: none;
   background: transparent;
-  color: #ffffff;
+  color: var(--text);
   width: 42px;
   height: 42px;
   border-radius: 50%;
@@ -116,8 +119,8 @@
 }
 
 .notification-toggle:hover {
-  color: #03152d;
-  background: #52dff0;
+  color: var(--bg);
+  background: var(--accent);
 }
 
 .notification-count-badge {
@@ -135,7 +138,7 @@
   align-items: center;
   justify-content: center;
   padding: 0 5px;
-  border: 2px solid #0b0c2a;
+  border: 2px solid var(--bg);
 }
 
 .notification-alert-dot {
@@ -146,7 +149,7 @@
   height: 8px;
   border-radius: 50%;
   background: #ff4d6d;
-  border: 2px solid #0b0c2a;
+  border: 2px solid var(--bg);
 }
 
 .notification-dropdown {
@@ -155,10 +158,10 @@
   top: calc(100% + 10px);
   width: 360px;
   max-height: 430px;
-  background: #0f1537;
-  border: 1px solid rgba(91, 134, 229, 0.45);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 14px 30px var(--shadow);
   z-index: 1200;
   overflow: hidden;
 }
@@ -168,17 +171,17 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  border-bottom: 1px solid rgba(91, 134, 229, 0.25);
+  border-bottom: 1px solid var(--border);
 }
 
 .notification-dropdown-header h6 {
   margin: 0;
-  color: #f1f5ff;
+  color: var(--text);
   font-size: 15px;
 }
 
 .notification-dropdown-header span {
-  color: #9ac5e5;
+  color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
 }
@@ -191,9 +194,9 @@
 }
 
 .notification-action-btn {
-  border: 1px solid rgba(91, 134, 229, 0.42);
-  background: #203364;
-  color: #f4f8ff;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
   font-size: 12px;
   font-weight: 600;
   border-radius: 8px;
@@ -202,12 +205,12 @@
 }
 
 .notification-action-btn:hover:not(:disabled) {
-  background: #29417d;
+  background: var(--surface);
 }
 
 .notification-action-btn.danger {
-  border-color: rgba(255, 77, 109, 0.45);
-  background: #5e1f2f;
+  border-color: var(--danger);
+  background: var(--danger);
   color: #fff0f4;
 }
 
@@ -223,22 +226,22 @@
 }
 
 .notification-empty-state {
-  color: #9ab4d6;
+  color: var(--text-muted);
   margin: 8px 0;
   font-size: 13px;
 }
 
 .notification-item {
-  border: 1px solid rgba(91, 134, 229, 0.28);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px;
   margin-bottom: 10px;
-  background: rgba(22, 31, 74, 0.75);
+  background: var(--surface-2);
 }
 
 .notification-item.unread {
-  border-color: rgba(54, 209, 220, 0.6);
-  background: rgba(17, 45, 82, 0.74);
+  border-color: var(--accent);
+  background: var(--surface);
 }
 
 .notification-item-top {
@@ -250,7 +253,7 @@
 
 .notification-message {
   margin: 0;
-  color: #e5efff;
+  color: var(--text);
   font-size: 13px;
   line-height: 1.4;
   flex: 1;
@@ -267,7 +270,7 @@
 
 .notification-date {
   margin: 5px 0 0;
-  color: #9ab4d6;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -278,9 +281,9 @@
 }
 
 .notification-item-btn {
-  border: 1px solid rgba(91, 134, 229, 0.35);
-  background: #24345f;
-  color: #f5f8ff;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
   border-radius: 7px;
   font-size: 11px;
   font-weight: 600;
@@ -288,8 +291,8 @@
 }
 
 .notification-item-btn.danger {
-  border-color: rgba(255, 77, 109, 0.4);
-  background: #6a2433;
+  border-color: var(--danger);
+  background: var(--danger);
   color: #fff4f6;
 }
 
@@ -320,7 +323,7 @@
   .notification-count-badge {
     top: 8px;
     right: 8px;
-    border-color: #1a1d44;
+    border-color: var(--bg);
   }
 
   .notification-dropdown {
@@ -367,7 +370,7 @@
 }
 
 .nav-group-user .futuristic-nav-link:hover {
-  background: rgba(91, 134, 229, 0.12);
+  background: var(--surface-2);
 }
 
 /* Vertical separator between app shortcuts and notification/auth controls */
@@ -375,15 +378,15 @@
   width: 1px;
   height: 22px;
   margin: 0 10px;
-  background: rgba(91, 134, 229, 0.35);
+  background: var(--border);
   list-style: none;
 }
 
 /* Logout — moved out of inline styles for a cleaner, hover-aware button */
 .logout-btn {
   background: transparent !important;
-  border: 2px solid #5b86e5 !important;
-  color: #5b86e5 !important;
+  border: 2px solid var(--accent-2) !important;
+  color: var(--accent-2) !important;
   font-weight: 600 !important;
   border-radius: 25px !important;
   padding: 6px 18px !important;
@@ -392,9 +395,9 @@
 }
 
 .logout-btn:hover {
-  background: #5b86e5 !important;
-  color: #0b0c2a !important;
-  box-shadow: 0 4px 14px rgba(91, 134, 229, 0.35) !important;
+  background: var(--accent-2) !important;
+  color: var(--bg) !important;
+  box-shadow: 0 4px 14px var(--shadow) !important;
 }
 
 /* Theme toggle — sits directly under Logout in the auth nav group */
