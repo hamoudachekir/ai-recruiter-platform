@@ -458,6 +458,15 @@
   .futuristic-navbar .navbar-toggler { display: none; }
 }
 
+/* Notifications dropdown — force solid black text in light mode for clarity */
+[data-theme="light"] .notification-dropdown-header h6,
+[data-theme="light"] .notification-action-btn,
+[data-theme="light"] .notification-message,
+[data-theme="light"] .notification-date,
+[data-theme="light"] .notification-item-btn {
+  color: #000;
+}
+
 /* Stack zones vertically on collapsed mobile menu */
 @media (max-width: 991.98px) {
   .nav-group-public,
