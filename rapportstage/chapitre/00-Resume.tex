@@ -1,0 +1,71 @@
+% ─────────────────────────────────────────────────────────────────────────────
+%  RÉSUMÉ (français) + ABSTRACT (anglais)
+% ─────────────────────────────────────────────────────────────────────────────
+\chapter*{RÉSUMÉ}
+\markboth{\MakeUppercase{Résumé}}{}
+\addcontentsline{toc}{chapter}{RÉSUMÉ}
+\adjustmtc
+\thispagestyle{MyStyle}
+
+\begin{sloppypar}
+Le recrutement, à l'ère des grands modèles de langage, souffre d'un triple déséquilibre :
+un volume de candidatures en forte croissance, des entretiens courts qui ne révèlent qu'une
+fraction du potentiel d'un candidat, et des filtres automatiques qui reproduisent les biais
+de leurs données historiques. Ce projet de fin d'études présente \textbf{NextHire}, une
+plateforme agentique d'entretien RH assisté par intelligence artificielle, développée au sein
+de Talan Tunisie Consulting et articulée autour de quatre contributions techniques :
+(i)~un moteur d'entretien fondé sur une machine à états Python native (\texttt{InterviewEngine})
+qui orchestre un entretien en deux phases (RH comportementale puis technique), piloté par le
+modèle \texttt{openai/\allowbreak gpt-oss-120b} via Groq et un moteur de questions adaptatif de
+type IRT-lite ; (ii)~un pipeline de détection d'intégrité à trois niveaux qui combine la
+vérification d'identité faciale (InsightFace), la détection d'objets interdits (YOLOv8n) et la
+surveillance comportementale (MediaPipe, Py-Feat) en un score de risque pondéré ;
+(iii)~un service d'analyse post-entretien orchestré par LangGraph et appuyé sur NVIDIA NIM
+(\texttt{meta/\allowbreak llama-3.3-\allowbreak 70b-\allowbreak instruct}), produisant un rapport
+recruteur structuré et un classement des candidats ; (iv)~une application web React~19
+entièrement accessible depuis le navigateur, dotée d'un avatar~3D parlant et d'un pipeline vocal
+bidirectionnel temps réel, sans installation côté candidat. La suite de tests automatisés compte
+211~vérifications réparties sur trois environnements (\texttt{pytest}, \texttt{unittest},
+\texttt{node:assert}) et passe à 100\,\%. Le moteur d'entretien fusionne l'évaluation de la réponse
+et la génération de la question suivante en un unique appel LLM, ce qui préserve un délai inter-tour
+compatible avec une conversation naturelle. NextHire s'adresse aux ingénieurs HR-tech et aux
+praticiens soucieux d'aligner l'automatisation du recrutement sur une décision finale qui demeure
+humaine.
+
+\bigskip
+\noindent\textbf{Mots-clés :} recrutement automatisé, agents d'intelligence artificielle,
+grands modèles de langage, analyse multimodale, vision par ordinateur, détection d'intégrité,
+évaluation adaptative IRT, équité algorithmique.
+\end{sloppypar}
+
+\newpage
+\begin{center}\textbf{\large ABSTRACT}\end{center}
+\bigskip
+
+\begin{sloppypar}
+In the era of large language models, recruitment suffers from a threefold imbalance: a sharply
+growing volume of applications, short interviews that reveal only a fraction of a candidate's
+potential, and automated filters that reproduce the biases of their historical data. This
+graduation project presents \textbf{NextHire}, an agentic, AI-assisted HR-interview platform
+developed at Talan Tunisie Consulting and built around four technical contributions:
+(i)~an interview engine based on a native Python state machine (\texttt{InterviewEngine}) that
+orchestrates a two-phase interview (behavioural HR, then technical), driven by the
+\texttt{openai/\allowbreak gpt-oss-120b} model through Groq and an IRT-lite adaptive question
+engine; (ii)~a three-tier integrity-detection pipeline combining facial identity verification
+(InsightFace), prohibited-object detection (YOLOv8n) and behavioural monitoring (MediaPipe,
+Py-Feat) into a weighted risk score; (iii)~a post-interview analysis service orchestrated by
+LangGraph and backed by NVIDIA NIM (\texttt{meta/\allowbreak llama-3.3-\allowbreak 70b-\allowbreak instruct}),
+producing a structured recruiter report and a candidate ranking; (iv)~a React~19 web application
+fully accessible from the browser, featuring a talking 3D avatar and a real-time bidirectional
+voice pipeline, with no installation on the candidate's side. The automated test suite comprises
+211~checks spread across three runtimes (\texttt{pytest}, \texttt{unittest}, \texttt{node:assert})
+and passes at 100\,\%. The interview engine merges answer evaluation and next-question generation
+into a single LLM call, which keeps the inter-turn delay compatible with a natural conversation.
+NextHire targets HR-tech engineers and practitioners who seek to align recruitment automation with
+a final decision that remains human.
+
+\bigskip
+\noindent\textbf{Keywords:} automated recruitment, artificial-intelligence agents, large language
+models, multimodal analysis, computer vision, integrity detection, IRT adaptive assessment,
+algorithmic fairness.
+\end{sloppypar}

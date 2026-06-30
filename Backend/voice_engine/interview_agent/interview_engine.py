@@ -16,12 +16,80 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .llm_client import LLMClient, LLMError
-from .prompts import COMPACT_SYSTEM, HR_SYSTEM, TECHNICAL_SYSTEM, build_compact_user_turn_prompt, build_user_turn_prompt
+from .prompts import (
+    COMPACT_SYSTEM,
+    HR_SYSTEM,
+    PHASE_OBJECTIVES,
+    TECHNICAL_SYSTEM,
+    build_compact_user_turn_prompt,
+    build_phase_system_prompt,
+    build_user_turn_prompt,
+)
 
 Phase = Literal["intro", "technical"]
 InterviewStyle = Literal["friendly", "strict", "senior", "junior", "fast_screening"]
 INTRO_QUESTION_LIMIT = 5
 INTERVIEW_STYLE_VALUES = {"friendly", "strict", "senior", "junior", "fast_screening"}
+
+# ── Multi-phase HR interview flow ───────────────────────────────────────────
+# A structured, professional interview runs through 5 sequential phases. This
+# axis is INDEPENDENT of the legacy ``Phase`` ("intro"/"technical") that the
+# scoring/report pipeline keys off: every interview phase maps to one legacy
+# bucket, so existing category/weighted scoring keeps working untouched, while
+# each Q&A turn is also tagged with its fine-grained interview phase for
+# post-interview per-phase analysis.
+InterviewPhase = Literal["introduction", "experience", "technical", "behavioral", "closing"]
+PHASE_SEQUENCE: list[str] = ["introduction", "experience", "technical", "behavioral", "closing"]
+
+PHASE_LEGACY_BUCKET: dict[str, Phase] = {
+    "introduction": "intro",
+    "experience": "intro",
+    "technical": "technical",
+    "behavioral": "intro",
+    "closing": "intro",
+}
+
+
+def _phase_target_env(name: str, default: int) -> int:
+    try:
+        return max(1, min(int(os.getenv(name, str(default)) or default), 12))
+    except (TypeError, ValueError):
+        return default
+
+
+PHASE_TARGETS: dict[str, int] = {
+    "introduction": _phase_target_env("INTERVIEW_PHASE_INTRO_QUESTIONS", 2),
+    "experience": _phase_target_env("INTERVIEW_PHASE_EXPERIENCE_QUESTIONS", 3),
+    "technical": _phase_target_env("INTERVIEW_PHASE_TECHNICAL_QUESTIONS", 4),
+    "behavioral": _phase_target_env("INTERVIEW_PHASE_BEHAVIORAL_QUESTIONS", 2),
+    "closing": _phase_target_env("INTERVIEW_PHASE_CLOSING_QUESTIONS", 2),
+}
+
+ALLOW_LLM_EARLY_ADVANCE = str(
+    os.getenv("INTERVIEW_PHASE_ALLOW_LLM_EARLY_ADVANCE", "1")
+).strip().lower() not in {"0", "false", "no", ""}
+
+# Legacy phase values (older callers / Node send "intro"/"technical").
+LEGACY_PHASE_TO_NEW: dict[str, str] = {"intro": "introduction", "technical": "technical"}
+
+
+def _coerce_interview_phase(value: str | None) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in PHASE_SEQUENCE:
+        return raw
+    return LEGACY_PHASE_TO_NEW.get(raw, "introduction")
+
+
+def _legacy_bucket(phase: str) -> Phase:
+    return PHASE_LEGACY_BUCKET.get(str(phase or "").strip(), "intro")
+
+
+def _next_interview_phase(phase: str) -> str | None:
+    try:
+        idx = PHASE_SEQUENCE.index(str(phase))
+    except ValueError:
+        return None
+    return PHASE_SEQUENCE[idx + 1] if idx + 1 < len(PHASE_SEQUENCE) else None
 AGENT_TRANSCRIPT_TAIL_TURNS = max(4, min(int(os.getenv("AGENT_TRANSCRIPT_TAIL_TURNS", "8") or "8"), 20))
 AGENT_SHORT_TERM_MEMORY_TURNS = max(3, min(int(os.getenv("AGENT_SHORT_TERM_MEMORY_TURNS", "6") or "6"), 16))
 AGENT_TEMPERATURE = max(0.0, min(float(os.getenv("AGENT_TEMPERATURE", "0.18") or "0.18"), 1.0))
@@ -40,6 +108,7 @@ class TranscriptEntry:
 @dataclass
 class TurnEvaluation:
     phase: Phase
+    interview_phase: str
     turn_index: int
     candidate_text: str
     score: float
@@ -55,6 +124,7 @@ class TurnEvaluation:
     def as_dict(self) -> dict[str, Any]:
         return {
             "phase": self.phase,
+            "interview_phase": self.interview_phase,
             "turn_index": self.turn_index,
             "candidate_text": self.candidate_text,
             "score": round(self.score, 3),
@@ -86,7 +156,13 @@ class InterviewState:
     candidate_name: str = ""
     candidate_profile: dict[str, Any] = field(default_factory=dict)
     interview_style: str = "friendly"
-    phase: Phase = "intro"
+    phase: Phase = "intro"  # legacy scoring bucket — derived from current_phase
+    # 5-phase HR flow (introduction → experience → technical → behavioral → closing)
+    current_phase: str = "introduction"
+    phase_question_counts: dict[str, int] = field(default_factory=dict)
+    phase_history: list[dict[str, Any]] = field(default_factory=list)
+    pending_bridge_to: str = ""  # set when a phase was just entered; drives the verbal bridge
+    last_objective_met: bool = False  # last LLM phase_objective_met signal (consumed next turn)
     theta: float = 0.0  # ability estimate, clamped to [-3, 3]
     turn_index: int = 0
     transcript: list[TranscriptEntry] = field(default_factory=list)
@@ -107,6 +183,8 @@ class InterviewState:
         return {
             "interview_id": self.interview_id,
             "phase": self.phase,
+            "current_phase": self.current_phase,
+            "phase_question_counts": dict(self.phase_question_counts),
             "theta": round(self.theta, 3),
             "stress_level": round(self.stress_level, 3),
             "turn_index": self.turn_index,
@@ -185,6 +263,34 @@ def _skill_breakdown(evaluations: list[TurnEvaluation]) -> list[dict[str, Any]]:
         )
 
     return sorted(rows, key=lambda item: (-item["answers"], item["skill"].lower()))[:12]
+
+
+def _phase_breakdown(evaluations: list[TurnEvaluation]) -> list[dict[str, Any]]:
+    """Per-interview-phase score rollup (introduction/experience/.../closing).
+
+    Additive metadata for the post-interview analysis — does not affect the
+    legacy hr/technical category scoring or the weighted criteria report.
+    """
+    buckets: dict[str, list[TurnEvaluation]] = {}
+    for item in evaluations:
+        key = str(getattr(item, "interview_phase", "") or "").strip() or "unknown"
+        buckets.setdefault(key, []).append(item)
+
+    rows: list[dict[str, Any]] = []
+    for phase in PHASE_SEQUENCE:
+        items = buckets.get(phase, [])
+        if not items:
+            continue
+        rows.append(
+            {
+                "phase": phase,
+                "legacy_bucket": _legacy_bucket(phase),
+                "answers": len(items),
+                "score": round(_avg([float(item.score) for item in items]) or 0.0, 3),
+                "average_difficulty": round(_avg([float(item.difficulty) for item in items]) or 0.0, 2),
+            }
+        )
+    return rows
 
 
 def _score_recommendation(overall_score: float, answer_count: int) -> dict[str, str]:
@@ -370,6 +476,8 @@ def build_final_report(state: InterviewState) -> dict[str, Any]:
         "stress_level": round(state.stress_level, 3),
         "category_scores": category_scores,
         "skill_breakdown": _skill_breakdown(evaluations),
+        "phase_breakdown": _phase_breakdown(evaluations),
+        "phase_history": list(state.phase_history),
         "recommendation": recommendation,
         # ── Weighted scoring from the job's evaluation criteria ──────────────
         "weighted_overall_score": weighted_overall,
@@ -636,7 +744,7 @@ def _french_question_for(state: InterviewState, question: str, skill_focus: str)
 
     if state.turn_index == 0 and state.phase == "intro":
         return (
-            "Bonjour, je suis Angelica, votre assistante d'entretien IA pour aujourd'hui. "
+            "Bonjour, je suis Nour, votre assistante d'entretien IA pour aujourd'hui. "
             "Je vais vous poser quelques questions liees a votre profil et a ce poste. "
             "Pour commencer, pouvez-vous vous presenter brievement et parler de votre parcours ?"
         )
@@ -833,19 +941,36 @@ def _clean_agent_question_text(text: str) -> str:
 
 
 def _register_emitted_question(state: InterviewState) -> None:
+    phase = str(state.current_phase or "introduction")
+    state.phase_question_counts[phase] = state.phase_question_counts.get(phase, 0) + 1
+    # Keep the legacy counter alive for the snapshot/back-compat consumers.
     if state.phase == "intro":
         state.intro_question_count += 1
 
 
-def _should_auto_switch_to_technical(state: InterviewState) -> bool:
-    return state.phase == "intro" and state.intro_question_count >= INTRO_QUESTION_LIMIT
+def _advance_phase_if_needed(state: InterviewState, *, objective_met: bool) -> str | None:
+    """Advance to the next interview phase when the current phase's question
+    target is reached OR the agent judged the phase objective met (early).
 
-
-def _switch_to_technical_if_needed(state: InterviewState) -> bool:
-    if not _should_auto_switch_to_technical(state):
-        return False
-    state.phase = "technical"
-    return True
+    Returns the newly entered phase name when a transition happens, else None.
+    Keeps the legacy ``state.phase`` bucket in sync so scoring is unaffected.
+    """
+    current = str(state.current_phase or "introduction")
+    if current == "closing":
+        return None
+    asked = state.phase_question_counts.get(current, 0)
+    target = PHASE_TARGETS.get(current, 3)
+    reached_target = asked >= target
+    early = objective_met and ALLOW_LLM_EARLY_ADVANCE and asked >= 1
+    if not (reached_target or early):
+        return None
+    nxt = _next_interview_phase(current)
+    if not nxt:
+        return None
+    state.current_phase = nxt
+    state.phase = _legacy_bucket(nxt)
+    state.phase_history.append({"phase": nxt, "started_turn": state.turn_index})
+    return nxt
 
 
 COMMON_TECH_SKILLS = {
@@ -1346,7 +1471,7 @@ class InterviewEngine:
         job_description: str = "",
         candidate_profile: dict | None = None,
         interview_style: str = "friendly",
-        phase: Phase = "intro",
+        phase: str = "intro",
         preferred_language: str = "en",
         job_context: str = "",
         seniority: str = "",
@@ -1357,6 +1482,10 @@ class InterviewEngine:
             if existing is not None and not existing.ended:
                 return self._resume_current_question(existing)
 
+            # ``phase`` may be a legacy bucket ("intro"/"technical") or one of the
+            # 5 interview phases. Normalize to the new axis and derive the legacy
+            # scoring bucket from it.
+            start_phase = _coerce_interview_phase(phase)
             state = InterviewState(
                 interview_id=interview_id,
                 job_title=job_title,
@@ -1368,9 +1497,11 @@ class InterviewEngine:
                 candidate_name=candidate_name,
                 candidate_profile=candidate_profile or {},
                 interview_style=normalize_interview_style(interview_style),
-                phase=phase,
+                phase=_legacy_bucket(start_phase),
+                current_phase=start_phase,
                 preferred_language=_normalize_preferred_language(preferred_language),
             )
+            state.phase_history.append({"phase": start_phase, "started_turn": 0})
             self._states[interview_id] = state
 
         return self._ask_next(state, last_answer="", last_sentiment=None)
@@ -1445,10 +1576,21 @@ class InterviewEngine:
             "resumed": True,
         }
 
-    def switch_phase(self, interview_id: str, phase: Phase) -> dict[str, Any]:
+    def switch_phase(self, interview_id: str, phase: str) -> dict[str, Any]:
+        """Manual phase override (legacy "intro"/"technical" or a 5-phase name).
+
+        Auto-advance is the primary path now; this stays for backward compat
+        with the Node ``agent:switch-phase`` event.
+        """
         state = self._require(interview_id)
         with self._lock:
-            state.phase = phase
+            target_phase = _coerce_interview_phase(phase)
+            state.current_phase = target_phase
+            state.phase = _legacy_bucket(target_phase)
+            state.phase_question_counts[target_phase] = 0
+            state.pending_bridge_to = ""
+            state.last_objective_met = False
+            state.phase_history.append({"phase": target_phase, "started_turn": state.turn_index})
             state.turn_index = 0
             # Keep theta across phases — it's still useful info on the candidate.
         return self._ask_next(state, last_answer="", last_sentiment=None)
@@ -1497,6 +1639,7 @@ class InterviewEngine:
                         "sentiment": sentiment,
                         "raw_text": text,
                         "phase": state.phase,
+                        "interview_phase": state.current_phase,
                         "interview_style": state.interview_style,
                         "language_request": requested_language,
                     },
@@ -1524,6 +1667,22 @@ class InterviewEngine:
             phase = str((entry.meta or {}).get("phase") or state.phase)
             return "technical" if phase == "technical" else "intro"
         return state.phase
+
+    def _candidate_interview_phase_for_last_answer(self, state: InterviewState, last_answer: str) -> str:
+        """The 5-phase interview phase the candidate's last answer belongs to.
+
+        Mirrors :meth:`_candidate_phase_for_last_answer` but returns the
+        fine-grained phase recorded on the candidate's transcript entry so the
+        evaluation is tagged with the phase that was active when they answered.
+        """
+        answer_key = _answer_key(last_answer)
+        for entry in reversed(state.transcript):
+            if entry.role != "candidate":
+                continue
+            if answer_key and _answer_key(entry.text) != answer_key:
+                continue
+            return str((entry.meta or {}).get("interview_phase") or state.current_phase)
+        return str(state.current_phase)
 
     def _finish_turn(
         self,
@@ -1562,6 +1721,7 @@ class InterviewEngine:
                 state.theta = update_theta(state.theta, score, confidence)
 
             evaluation_phase = self._candidate_phase_for_last_answer(state, last_answer)
+            evaluation_interview_phase = self._candidate_interview_phase_for_last_answer(state, last_answer)
             state.turn_index += 1
             turn_index = state.turn_index
             state.last_question_meta = {
@@ -1582,6 +1742,7 @@ class InterviewEngine:
                         "difficulty": difficulty,
                         "skill_focus": skill_focus,
                         "phase": state.phase,
+                        "interview_phase": state.current_phase,
                         "turn_index": turn_index,
                         "interview_style": state.interview_style,
                         "language": state.preferred_language,
@@ -1594,6 +1755,7 @@ class InterviewEngine:
                 state.evaluations.append(
                     TurnEvaluation(
                         phase=evaluation_phase,
+                        interview_phase=evaluation_interview_phase,
                         turn_index=turn_index,
                         candidate_text=last_answer,
                         score=score,
@@ -1610,14 +1772,22 @@ class InterviewEngine:
             category_scores = build_category_scores(state.evaluations)
             state.last_question_meta["category_scores"] = category_scores
             phase = state.phase
+            current_phase = state.current_phase
             theta = state.theta
             stress_level = state.stress_level
             interview_style = state.interview_style
             preferred_language = state.preferred_language
+            # The interview is "done" only when the closing phase is complete —
+            # NOT on intermediate phase transitions (those just advance the flow).
+            closing_complete = (
+                state.current_phase == "closing"
+                and state.phase_question_counts.get("closing", 0) >= PHASE_TARGETS.get("closing", 2)
+            )
 
         return {
             "interview_id": state.interview_id,
             "phase": phase,
+            "current_phase": current_phase,
             "interview_style": interview_style,
             "language": preferred_language,
             "turn_index": turn_index,
@@ -1627,6 +1797,7 @@ class InterviewEngine:
                 "skill_focus": skill_focus,
                 "agent_mode": agent_mode,
                 "language": preferred_language,
+                "interview_phase": current_phase,
             },
             "scoring": {
                 "score": round(score, 3),
@@ -1637,7 +1808,8 @@ class InterviewEngine:
                 "reasoning": reasoning,
                 "category_scores": category_scores,
             },
-            "done": bool(done or auto_switched),
+            "done": bool(done or closing_complete),
+            "phase_advanced": bool(auto_switched),
         }
 
     def _ask_next(
@@ -1649,17 +1821,25 @@ class InterviewEngine:
     ) -> dict[str, Any]:
         last_answer = _sanitize_candidate_answer(last_answer)
 
-        auto_switched = _switch_to_technical_if_needed(state)
+        # Advance the 5-phase flow based on the previous turn's question count and
+        # the agent's phase_objective_met signal (consumed here). When a phase is
+        # entered, remember it so the next question opens with a verbal bridge.
+        objective_met = state.last_objective_met
+        state.last_objective_met = False
+        advanced_to = _advance_phase_if_needed(state, objective_met=objective_met)
+        auto_switched = advanced_to is not None
+        if advanced_to:
+            state.pending_bridge_to = advanced_to
 
         # Opening turn is generated locally so "Start Intro" responds instantly.
         if state.turn_index == 0:
             if state.phase == "intro":
-                # Fixed Angelica introduction. The opener must be deterministic so
+                # Fixed Nour introduction. The opener must be deterministic so
                 # the candidate always hears the same greeting first — no LLM
                 # variance, no style branching. The "background" follow-up that
                 # this line ends with becomes the first scored question.
                 question = (
-                    "Hello, I'm Angelica, your AI interview assistant for today. "
+                    "Hello, I'm Nour, your AI interview assistant for today. "
                     "I'll ask you a few questions related to your profile and this job position. "
                     "Please answer naturally. "
                     "Let's begin with a short introduction about your background."
@@ -1913,7 +2093,19 @@ class InterviewEngine:
             )
 
         use_compact_prompt = bool(getattr(self._llm, "use_compact_interview_prompt", False))
-        system = COMPACT_SYSTEM if use_compact_prompt else pick_system_prompt(state.phase)
+        if use_compact_prompt:
+            # Even in the token-lean compact mode (Groq), the system prompt must
+            # carry the current phase's objective so the agent's behavior shifts
+            # per phase — especially the closing phase, where it should invite
+            # and answer the candidate's questions rather than keep quizzing.
+            system = COMPACT_SYSTEM + "\n" + PHASE_OBJECTIVES.get(state.current_phase, "")
+        else:
+            system = build_phase_system_prompt(state.current_phase)
+
+        # Consume the pending bridge: the question produced this turn opens the
+        # new phase, so it should start with a short verbal transition.
+        is_phase_transition = bool(state.pending_bridge_to)
+        state.pending_bridge_to = ""
 
         # Compute stress from confidence + sentiment + struggle streak
         # (only after turn 0, when we have a real answer to grade)
@@ -1953,7 +2145,7 @@ class InterviewEngine:
 
         if use_compact_prompt:
             user = build_compact_user_turn_prompt(
-                phase=state.phase,
+                phase=state.current_phase,
                 job_title=state.job_title,
                 job_skills=state.job_skills,
                 candidate_name=state.candidate_name,
@@ -1964,10 +2156,12 @@ class InterviewEngine:
                 answered_topics=answered_topics,
                 job_context=state.job_context,
                 seniority=state.seniority,
+                current_phase=state.current_phase,
+                is_phase_transition=is_phase_transition,
             )
         else:
             user = build_user_turn_prompt(
-                phase=state.phase,
+                phase=state.current_phase,
                 job_title=state.job_title,
                 job_skills=state.job_skills,
                 job_description=state.job_description,
@@ -1986,6 +2180,8 @@ class InterviewEngine:
                 answered_topics=answered_topics,
                 job_context=state.job_context,
                 seniority=state.seniority,
+                current_phase=state.current_phase,
+                is_phase_transition=is_phase_transition,
             )
 
         system_with_comfort = system + comfort_addendum
@@ -2033,6 +2229,8 @@ class InterviewEngine:
         difficulty = int(payload.get("difficulty", 3))
         skill_focus = str(payload.get("skill_focus", ""))
         done = bool(payload.get("done", False))
+        # Remember the phase-objective signal so the NEXT turn can advance early.
+        state.last_objective_met = bool(payload.get("phase_objective_met", False))
 
         if _is_low_information_answer(last_answer):
             question, difficulty, skill_focus = _build_low_info_followup(

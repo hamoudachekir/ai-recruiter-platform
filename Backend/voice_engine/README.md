@@ -131,7 +131,7 @@ Quand l'interview agent est lancé sur `http://localhost:8013`, vous pouvez simu
 .\.venv\Scripts\python.exe Backend\voice_engine\scripts\test_interview_agent_conversation.py
 ```
 
-Le test démarre une session, affiche les réponses candidat et les questions d'Angelica, vérifie que les questions ne sont pas vides, contrôle le temps de réponse, et couvre deux cas importants:
+Le test démarre une session, affiche les réponses candidat et les questions de Nour, vérifie que les questions ne sont pas vides, contrôle le temps de réponse, et couvre deux cas importants:
 
 - une vraie réponse qui contient "repeated words" ne doit pas déclencher une répétition de question;
 - "can you repeat?" doit reformuler la dernière question.

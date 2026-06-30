@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 from typing import Annotated, AsyncGenerator, Optional
@@ -151,14 +152,34 @@ def startup() -> None:
     global speech_stack, startup_error
 
     try:
+        fw_device = os.getenv("FW_DEVICE", "cuda")
+        # distil-large-v3 is great on GPU but slow on CPU. On CPU, default to the
+        # fast multilingual "base" model so live STT keeps up with a real
+        # interview (~5x faster than distil-large-v3, still handles EN/FR).
+        # Tune with FW_MODEL (tiny=fastest, small/medium=more accurate).
+        default_model = "distil-large-v3" if fw_device == "cuda" else "base"
+        # On CPU, int8 is the fastest compute type (int8_float16 needs a GPU).
+        default_compute = "int8_float16" if fw_device == "cuda" else "int8"
+        # Use all CPU cores on CPU (ctranslate2 otherwise caps at ~4 threads).
+        default_cpu_threads = 0 if fw_device == "cuda" else (os.cpu_count() or 4)
         speech_stack = SpeechStack(
-            model_name=os.getenv("FW_MODEL", "distil-large-v3"),
-            device=os.getenv("FW_DEVICE", "cuda"),
-            compute_type=os.getenv("FW_COMPUTE_TYPE", "int8_float16"),
+            model_name=os.getenv("FW_MODEL", default_model),
+            device=fw_device,
+            compute_type=os.getenv("FW_COMPUTE_TYPE", default_compute),
+            cpu_threads=int(os.getenv("FW_CPU_THREADS", str(default_cpu_threads))),
             language=_env_language_default(),
             beam_size=int(os.getenv("FW_BEAM_SIZE", "1")),
+            # The browser already runs VAD and only uploads trimmed speech
+            # utterances, so re-running faster-whisper's internal Silero VAD on
+            # every clip is redundant latency. Default off; set FW_VAD_FILTER=1
+            # to re-enable if you start sending untrimmed audio.
+            vad_filter=_env_bool("FW_VAD_FILTER", False),
             neutral_threshold=float(os.getenv("FW_NEUTRAL_THRESHOLD", "0.65")),
             enable_sentiment=True,
+            # Per-segment sentiment adds one transformer pass per segment on the
+            # live-draft hot path. Default off (overall sentiment is still
+            # computed); set FW_SEGMENT_SENTIMENT=1 to restore per-segment.
+            enable_segment_sentiment=_env_bool("FW_SEGMENT_SENTIMENT", False),
             enable_transcript_correction=_env_bool(
                 "FW_ENABLE_TRANSCRIPT_CORRECTION", True
             ),
@@ -207,7 +228,8 @@ def health() -> dict:
         "compute_type": speech_stack.active_compute_type,
         "cuda_runtime_path": speech_stack.cuda_runtime_path,
         "tts_provider": speech_stack.tts_provider,
-        "tts_model": speech_stack.elevenlabs_model_id,
+        "tts_model": ("edge-tts" if speech_stack.tts_provider == "edge" else speech_stack.elevenlabs_model_id),
+        "tts_edge_available": _EDGE_TTS_OK,
         "tts_preloaded": True,
     }
 
@@ -541,6 +563,59 @@ EDGE_TTS_RATES = {
 }
 
 
+# French diacritics + common French function words: a strong, dependency-free
+# signal that the text is French, so the voice matches the words being spoken.
+_FRENCH_DIACRITICS = set("àâäçéèêëîïôœùûüÿæ")
+_FRENCH_WORDS = {
+    "le", "la", "les", "un", "une", "des", "du", "de", "je", "tu", "vous", "nous",
+    "votre", "vos", "mon", "ma", "mes", "est", "êtes", "avez", "pouvez", "peux",
+    "pourquoi", "quel", "quelle", "quels", "quelles", "comment", "avec", "pour",
+    "dans", "sur", "parcours", "expérience", "experience", "entreprise", "poste",
+    "bonjour", "merci", "oui", "non", "ce", "cette", "qui", "que", "quoi", "ne",
+    "pas", "plus", "très", "aussi", "donc", "alors", "parlez", "parler", "décrire",
+    "décrivez", "présenter", "présentez", "métier", "compétences", "projet",
+}
+_ENGLISH_WORDS = {
+    "the", "you", "your", "is", "are", "what", "why", "how", "can", "could",
+    "with", "for", "in", "on", "about", "tell", "me", "role", "company",
+    "please", "hello", "thanks", "yes", "no", "this", "that", "which", "would",
+    "experience", "and", "to", "of", "do", "did", "have",
+}
+
+
+def _detect_text_language(text: Optional[str]) -> Optional[str]:
+    """Best-effort French/English detection from the text itself.
+
+    Returns "fr", "en", or None (unknown). Diacritics are a strong French
+    signal; otherwise we compare French vs English function-word counts.
+    """
+    raw = str(text or "").lower()
+    if not raw.strip():
+        return None
+    if any(ch in _FRENCH_DIACRITICS for ch in raw):
+        return "fr"
+    words = re.findall(r"[a-zàâäçéèêëîïôœùûüÿæ']+", raw)
+    if not words:
+        return None
+    fr = sum(1 for w in words if w in _FRENCH_WORDS)
+    en = sum(1 for w in words if w in _ENGLISH_WORDS)
+    if fr > en:
+        return "fr"
+    if en > fr:
+        return "en"
+    return None
+
+
+def _resolve_tts_language(requested: Optional[str], text: str) -> str:
+    """The spoken language must match the words. Prefer the language detected
+    from the text; fall back to the requested language, then English."""
+    detected = _detect_text_language(text)
+    if detected:
+        return detected
+    requested_norm = str(requested or "").strip().lower()
+    return requested_norm or "en"
+
+
 def _select_voice_for_language(language_code: Optional[str]) -> str:
     """Select appropriate Edge TTS voice for language code."""
     normalized = str(language_code or "").strip().lower()
@@ -597,11 +672,15 @@ async def _edge_tts_stream(
     text: str, language: Optional[str] = None
 ) -> AsyncGenerator[bytes, None]:
     """Stream MP3 audio chunks from Microsoft Edge TTS with language-aware voice selection."""
-    voice = _select_voice_for_language(language)
-    rate = _select_rate_for_language(language)
+    # The voice must match the language of the TEXT, not just the caller's tag —
+    # otherwise French questions get read with an English accent when the tag drifts.
+    effective_language = _resolve_tts_language(language, text)
+    voice = _select_voice_for_language(effective_language)
+    rate = _select_rate_for_language(effective_language)
 
     print(
-        f'[TTS] synthesizing text="{text[:50]}{"..." if len(text) > 50 else ""}" voice={voice} rate={rate}'
+        f'[TTS] requested_lang={language} effective_lang={effective_language} '
+        f'voice={voice} text="{text[:40]}{"..." if len(text) > 40 else ""}"'
     )
 
     comm = _edge_tts.Communicate(text, voice, rate=rate)
@@ -619,7 +698,10 @@ async def _edge_tts_stream(
 )
 async def tts(request: TtsRequest):
     provider = str(request.provider or "").strip().lower()
-    want_elevenlabs = provider in {"elevenlabs", "eleven_labs", "el"}
+    # ElevenLabs is disabled: Edge TTS is the only provider unless someone
+    # explicitly opts back in via TTS_ALLOW_ELEVENLABS=1.
+    allow_elevenlabs = str(os.getenv("TTS_ALLOW_ELEVENLABS", "0") or "0").strip().lower() in {"1", "true", "yes", "on"}
+    want_elevenlabs = allow_elevenlabs and provider in {"elevenlabs", "eleven_labs", "el"}
 
     # ── ElevenLabs path ─ only if explicitly requested AND API key is configured ──
     if want_elevenlabs:

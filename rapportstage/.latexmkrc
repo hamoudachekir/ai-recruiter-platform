@@ -3,7 +3,7 @@
 # out to Pygments and therefore requires pdflatex to run with -shell-escape.
 # Prepending it here means every build (VS Code LaTeX Workshop *and* the
 # command line) gets the flag automatically, without touching global settings.
-set_tex_cmds('-shell-escape %O %S');
+set_tex_cmds('-synctex=1 -shell-escape %O %S');
 $pdf_mode = 1;
 
 # Keep the project folder clean: send every generated file (aux, log, .mtc,

@@ -2565,35 +2565,42 @@ const CallRoomActive = () => {
       track.enabled = true;
     });
 
-    // CRITICAL FIX: the VAD analyser must read from an INDEPENDENT mic capture,
-    // not the main interview stream. The main stream's track gets muted
-    // (track.enabled=false) while the agent speaks/thinks; on Chromium that
-    // silences the analyser's MediaStreamAudioSourceNode — and even a clone of
-    // the track — permanently (it keeps reading 0 after re-enable). A second
-    // getUserMedia() session is its own capture and is never muted, so the
-    // analyser always hears the candidate. We instead gate *arming an utterance*
-    // on the main mic's enabled state + canAcceptSttNow() below.
+    // The VAD analyser must keep "hearing" the candidate even while the main
+    // mic track is muted (track.enabled=false) during agent speech/thinking.
+    //
+    // DO NOT open a second getUserMedia() on the same physical mic for this:
+    // Chromium returns a permanently SILENT stream for a second capture of the
+    // same device (dual-capture), which makes the analyser read rms=0 forever
+    // and breaks STT entirely.
+    //
+    // Instead we tap a CLONE of the main mic track. A cloned MediaStreamTrack
+    // has an INDEPENDENT `enabled` flag, so when setMicEnabled(false) disables
+    // the source track during TTS, this clone stays enabled and keeps feeding
+    // the candidate's audio to the analyser. We still gate *arming an utterance*
+    // on the main mic's enabled state + canAcceptSttNow() in vadTick below, so
+    // the agent's own TTS is never armed/recorded as a candidate answer.
     let analyserStream;
-    try {
-      analyserStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-        },
-      });
-      vadAnalyserTrackRef.current = analyserStream.getAudioTracks()[0] || null;
-    } catch (err) {
-      console.warn(
-        "[VAD] dedicated mic capture failed; using main stream (may go deaf after mute):",
-        err?.message || err,
-      );
-      if (!streamRef.current) return;
+    const mainAudioTrack = streamRef.current.getAudioTracks()[0];
+    if (mainAudioTrack) {
+      const analyserTrack = mainAudioTrack.clone();
+      analyserTrack.enabled = true; // independent of the source track's mute state
+      vadAnalyserTrackRef.current = analyserTrack;
+      analyserStream = new MediaStream([analyserTrack]);
+    } else {
+      vadAnalyserTrackRef.current = null;
       analyserStream = streamRef.current;
     }
     if (vadTimerRef.current) {
       // startVad was called again while awaiting — abort this duplicate.
+      // (Defensive: no awaits remain above, but keep the guard.)
+      if (vadAnalyserTrackRef.current) {
+        try {
+          vadAnalyserTrackRef.current.stop();
+        } catch (err) {
+          /* noop */
+        }
+        vadAnalyserTrackRef.current = null;
+      }
       return;
     }
 

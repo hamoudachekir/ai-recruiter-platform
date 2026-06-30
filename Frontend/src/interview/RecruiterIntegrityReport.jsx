@@ -1,7 +1,39 @@
 import EventTimeline from './EventTimeline';
 import FlaggedMoments from './FlaggedMoments';
 import IntegritySummaryCards from './IntegritySummaryCards';
+import { summarizeByType, groupIncidents, formatDuration } from './integrityEvents';
 import './RecruiterIntegrityReport.css';
+
+const FINDING_TEMPLATES = {
+  MULTIPLE_PEOPLE: (s) => `${s.incidents} multiple-person incident${s.incidents === 1 ? '' : 's'} (~${formatDuration(s.totalSeconds)} on camera).`,
+  NO_PERSON_VISIBLE: (s) => `${s.incidents} no-person incident${s.incidents === 1 ? '' : 's'} (~${formatDuration(s.totalSeconds)} with no one in frame).`,
+  NO_FACE: (s) => `${s.incidents} no-face incident${s.incidents === 1 ? '' : 's'} (~${formatDuration(s.totalSeconds)}).`,
+  PHONE_VISIBLE: (s) => `Phone visible in ${s.incidents} incident${s.incidents === 1 ? '' : 's'}.`,
+  REFERENCE_MATERIAL_VISIBLE: (s) => `Reference materials detected in ${s.incidents} incident${s.incidents === 1 ? '' : 's'}.`,
+  SCREEN_DEVICE_VISIBLE: (s) => `Extra screen detected in ${s.incidents} incident${s.incidents === 1 ? '' : 's'}.`,
+  TAB_SWITCH: (s) => `Browser focus changed ${s.incidents} time${s.incidents === 1 ? '' : 's'}.`,
+  COPY_PASTE: (s) => `${s.incidents} copy/paste action${s.incidents === 1 ? '' : 's'} inside the interview page.`,
+  FULLSCREEN_EXIT: (s) => `Fullscreen exited ${s.incidents} time${s.incidents === 1 ? '' : 's'}.`,
+};
+
+// Derive consistent key findings + a one-line timeline summary directly from the
+// grouped incidents, so every number on the page agrees (no raw frame counts).
+const deriveFromIncidents = (events) => {
+  const byType = summarizeByType(events);
+  const rows = Object.values(byType);
+  if (!rows.length) return null;
+
+  const order = Object.keys(FINDING_TEMPLATES);
+  const findings = rows
+    .filter((row) => FINDING_TEMPLATES[row.type])
+    .sort((a, b) => order.indexOf(a.type) - order.indexOf(b.type))
+    .map((row) => FINDING_TEMPLATES[row.type](row));
+
+  const totalIncidents = rows.reduce((sum, row) => sum + row.incidents, 0);
+  const timelineSummary = `${totalIncidents} distinct integrity incident${totalIncidents === 1 ? '' : 's'} recorded for recruiter review.`;
+
+  return { findings, timelineSummary };
+};
 
 const normalizeLegacyReport = (report) => {
   if (!report) return null;
@@ -96,6 +128,17 @@ export default function RecruiterIntegrityReport({
 
   const level = normalizedReport.overallRiskLevel || 'low';
   const score = Number(normalizedReport.riskScore || 0);
+  const derived = deriveFromIncidents(events);
+  const keyFindings = derived?.findings?.length ? derived.findings : normalizedReport.keyFindings;
+  const timelineSummary = derived?.timelineSummary || normalizedReport.timelineSummary;
+
+  // Incident count per question (collapsed from raw frames) for consistency with
+  // the rest of the page. Falls back to the backend signalCount when no events.
+  const incidentsForQuestion = (questionId) => {
+    if (!Array.isArray(events) || !events.length) return null;
+    const scoped = events.filter((e) => (e.questionId || 'General') === (questionId || 'General'));
+    return groupIncidents(scoped).length;
+  };
 
   return (
     <div className="rir-container">
@@ -110,57 +153,14 @@ export default function RecruiterIntegrityReport({
       </div>
 
       <IntegritySummaryCards report={normalizedReport} events={events} />
-
-      {/* Objective Visual Signals Section */}
-      <div className="rir-section rir-section--visual-signals">
-        <h4>Objective Visual Signals</h4>
-        <p className="rir-section__disclaimer">
-          These signals indicate moments that may require recruiter review. They are not proof of misconduct.
-        </p>
-        <div className="rir-visual-signals-grid">
-          <div className="rir-visual-signal">
-            <span className="rir-visual-signal__label">Face Presence</span>
-            <span className="rir-visual-signal__value">
-              {normalizedReport.objectiveVisualSignals?.facePresencePercentage ?? normalizedReport.metrics?.facePresencePercentage ?? 0}%
-            </span>
-          </div>
-          <div className="rir-visual-signal">
-            <span className="rir-visual-signal__label">Person Count Issues</span>
-            <span className="rir-visual-signal__value">
-              {normalizedReport.objectiveVisualSignals?.personCountIssues ?? normalizedReport.metrics?.multiplePersonEvents ?? 0}
-            </span>
-          </div>
-          <div className="rir-visual-signal">
-            <span className="rir-visual-signal__label">Phone Detections</span>
-            <span className="rir-visual-signal__value">
-              {normalizedReport.objectiveVisualSignals?.phoneDetections ?? normalizedReport.metrics?.phoneDetections ?? 0}
-            </span>
-          </div>
-          <div className="rir-visual-signal">
-            <span className="rir-visual-signal__label">Reference Materials</span>
-            <span className="rir-visual-signal__value">
-              {normalizedReport.objectiveVisualSignals?.referenceMaterialDetections ?? normalizedReport.metrics?.bookDetections ?? 0}
-            </span>
-          </div>
-          <div className="rir-visual-signal">
-            <span className="rir-visual-signal__label">Extra Screens</span>
-            <span className="rir-visual-signal__value">
-              {normalizedReport.objectiveVisualSignals?.additionalScreenDetections ?? normalizedReport.metrics?.screenDetections ?? 0}
-            </span>
-          </div>
-          <div className="rir-visual-signal">
-            <span className="rir-visual-signal__label">Looking Away</span>
-            <span className="rir-visual-signal__value">
-              {Math.round(normalizedReport.objectiveVisualSignals?.lookingAwayTotalSeconds ?? normalizedReport.metrics?.lookingAwayTotalSeconds ?? 0)}s
-            </span>
-          </div>
-        </div>
-      </div>
+      <p className="rir-disclaimer-note">
+        These signals indicate moments that may require recruiter review — they are not proof of misconduct.
+      </p>
 
       {/* Interview Comfort Indicators Section */}
       {normalizedReport.interviewComfortIndicators && (
         <div className="rir-section rir-section--comfort">
-          <h4>Interview Comfort Indicators</h4>
+          <h4>Interview comfort indicators</h4>
           <p className="rir-section__disclaimer">
             These are <strong>objective technical indicators only</strong> — not emotion detection.
           </p>
@@ -200,11 +200,11 @@ export default function RecruiterIntegrityReport({
         {normalizedReport.summary}
       </div>
 
-      {!!normalizedReport.keyFindings?.length && (
+      {!!keyFindings?.length && (
         <div className="rir-section">
-          <h4>Key Findings</h4>
+          <h4>Key findings</h4>
           <ul className="rir-list">
-            {normalizedReport.keyFindings.map((finding, index) => (
+            {keyFindings.map((finding, index) => (
               <li key={`${finding}-${index}`}>{finding}</li>
             ))}
           </ul>
@@ -213,15 +213,23 @@ export default function RecruiterIntegrityReport({
 
       {!!normalizedReport.questionAnalysis?.length && (
         <div className="rir-section">
-          <h4>Question-by-question Review</h4>
+          <h4>Question-by-question review</h4>
           <div className="rir-question-list">
-            {normalizedReport.questionAnalysis.map((item, index) => (
-              <div key={`${item.questionId || 'question'}-${index}`} className="rir-question-card">
-                <strong>{item.questionId || 'General'}</strong>
-                <span>{item.signalCount || item.signals?.length || 0} signal(s)</span>
-                {item.highestSeverity && <span>Highest severity: {item.highestSeverity}</span>}
-              </div>
-            ))}
+            {normalizedReport.questionAnalysis.map((item, index) => {
+              const count = incidentsForQuestion(item.questionId)
+                ?? (item.signalCount || item.signals?.length || 0);
+              return (
+                <div key={`${item.questionId || 'question'}-${index}`} className="rir-question-card">
+                  <strong>{item.questionId || 'General'}</strong>
+                  <span>{count} incident{count === 1 ? '' : 's'}</span>
+                  {item.highestSeverity && (
+                    <span className={`rir-severity rir-severity--${item.highestSeverity}`}>
+                      {item.highestSeverity}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -229,19 +237,18 @@ export default function RecruiterIntegrityReport({
       <EventTimeline events={events} />
       <FlaggedMoments events={events} recordingUrl={recordingUrl} apiBase={apiBase} />
 
-      <div className="rir-section">
-        <h4>Timeline Summary</h4>
-        <p>{normalizedReport.timelineSummary}</p>
-      </div>
-
-      <div className="rir-section">
-        <h4>Recruiter Recommendation</h4>
-        <p>{normalizedReport.recruiterRecommendation}</p>
-      </div>
-
-      <div className="rir-limitations">
-        <strong>Limitations: </strong>
-        {normalizedReport.limitations}
+      <div className="rir-footer">
+        <div className="rir-footer__row">
+          <span className="rir-footer__label">Timeline</span>
+          <p>{timelineSummary}</p>
+        </div>
+        <div className="rir-footer__row rir-footer__row--recommend">
+          <span className="rir-footer__label">Recommendation</span>
+          <p>{normalizedReport.recruiterRecommendation}</p>
+        </div>
+        <p className="rir-footer__limitations">
+          <strong>Limitations:</strong> {normalizedReport.limitations}
+        </p>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import axios from "axios";
 import Navbar from "../../components/Navbar/Navbar";
 import Footer from "../../components/Footer/Footer";
 import MessagePopup from "../../components/MessagePopup";
+import ConversationsPopup from "../../components/ConversationsPopup";
 import { io } from "socket.io-client";
 import { jwtDecode } from "jwt-decode";
 import "slick-carousel/slick/slick.css";
@@ -57,6 +58,8 @@ const Home = () => {
   const [contactSubject, setContactSubject] = useState("");
   const [contactMessage, setContactMessage] = useState("");
   const [showMessagePopup, setShowMessagePopup] = useState(false);
+  const [showInbox, setShowInbox] = useState(false);
+  const [threadFromInbox, setThreadFromInbox] = useState(false);
   const [chatPartner, setChatPartner] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
@@ -354,50 +357,39 @@ const Home = () => {
       picture: '/images/bot-avatar.png'
     });
     setShowMessagePopup(true);
+    setShowInbox(false);
+    setThreadFromInbox(false);
     setHasUnreadMessages(false);
   };
 
-  const openCandidateMessages = async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const userId = localStorage.getItem("userId");
-      if (!token || !userId) return;
+  // Open the recruiter-messages inbox (conversation list).
+  const openCandidateMessages = () => {
+    setShowMessagePopup(false);
+    setShowInbox(true);
+    setHasUnreadMessages(false);
+  };
 
-      const response = await axios.get(
-        `http://localhost:3001/api/messages/user/${userId}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+  // Open a specific recruiter thread from the inbox.
+  const openThreadFromInbox = (partner) => {
+    setChatPartner(partner);
+    setShowInbox(false);
+    setThreadFromInbox(true);
+    setShowMessagePopup(true);
+  };
 
-      const allMessages = response.data.messages || [];
+  // Open NextBot from the inbox.
+  const openBotFromInbox = () => {
+    setShowInbox(false);
+    setThreadFromInbox(false);
+    openBotChat();
+  };
 
-      // Find the last message with a real user (exclude bot messages)
-      const realMessages = allMessages.filter(
-        (m) => m.from !== "bot" && m.to !== "bot"
-      );
-
-      if (realMessages.length > 0) {
-        const lastMsg = realMessages.at(-1);
-        const partnerId = lastMsg.from === userId ? lastMsg.to : lastMsg.from;
-
-        const senderInfo = await axios.get(
-          `http://localhost:3001/api/users/${partnerId}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-
-        const u = senderInfo.data;
-        setChatPartner({
-          _id: u._id,
-          name: u.name || `${u.firstName || ""} ${u.lastName || ""}`.trim() || "Recruiter",
-          picture: u.picture || null,
-        });
-        setShowMessagePopup(true);
-      } else {
-        // No real messages yet — open bot as fallback
-        openBotChat();
-      }
-    } catch (error) {
-      console.error("Error fetching candidate messages:", error);
-      openBotChat();
+  // Closing a thread returns to the inbox if that's where we came from.
+  const closeThread = () => {
+    setShowMessagePopup(false);
+    if (threadFromInbox) {
+      setThreadFromInbox(false);
+      setShowInbox(true);
     }
   };
 
@@ -666,20 +658,31 @@ const Home = () => {
         </div>
       )}
 
+      {/* Recruiter messages inbox (conversation list) */}
+      {showInbox && currentUserId && (
+        <ConversationsPopup
+          socket={socketRef.current}
+          currentUserId={currentUserId}
+          onSelectPartner={openThreadFromInbox}
+          onSelectBot={openBotFromInbox}
+          onClose={() => setShowInbox(false)}
+        />
+      )}
+
       {/* Live Chat Message Popup */}
       {showMessagePopup && chatPartner && (
         <MessagePopup
           socket={socketRef.current}
           selectedUser={chatPartner}
-          onClose={() => setShowMessagePopup(false)}
+          onClose={closeThread}
           currentUserId={currentUserId}
         />
       )}
 
       <div className="home-container">
         <Navbar />
-        {/* Message notification and bot chat buttons for candidates */}
-        {localStorage.getItem("token") && role === "CANDIDATE" && (
+        {/* Message bar — recruiter conversations (candidates & recruiters), plus NextBot for candidates */}
+        {localStorage.getItem("token") && (role === "CANDIDATE" || role === "ENTERPRISE") && (
           <div className="message-notification-container">
             <button
               className={`message-notification-button ${hasUnreadMessages ? 'has-notifications' : ''}`}
@@ -689,13 +692,15 @@ const Home = () => {
               <FontAwesomeIcon icon={faMessage} />
               {hasUnreadMessages && <span className="notification-badge"></span>}
             </button>
-            <button
-              className="bot-chat-button"
-              onClick={openBotChat}
-              title="Chat with NextBot"
-            >
-              <FontAwesomeIcon icon={faRobot} />
-            </button>
+            {role === "CANDIDATE" && (
+              <button
+                className="bot-chat-button"
+                onClick={openBotChat}
+                title="Chat with NextBot"
+              >
+                <FontAwesomeIcon icon={faRobot} />
+              </button>
+            )}
           </div>
         )}
         <section className="hero_section_clean elite">

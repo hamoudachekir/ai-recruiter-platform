@@ -4,20 +4,97 @@
 \adjustmtc
 \thispagestyle{MyStyle}
 
-% Guide pour la rédaction de la Conclusion et Perspectives
+Ce projet de fin d'études est parti d'un constat posé en introduction~: le processus de
+recrutement traditionnel reste long, répétitif et sujet aux biais, freiné par la surcharge
+des équipes RH et par l'inadéquation des outils existants, le plus souvent limités à des
+entretiens vidéo asynchrones sans véritable interaction. La problématique centrale était de
+savoir comment conduire un entretien technique complet, équitable et automatisé, reproduisant
+le raisonnement et la profondeur d'un entretien mené par un recruteur humain expérimenté.
 
-La \textbf{Conclusion Générale} a pour objectif de résumer les contributions du projet et d’ouvrir des perspectives d’évolution. Elle doit inclure les éléments suivants :
+Pour y répondre, le travail a suivi une méthodologie Scrum structurée en sprints successifs.
+Après avoir cerné les besoins des recruteurs au sein de Talan Tunisie Consulting, nous avons
+conçu et développé \textbf{NextHire}, une plateforme complète articulée autour d'un agent
+conversationnel IA, d'un pipeline de détection d'intégrité à trois niveaux et d'une
+application web React accessible depuis n'importe quel navigateur.
+
+\bigskip
+\noindent\textbf{Résultats obtenus.}
+Les objectifs fixés au début du projet ont été atteints. La plateforme couvre l'ensemble
+du cycle d'un entretien IA~: elle analyse le CV du candidat, génère des questions
+personnalisées selon un modèle adaptatif IRT-lite, conduit l'entretien en temps réel via
+un avatar 3D parlant, surveille en continu l'intégrité de la session et produit
+automatiquement un rapport structuré à destination du recruteur. La suite de tests automatisés, composée de 211~vérifications réparties sur trois
+environnements d'exécution (\texttt{pytest}, \texttt{unittest}, \texttt{node:assert}),
+passe avec un taux de réussite de 100\,\% :
+191~tests \texttt{pytest} dans le service d'analyse (dont 1~ignoré, soit
+190~exécutés), 9~tests \texttt{unittest} dans le moteur vocal,
+et 12~assertions \texttt{node:assert} côté Node.js. Le moteur d'entretien fusionne l'évaluation
+de la réponse et la génération de la question suivante en un unique appel LLM, ce qui maintient
+un délai inter-tour compatible avec une conversation naturelle en déploiement avec GPU. La couverture de \texttt{report\_service.py}, le module métier central du service
+d'analyse, atteint 91\,\% ; la couverture globale du package est de 45\,\%.
+
+\bigskip
+\noindent\textbf{Difficultés rencontrées.}
+La réalisation du projet a soulevé plusieurs difficultés, principalement liées à la
+nature temps réel du système et à sa complexité distribuée~:
 
 \begin{itemize}
-    \item \textbf{Synthèse des réalisations :} Récapitulez les principales étapes du projet et les résultats obtenus.
-    \item \textbf{Impact et apports :} Mettez en avant l'importance du projet et les bénéfices qu’il apporte aux utilisateurs ou à l’entreprise.
-    \item \textbf{Limites :} Identifiez brièvement les contraintes ou améliorations possibles.
-    \item \textbf{Perspectives d’évolution :} Décrivez les pistes d’amélioration et d’extension du projet :
-    \begin{itemize}
-        \item \textbf{À court terme :} Actions immédiates après la mise en place du projet.
-        \item \textbf{À moyen terme :} Évolutions possibles dans les mois ou années à venir.
-        \item \textbf{À long terme :} Vision future et extensions potentielles du projet.
-    \end{itemize}
+  \item \textbf{Streaming audio et VAD~:} assurer la détection fiable de fin de parole
+        et l'acheminement des trames PCM vers le service de transcription sans interruption
+        perceptible, en gérant les silences courts et les hésitations naturelles.
+  \item \textbf{Latence STT sur CPU~:} en l'absence d'accélération GPU, la transcription
+        par Faster-Whisper constitue le principal poste de latence du pipeline vocal,
+        ce qui impose un déploiement avec GPU pour atteindre les performances
+        conversationnelles cibles.
+  \item \textbf{Synchronisation des micro-services~:} coordonner l'état de session entre
+        le backend Node.js, le moteur de dialogue Python et les services de vérification
+        via Redis, tout en maintenant la cohérence lors des déconnexions WebSocket.
+  \item \textbf{Calibration du pipeline de détection~:} ajuster les seuils de similarité
+        cosinus (InsightFace, $\tau = 0{,}60$), les seuils de confiance YOLO par classe
+        et les poids du score de risque pour minimiser simultanément faux positifs et
+        faux négatifs.
+  \item \textbf{Synchronisation labiale de l'avatar 3D~:} aligner les phonèmes générés
+        par Edge TTS avec les morphèmes de l'avatar react-three-fiber en streaming,
+        sans introduire de décalage perceptible.
+  \item \textbf{Conception de la machine à états Python native (\texttt{InterviewEngine})~:} modéliser le flux de
+        l'entretien (phases, gardes, transitions, repli sur erreur) de façon à la fois
+        auditable et suffisamment souple pour absorber les réponses hors-sujet.
 \end{itemize}
 
-\noindent Cette conclusion doit être rédigée de manière synthétique et mettre en avant la valeur ajoutée du projet ainsi que son potentiel d’évolution.
+\bigskip
+\noindent\textbf{Apports du projet.}
+Sur le plan technique, ce travail a permis de concevoir et de mettre en œuvre une
+architecture micro-services complète articulée autour d'un état partagé Redis, d'une machine à états Python native (\texttt{InterviewEngine}) pour le moteur d'entretien,
+et de six services Python spécialisés (LangGraph est utilisé exclusivement dans
+le service d'analyse post-entretien). La combinaison d'un scoring
+adaptatif IRT-lite, d'un pipeline de surveillance multimodal (géométrie faciale, vérification
+d'identité, détection d'objets) et d'un rapport de risque pondéré constitue une contribution
+technique cohérente et réutilisable. L'ensemble est accessible depuis le navigateur sans
+installation côté candidat, ce qui élargit considérablement le périmètre d'utilisation.
+
+Sur le plan personnel et professionnel, ce stage a été l'occasion d'approfondir des
+compétences variées~: l'ingénierie des systèmes agentiques et des LLM, le traitement temps
+réel de la parole et de la vidéo, le développement full-stack moderne (Node.js, React 19,
+Python FastAPI), la vision par ordinateur appliquée (InsightFace, YOLOv8, MediaPipe),
+ainsi que la conduite d'un projet complet de l'analyse du besoin jusqu'au déploiement,
+au sein d'un environnement d'entreprise.
+
+\bigskip
+\noindent\textbf{Perspectives.}
+Plusieurs pistes d'amélioration prolongent naturellement ce travail. Le déploiement sur
+infrastructure GPU réduirait fortement la latence de transcription, rendant
+le pipeline vocal entièrement conversationnel. Le modèle de reconnaissance vocale pourrait
+être affiné sur un corpus de vocabulaire métier spécifique au recrutement technique, et
+étendu au dialecte tunisien pour mieux servir le marché local. Le pipeline de détection
+d'intégrité pourrait être enrichi d'un module de détection de deepfakes pour contrer les
+tentatives d'usurpation d'identité. Le moteur de questions adaptatif pourrait intégrer
+un filtrage collaboratif fondé sur les historiques d'embauche réels afin d'améliorer la
+pertinence des évaluations. Enfin, une extension multilingue couvrant d'autres dialectes
+du Maghreb élargirait la portée de la plateforme au-delà du contexte tunisien.
+
+En définitive, NextHire démontre la viabilité d'un recrutement automatisé par l'intelligence
+artificielle et illustre comment les systèmes agentiques fondés sur les LLM peuvent
+reproduire, à l'échelle, la rigueur et la cohérence d'un entretien professionnel. Il ouvre
+la voie à des outils RH plus autonomes, capables d'accompagner les équipes face à une
+demande de recrutement toujours croissante, tout en laissant la décision finale là où elle
+doit rester~: chez le recruteur humain.

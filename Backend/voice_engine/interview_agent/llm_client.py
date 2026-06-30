@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -255,6 +256,30 @@ class GroqClient(LLMClient):
         self.model = model
         timeout_ms = max(1000, int(os.getenv("AGENT_LLM_TIMEOUT_MS", "6000") or "6000"))
         self.request_timeout_sec = timeout_ms / 1000.0
+        # Free-tier Groq enforces a tokens-per-minute cap; a brief retry that
+        # honors the server's retry-after smooths over transient 429 spikes.
+        self.max_retries = max(0, int(os.getenv("GROQ_MAX_RETRIES", "1") or "1"))
+        self.retry_max_sleep_sec = max(0.0, float(os.getenv("GROQ_RETRY_MAX_SLEEP_SEC", "8") or "8"))
+
+    @staticmethod
+    def _retry_after_seconds(resp: "httpx.Response | None", default: float = 2.0) -> float:
+        """Seconds to wait before retrying a 429, from the Retry-After header or
+        the 'try again in Xs' hint Groq puts in the error body."""
+        if resp is None:
+            return default
+        header = resp.headers.get("retry-after")
+        if header:
+            try:
+                return float(header)
+            except (TypeError, ValueError):
+                pass
+        match = re.search(r"try again in ([0-9.]+)\s*s", resp.text or "", re.IGNORECASE)
+        if match:
+            try:
+                return float(match.group(1))
+            except (TypeError, ValueError):
+                pass
+        return default
 
     def complete_json(self, system, messages, temperature=0.6, max_tokens=800):
         enforced_system = (
@@ -278,22 +303,32 @@ class GroqClient(LLMClient):
             "Content-Type": "application/json",
         }
 
-        try:
-            with httpx.Client(timeout=self.request_timeout_sec) as client:
-                resp = client.post(
-                    f"{self._BASE_URL}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                resp.raise_for_status()
-                body = resp.json()
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code if exc.response is not None else 0
-            detail = (exc.response.text or "")[:300] if exc.response is not None else ""
-            raise LLMError(f"Groq request failed (HTTP {status}): {detail or exc}") from exc
-        except httpx.HTTPError as exc:
-            raise LLMError(f"Groq request failed: {exc}") from exc
+        body = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                with httpx.Client(timeout=self.request_timeout_sec) as client:
+                    resp = client.post(
+                        f"{self._BASE_URL}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+                    resp.raise_for_status()
+                    body = resp.json()
+                break
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code if exc.response is not None else 0
+                # Retry once (bounded) on rate-limit, honoring the server's hint.
+                if status == 429 and attempt < self.max_retries:
+                    wait = min(self._retry_after_seconds(exc.response), self.retry_max_sleep_sec)
+                    time.sleep(wait + 0.25)
+                    continue
+                detail = (exc.response.text or "")[:300] if exc.response is not None else ""
+                raise LLMError(f"Groq request failed (HTTP {status}): {detail or exc}") from exc
+            except httpx.HTTPError as exc:
+                raise LLMError(f"Groq request failed: {exc}") from exc
 
+        if body is None:
+            raise LLMError("Groq request failed: no response after retries")
         content = (
             body.get("choices", [{}])[0]
             .get("message", {})

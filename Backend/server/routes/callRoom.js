@@ -399,9 +399,14 @@ router.get("/available", verifyToken, async (req, res) => {
         .json({ message: "Only candidates can view available rooms" });
     }
 
+    // Return rooms still open to join (no candidate yet) PLUS any room this
+    // candidate has already requested but isn't confirmed/rejected on. Without
+    // the second clause, a candidate who clicked "Request to Join" loses sight
+    // of the room on page reload (its candidate field is no longer null), even
+    // though they're the one waiting for the recruiter to confirm.
     const waitingRooms = await CallRoom.find({
       status: "waiting_confirmation",
-      candidate: { $eq: null },
+      $or: [{ candidate: { $eq: null } }, { candidate: req.user._id }],
     })
       .populate("initiator", "email firstName lastName")
       .populate("job", "title company")

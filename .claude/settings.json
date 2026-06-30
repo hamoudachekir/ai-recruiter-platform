@@ -99,7 +99,12 @@
       "Bash(netstat -ano)",
       "Bash(curl -s --max-time 5 http://127.0.0.1:8013/health)",
       "Bash(powershell -Command \"\\(Get-Process python -ErrorAction SilentlyContinue | Measure-Object\\).Count\")",
-      "PowerShell($ErrorActionPreference='Stop'; foreach \\($f in @\\('Backend\\\\scripts\\\\run_call_room_full_stack.ps1','Backend\\\\voice_engine\\\\scripts\\\\run_voice_interview_stack.ps1'\\)\\) { $null=[System.Management.Automation.PSParser]::Tokenize\\(\\(Get-Content -Raw \"C:\\\\Users\\\\wh\\\\ai-recruiter-platform\\\\$f\"\\), [ref]$null\\); \"OK parse: $f\" })"
+      "PowerShell($ErrorActionPreference='Stop'; foreach \\($f in @\\('Backend\\\\scripts\\\\run_call_room_full_stack.ps1','Backend\\\\voice_engine\\\\scripts\\\\run_voice_interview_stack.ps1'\\)\\) { $null=[System.Management.Automation.PSParser]::Tokenize\\(\\(Get-Content -Raw \"C:\\\\Users\\\\wh\\\\ai-recruiter-platform\\\\$f\"\\), [ref]$null\\); \"OK parse: $f\" })",
+      "PowerShell(git -C \"C:\\\\Users\\\\wh\\\\ai-recruiter-platform\" add --dry-run -- rapportstage 2>&1)",
+      "PowerShell(git -C \"C:\\\\Users\\\\wh\\\\ai-recruiter-platform\" check-ignore -v rapportstage/main.pdf rapportstage/main.tex 2>&1)",
+      "PowerShell($dir = \"C:\\\\Users\\\\wh\\\\ai-recruiter-platform\\\\rapportstage\")",
+      "PowerShell(\"==== what git WOULD track in rapportstage \\(source only\\) ====\")",
+      "PowerShell(\"`n==== sanity: is main.pdf ignored? ====\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\wh",

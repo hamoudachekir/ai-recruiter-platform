@@ -6,15 +6,19 @@ import './CallRoomAvailable.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
 
-const isTokenExpired = (jwtToken) => {
-  if (!jwtToken) return true;
+const decodeToken = (jwtToken) => {
+  if (!jwtToken) return null;
   try {
-    const payload = JSON.parse(atob(jwtToken.split('.')[1] || ''));
-    if (!payload?.exp) return true;
-    return payload.exp * 1000 <= Date.now();
+    return JSON.parse(atob(jwtToken.split('.')[1] || ''));
   } catch {
-    return true;
+    return null;
   }
+};
+
+const isTokenExpired = (jwtToken) => {
+  const payload = decodeToken(jwtToken);
+  if (!payload?.exp) return true;
+  return payload.exp * 1000 <= Date.now();
 };
 
 const CallRoomAvailable = () => {
@@ -27,7 +31,16 @@ const CallRoomAvailable = () => {
   const navigate = useNavigate();
 
   const token = localStorage.getItem('token');
-  const currentUserId = localStorage.getItem('userId');
+  // Derive identity from the token itself, not from the separate localStorage
+  // 'role'/'userId' keys — those can go stale when a different login flow
+  // overwrites the token without updating them, which made this page show an
+  // empty list (recruiter token → 403) instead of the real reason.
+  const tokenPayload = decodeToken(token);
+  const currentUserId = String(
+    tokenPayload?.id || tokenPayload?._id || localStorage.getItem('userId') || '',
+  );
+  const currentRole = String(tokenPayload?.role || '').toUpperCase();
+  const isCandidate = currentRole === 'CANDIDATE';
 
   const setRoomMsg = (roomDbId, text, type = 'info') => {
     setRoomMessages(prev => ({ ...prev, [roomDbId]: { text, type } }));
@@ -43,6 +56,15 @@ const CallRoomAvailable = () => {
 
   // ── Fetch available rooms ─────────────────────────────────────────────────
   useEffect(() => {
+    // This page is candidate-only. If the browser is authenticated as a
+    // recruiter/enterprise (e.g. the account that created the room), the
+    // backend returns 403 — surface that clearly instead of showing an empty
+    // "no rooms available" state.
+    if (!isCandidate) {
+      setLoading(false);
+      return;
+    }
+
     const fetchAvailableRooms = async () => {
       try {
         const response = await fetch(`${API_BASE}/api/call-rooms/available`, {
@@ -51,6 +73,18 @@ const CallRoomAvailable = () => {
         const data = await response.json();
         if (data.success) {
           setAvailableRooms(data.rooms);
+          // Restore "waiting for confirmation" state across reloads: if one of
+          // the returned rooms is one this candidate already requested, resume
+          // the fallback poll so we still auto-redirect when the recruiter
+          // confirms.
+          const mine = data.rooms.find(
+            (r) => String(r.candidate?._id || r.candidate) === String(currentUserId),
+          );
+          if (mine?.roomId) {
+            setPendingRoomId(mine.roomId);
+          }
+        } else {
+          console.error('Available rooms request failed:', response.status, data.message);
         }
       } catch (error) {
         console.error('Failed to fetch available rooms:', error);
@@ -60,7 +94,7 @@ const CallRoomAvailable = () => {
     };
 
     fetchAvailableRooms();
-  }, [token]);
+  }, [token, isCandidate]);
 
   // ── Fallback poll: redirect when room becomes active ──────────────────────
   useEffect(() => {
@@ -194,6 +228,21 @@ const CallRoomAvailable = () => {
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
+  if (!isCandidate) {
+    return (
+      <PublicLayout>
+        <div className="empty-state">
+          <p>This page is only available to candidate accounts.</p>
+          <p>
+            You appear to be signed in
+            {currentRole ? ` as ${currentRole}` : ''} — please log out and sign
+            in with your candidate account to join an interview room.
+          </p>
+        </div>
+      </PublicLayout>
+    );
+  }
+
   if (loading) {
     return (
       <PublicLayout>

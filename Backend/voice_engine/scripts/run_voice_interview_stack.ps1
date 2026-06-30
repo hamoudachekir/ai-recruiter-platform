@@ -164,6 +164,10 @@ $speechDefaults = @{
     FW_TTS_SPEED = '1.12'
     FW_DEVICE = $fwDevice
     FW_COMPUTE_TYPE = $fwCompute
+    # Fast multilingual STT model for live interviews on CPU (~4s vs ~18-36s for
+    # distil-large-v3). Set FW_MODEL=tiny for max speed, or small/medium for more
+    # accuracy. On GPU you can pin distil-large-v3.
+    FW_MODEL = 'base'
 }
 
 $agentDefaults = @{

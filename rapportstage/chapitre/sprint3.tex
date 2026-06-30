@@ -1,0 +1,429 @@
+\chapter[Sprint 3 : Agent vocal adaptatif]{Sprint 3 : Un agent d'entretien vocal\\adaptatif piloté par LLM}
+\begin{spacing}{1.2}
+\minitoc
+\thispagestyle{MyStyle}
+\end{spacing}
+\clearpage
+
+\providecommand{\screenshot}[2]{%
+  \IfFileExists{../screenshoot/#1}{%
+    \includegraphics[width=0.9\textwidth,height=12cm,keepaspectratio]{../screenshoot/#1}%
+  }{%
+    \fbox{\parbox[c][4.5cm][c]{0.9\textwidth}{\centering\itshape
+      Capture d'écran à insérer~: #2\\[4pt]
+      \normalfont\small(fichier attendu~: \texttt{screenshoot/#1})}}%
+  }%
+}
+
+\section{Introduction}
+
+Ce troisième sprint constitue le cœur du projet~: il livre l'agent d'entretien vocal piloté par un grand modèle de langage, son moteur adaptatif IRT-lite et la pile vocale (transcription et synthèse). L'avatar 3D parlant donne un visage à l'assistante d'entretien \textit{Nour} et rend l'échange plus naturel.
+
+\section{Objectifs du sprint}
+
+L'objectif principal de ce sprint est défini comme suit~:
+
+\begin{quote}
+\itshape Concevoir et réaliser le cœur conversationnel de NextHire~: un agent d'entretien vocal qui conduit en temps réel un entretien adaptatif, en générant et en évaluant les questions au moyen d'un grand modèle de langage, en ajustant la difficulté au niveau du candidat (IRT-lite) et en s'exprimant par la voix à travers un avatar 3D.
+\end{quote}
+
+\subsection{Backlog du sprint}
+
+Le tableau~\ref{tab:backlog-s3} présente le backlog du Sprint~3.
+
+\begin{table}[H]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.3}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.1cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.8cm}|}
+    \hline
+    \rowcolor{blue!10}
+    \textbf{ID} & \textbf{Récit utilisateur} & \textbf{Priorité} \\
+    \hline
+    S1 & En tant que candidat, je veux passer un entretien vocal en direct mené par un agent IA. & Haute \\
+    \hline
+    S2 & En tant que candidat, je veux que les questions s'adaptent à mon niveau au fil de l'entretien. & Haute \\
+    \hline
+    S3 & En tant que candidat, je veux voir et entendre un avatar 3D qui pose les questions (voix et synchronisation labiale). & Haute \\
+    \hline
+    S4 & En tant que candidat, je veux suivre la transcription de mes réponses en temps réel. & Moyenne \\
+    \hline
+    S5 & En tant que recruteur, je veux obtenir une évaluation structurée à l'issue de l'entretien. & Haute \\
+    \hline
+  \end{tabularx}
+  \caption{Backlog du Sprint~3 : Agent d'entretien vocal adaptatif.}
+  \label{tab:backlog-s3}
+\end{table}
+
+\section{Concept de l'entretien vocal adaptatif}
+
+L'entretien de NextHire est conduit par un agent conversationnel unique, l'assistante «~Nour~», pilotée par une machine à états développée sur mesure plutôt que par un \textit{framework} multi-agents. L'entretien se déroule en deux phases successives, une phase RH comportementale puis une phase technique, chacune dotée de son propre \textit{prompt} système.
+
+La phase technique repose sur une sélection adaptative des questions~: à chaque tour, la capacité estimée du candidat ($\theta$) est mise à jour selon une règle IRT-lite, ce qui oriente la difficulté de la question suivante. L'agent ajuste par ailleurs son ton au niveau de stress détecté chez le candidat (normal, chaleureux, rassurant), sans changer d'interlocuteur. Enfin, l'avatar 3D donne un visage à l'agent~: il énonce les questions par synthèse vocale et synchronise le mouvement de ses lèvres avec l'audio.
+
+\section{Conception détaillée et architecture}
+
+\subsection{Le moteur d'entretien}
+
+Le moteur d'entretien (\texttt{InterviewEngine}) est une machine à états Python native, sans dépendance à LangChain ni LangGraph. Il enchaîne plusieurs nœuds, initialisation de session, ouverture, attente de réponse, traitement de la réponse, mise à jour IRT-lite et gestion du stress, génération de la question, puis clôture, autour d'un état partagé \texttt{InterviewState} (configuration du poste, tour courant, capacité estimée $\theta$, niveau de stress). Sa réalisation repose sur un appel JSON unique au LLM Groq (\texttt{openai/gpt-oss-120b}) par tour, qui fusionne l'évaluation de la réponse et la génération de la question suivante, et sur une série de \textit{guards} déterministes traités sans appel LLM (changement de langue, demande de répétition, réponse hors-sujet). L'état de session est conservé dans Redis, avec repli en mémoire en cas d'indisponibilité. La figure~\ref{fig:interview-engine} en présente la machine à états et l'état \texttt{InterviewState} associé.
+
+\begin{figure}[H]
+  \centering
+  \resizebox{\textwidth}{!}{%
+  \begin{tikzpicture}[
+    font=\scriptsize,
+    >=Stealth,
+    box/.style={draw, rounded corners=3pt, fill=blue!10,
+                minimum width=3.4cm, minimum height=0.65cm, align=center, font=\tiny},
+    io/.style={draw, dashed, rounded corners=3pt, fill=orange!12,
+               minimum width=3.4cm, minimum height=0.65cm, align=center, font=\tiny},
+    dec/.style={draw, diamond, fill=yellow!15, aspect=2.4, align=center,
+                inner sep=1pt, font=\tiny},
+    term/.style={draw, ellipse, fill=gray!25, minimum width=1.8cm,
+                 minimum height=0.5cm, align=center, font=\tiny\bfseries},
+    ann/.style={draw=blue!30, fill=blue!4, align=left, text width=3.9cm,
+                inner sep=2.5pt, font=\tiny, rounded corners=2pt},
+  ]
+
+  %% ── Main flow (centered at x = 0) ──────────────────────────────────────
+  \node[term] (start) at (0,    0)    {START};
+  \node[box]  (N0)    at (0,  -1.4)  {initialise\_session};
+  \node[box]  (N1)    at (0,  -2.7)  {ouverture};
+  \node[io]   (N2)    at (0,  -4.1)  {await\_response};
+  \node[box]  (N3)    at (0,  -5.4)  {traitement\_réponse};
+  \node[box]  (N4)    at (0,  -6.7)  {update\_irt\_stress};
+  \node[dec]  (D1)    at (0,  -8.1)  {should\_end ?};
+  \node[dec]  (D2)    at (0,  -9.7)  {switch\_phase ?};
+  \node[box]  (N5)    at (0, -11.1)  {generate\_question};
+  \node[box]  (N6)    at (5,  -8.1)  {end\_interview};
+  \node[term] (endn)  at (5,  -9.3)  {END};
+
+  %% ── Arrows ──────────────────────────────────────────────────────────────
+  \draw[->] (start) -- (N0);
+  \draw[->] (N0)    -- (N1);
+  \draw[->] (N1)    -- (N2);
+  \draw[->] (N2)    -- node[right,font=\tiny,fill=white,inner sep=0pt]
+                         {transcription STT} (N3);
+  \draw[->] (N3)    -- (N4);
+  \draw[->] (N4)    -- (D1);
+  \draw[->] (D1)    -- node[right,font=\tiny]{Non} (D2);
+  \draw[->] (D2)    -- node[right,font=\tiny]{Non} (N5);
+  \draw[->] (D1.east) -- node[above,font=\tiny]{Oui} (N6.west);
+  \draw[->] (N6)      -- (endn);
+  \draw[->] (D2.east) -- ++(0.7,0) |-
+            node[right,font=\tiny,pos=0.4]{Oui $\to$ technique}
+            (N5.east);
+  \draw[->] (N5.south) -- ++(0,-0.45) -- ++(-3.0,0) |- (N2.west);
+
+  %% ── Main Interview Loop bounding box ────────────────────────────────────
+  \draw[dashed, draw=gray!55, rounded corners=3pt]
+    (-2.1,-3.3) rectangle (2.1,-11.85);
+  \node[font=\tiny, text=gray, fill=white, inner sep=1pt]
+    at (0,-3.3) {Boucle principale d'entretien};
+
+  %% ── Annotation boxes ─────────────────────────────────────────────────
+  \node[ann] at (7.0, -1.4) {
+    InterviewState créé\\
+    -- interview\_id, job\_title, skills\\
+    -- seniority, eval\_criteria, style
+  };
+  \node[ann] at (7.0, -2.7) {
+    Tour 0 : message fixe «Nour»\\
+    -- aucun appel LLM
+  };
+  \node[ann] at (7.0, -4.1) {
+    [I/O] Bloquant -- attend\\
+    transcription WebSocket\\
+    Faster Whisper STT :8012
+  };
+  \node[ann] at (7.0, -5.4) {
+    Guards déterministes OU LLM\\
+    Groq $\to$ score, conf., question,\\
+    difficulty, skill\_focus, done
+  };
+  \node[ann] at (7.0, -6.7) {
+    IRT-lite : $\theta \mathrel{+}= 0.4(\mathrm{score}{-}0.5)$\\
+    \phantom{IRT-lite : }$+\, 0.1(\mathrm{conf.}{-}0.5)$\\
+    stress\_level $\to$ agent\_mode\\
+    (normal/warm/supportive/reset)
+  };
+  \node[ann] at (7.0,-11.1) {
+    Skill rotation + déduplication\\
+    (similarité de tokens $\geq 0.65$), fallback bank
+  };
+  \node[ann] at (9.8, -9.3) {
+    build\_final\_report() :\\
+    weighted scores, hiring\_rec\\
+    $\to$ POST /call-rooms/:id/end
+  };
+
+  %% ── InterviewState panel (top-right) ─────────────────────────────────
+  \draw[draw=black!45, rounded corners=3pt, fill=gray!5]
+    (8.2, 0.5) rectangle (13.0, -2.8);
+  \node[font=\tiny\bfseries] at (10.6, 0.32) {InterviewState (dataclass)};
+  \draw[black!30] (8.2,-0.1) -- (13.0,-0.1);
+  \node[font=\tiny, align=left, text width=4.4cm] at (10.6,-1.45) {
+    \textbf{Session / Config :} interview\_id,\\
+    \quad candidate\_name, job\_title, skills,\\
+    \quad seniority, evaluation\_criteria,\\
+    \quad interview\_style, preferred\_language\\[2pt]
+    \textbf{Live Turn :} phase, turn\_index,\\
+    \quad theta (IRT), transcript, evaluations,\\
+    \quad intro\_question\_count\\[2pt]
+    \textbf{Contrôle :} stress\_level,\\
+    \quad struggle\_streak, ended
+  };
+
+  \end{tikzpicture}%
+  }%
+  \caption{Machine à états de l'agent d'entretien NextHire
+           (\textit{custom Python} -- sans LangGraph/LangChain).}
+  \label{fig:interview-engine}
+\end{figure}
+
+\subsection{Pile vocale (STT et TTS)}
+
+La pile vocale est portée par un micro-service FastAPI dédié. La transcription des réponses du candidat est assurée en continu par Faster-Whisper, dont le fournisseur et la langue sont sélectionnés selon la configuration de la session. La synthèse vocale de l'assistante \textit{Nour} s'appuie sur Edge TTS, qui fonctionne en \textit{streaming}~: les premiers fragments audio sont émis avant la fin de la synthèse, ce qui réduit la latence perçue. L'audio est diffusé au client via Socket.IO et synchronisé avec le mouvement des lèvres de l'avatar.
+
+\subsection{Flux d'une session d'entretien}
+
+La figure~\ref{fig:seq-interview} illustre le flux de messages d'une session d'entretien IA NextHire, de l'initialisation de la salle jusqu'à la génération du rapport final.
+
+Les étapes clés sont les suivantes.
+
+\begin{sloppypar}
+\begin{enumerate}
+  \item \textbf{Initialisation.} Le candidat ouvre la page d'entretien. Le client React envoie
+        une requête \texttt{GET} vers \texttt{/api/call-rooms/\{roomId\}} au backend Node.js,
+        qui récupère le document \texttt{CallRoom} dans MongoDB (contexte du poste, profil
+        candidat, statut de la session) et retourne ces données au client.
+
+  \item \textbf{Vérification d'identité.} Le candidat soumet une image de sa webcam pour
+        la vérification faciale. Le backend appelle le service Face Verify (Python, port 8011),
+        qui compare l'embedding de l'image en direct avec celui enregistré lors de l'inscription
+        (similarité cosinus, modèle InsightFace \textit{buffalo-l}) et autorise l'entretien
+        si le seuil de correspondance est atteint.
+
+  \item \textbf{Démarrage de l'entretien.} Le client établit une connexion Socket.IO avec le
+        backend. Celui-ci initialise une session auprès de l'Interview Agent via REST. L'agent
+        crée un objet \texttt{InterviewState} en mémoire, appelle le LLM Groq avec le prompt
+        système pour générer la question d'ouverture, transmet le texte à Edge TTS pour la
+        synthèse vocale, et diffuse l'audio au candidat.
+
+  \item \textbf{Boucle Q\&A.} Le candidat répond oralement. L'audio PCM est envoyé au backend
+        via Socket.IO, transcrit par Faster Whisper (STT), puis transmis à l'Interview Agent.
+        L'agent évalue la réponse via le LLM (scoring IRT-lite, mise à jour du score de
+        capacité adaptative) et génère la question suivante. La boucle se répète jusqu'à ce
+        que le champ \texttt{done} retourné par le LLM soit \texttt{true}.
+
+  \item \textbf{Fin de l'entretien.} L'agent retourne l'évaluation finale avec la transcription
+        complète. Le backend construit le rapport recruteur, le persiste dans MongoDB, déclenche
+        l'analyse post-entretien en arrière-plan (service Analysis), et notifie le client via
+        Socket.IO.
+\end{enumerate}
+\end{sloppypar}
+
+\begin{figure}[H]
+  \centering
+  \resizebox{\textwidth}{!}{%
+  \begin{tikzpicture}[
+    font=\scriptsize,
+    >={Stealth[length=2mm]},
+    msg/.style={->, thin},
+    ret/.style={->, thin, dashed},
+    lbl/.style={font=\tiny, fill=white, inner sep=1pt, midway, above},
+    lifeline/.style={dashed, thin, gray!70},
+    phdr/.style={draw, fill=blue!12, rounded corners=2pt, align=center,
+                 font=\scriptsize\bfseries, minimum height=0.65cm, minimum width=2.8cm},
+  ]
+
+  %% ── Participant boxes ──────────────────────────────────────────────────
+  \node[phdr] at ( 0, 0) {React\\(Client)};
+  \node[phdr] at ( 4, 0) {Node.js\\(:3001)};
+  \node[phdr] at ( 8, 0) {Interview Agent\\(:8013)};
+  \node[phdr] at (12, 0) {Speech Stack\\(STT/TTS :8012)};
+  \node[phdr] at (16, 0) {Groq\\(LLM API)};
+  \node[phdr] at (20, 0) {MongoDB};
+  \node[phdr] at (24, 0) {Analysis Service\\(:8090)};
+
+  %% ── Lifelines ──────────────────────────────────────────────────────────
+  \draw[lifeline] ( 0,-0.38) -- ( 0,-21.5);
+  \draw[lifeline] ( 4,-0.38) -- ( 4,-21.5);
+  \draw[lifeline] ( 8,-0.38) -- ( 8,-21.5);
+  \draw[lifeline] (12,-0.38) -- (12,-21.5);
+  \draw[lifeline] (16,-0.38) -- (16,-21.5);
+  \draw[lifeline] (20,-0.38) -- (20,-21.5);
+  \draw[lifeline] (24,-0.38) -- (24,-21.5);
+
+  %% ════════════════════════════════════════════════════════════════════════
+  %% 1. Initialisation
+  %% ════════════════════════════════════════════════════════════════════════
+  \node[font=\tiny\bfseries, anchor=east] at (-0.3,-0.75) {1.};
+  \draw[msg] ( 0,-0.75) -- node[lbl] {GET /api/call-rooms/:roomId} (4,-0.75);
+  \draw[msg] ( 4,-1.30) -- node[lbl] {findOne(roomId)} (20,-1.30);
+  \draw[ret] (20,-1.85) -- node[lbl] {CallRoom \{jobContext, status, candidateInfo\}} (4,-1.85);
+  \draw[ret] ( 4,-2.40) -- node[lbl] {200 OK \{roomId, jobContext\}} (0,-2.40);
+
+  %% ════════════════════════════════════════════════════════════════════════
+  %% 2. Vérification d'identité faciale
+  %% ════════════════════════════════════════════════════════════════════════
+  \node[font=\tiny\bfseries, anchor=east] at (-0.3,-2.85) {2.};
+  \draw[msg] (0,-2.85) -- node[lbl] {POST /face-verify \{webcam\_frame\}} (4,-2.85);
+  \draw[draw=orange!70, fill=orange!8, rounded corners=1pt, thin]
+    (4.1,-3.10) rectangle (7.9,-3.65);
+  \node[font=\tiny, anchor=west] at (4.2,-3.38)
+    {[Face Verify :8011] compare\_embedding};
+  \draw[ret] (4,-3.95) -- node[lbl] {\{allowInterview: true, similarity: 0.92\}} (0,-3.95);
+  \draw[msg] (4,-4.45) -- node[lbl] {PATCH call-rooms \{faceVerification: matched\}} (20,-4.45);
+
+  %% ════════════════════════════════════════════════════════════════════════
+  %% 3. Démarrage de l'entretien
+  %% ════════════════════════════════════════════════════════════════════════
+  \node[font=\tiny\bfseries, anchor=east] at (-0.3,-4.95) {3.};
+  \draw[msg] (0,-4.95) -- node[lbl] {Socket.IO connect(roomId)} (4,-4.95);
+  \draw[msg] (4,-5.55) -- node[lbl] {POST /session/start \{jobContext, candidateProfile, style\}} (8,-5.55);
+  %% self-arrow: create InterviewState
+  \draw[->] (8,-6.15) -- ++(0.6,0) -- ++(0,-0.40) -- ++(-0.6,0);
+  \node[font=\tiny, anchor=west] at (8.70,-6.35) {create InterviewState};
+  \draw[msg] (8,-6.90) -- node[lbl] {chat.completions(COMPACT\_SYSTEM + opening\_prompt)} (16,-6.90);
+  \draw[ret] (16,-7.50) -- node[lbl] {\{next\_question, score:0.5, done:false\}} (8,-7.50);
+  \draw[ret] ( 8,-8.05) -- node[lbl] {\{question\_text\}} (4,-8.05);
+  \draw[msg] ( 4,-8.55) -- node[lbl] {POST /api/tts \{question\_text\}} (12,-8.55);
+  \draw[ret] (12,-9.10) -- node[lbl] {audio stream} (4,-9.10);
+  \draw[ret] ( 4,-9.60) -- node[lbl] {emit("agent-audio",\ audio)} (0,-9.60);
+
+  %% ════════════════════════════════════════════════════════════════════════
+  %% 4. Boucle Q&A
+  %% ════════════════════════════════════════════════════════════════════════
+  \node[font=\tiny\bfseries, anchor=east] at (-0.3,-10.1) {4.};
+  %% Loop frame
+  \draw[draw=green!50!black, fill=green!5, rounded corners=3pt, dashed, thin]
+    (-0.3,-10.1) rectangle (21.3,-18.5);
+  \node[font=\tiny\bfseries, text=green!40!black, anchor=north west]
+    at (-0.2,-10.15) {loop [répéter jusqu'à done = true]};
+
+  \draw[msg] ( 0,-10.75) -- node[lbl] {emit("audio-chunk",\ PCM\_audio)} (4,-10.75);
+  \draw[msg] ( 4,-11.35) -- node[lbl] {POST /api/transcribe \{audio\}} (12,-11.35);
+  \draw[ret] (12,-11.95) -- node[lbl] {\{text: transcript\}} (4,-11.95);
+  \draw[msg] ( 4,-12.55) -- node[lbl] {POST /session/turn \{interview\_id, transcript\}} (8,-12.55);
+  %% self-arrow: IRT update
+  \draw[->] (8,-13.15) -- ++(0.6,0) -- ++(0,-0.40) -- ++(-0.6,0);
+  \node[font=\tiny, anchor=west] at (8.70,-13.35)
+    {update\_theta(score,\ confidence) : IRT-lite};
+  \draw[msg] ( 8,-13.95) -- node[lbl] {chat.completions(contexte + réponse candidat)} (16,-13.95);
+  \draw[ret] (16,-14.55) -- node[lbl] {\{score, next\_question, difficulty, done\}} (8,-14.55);
+  \draw[ret] ( 8,-15.15) -- node[lbl] {\{question, score, done\}} (4,-15.15);
+  \draw[msg] ( 4,-15.75) -- node[lbl] {POST /api/tts \{next\_question\} [if !done]} (12,-15.75);
+  \draw[ret] (12,-16.35) -- node[lbl] {audio stream} (4,-16.35);
+  \draw[ret] ( 4,-16.95) -- node[lbl] {emit("agent-audio",\ audio)} (0,-16.95);
+  %% guard box
+  \draw[draw=gray!50, fill=gray!8, rounded corners=1pt, thin]
+    (0.5,-17.75) rectangle (7.5,-18.25);
+  \node[font=\tiny] at (4.0,-18.00)
+    {[done = true] $\Rightarrow$ sortie de boucle};
+
+  %% ════════════════════════════════════════════════════════════════════════
+  %% 5. Fin de l'entretien
+  %% ════════════════════════════════════════════════════════════════════════
+  \node[font=\tiny\bfseries, anchor=east] at (-0.3,-18.8) {5.};
+  \draw[ret] ( 8,-18.80) -- node[lbl] {\{done:true, final\_evaluation, transcript\}} (4,-18.80);
+  \draw[msg] ( 4,-19.40) -- node[lbl] {PATCH /call-rooms/:id \{status:ended, recruiterReport\}} (20,-19.40);
+  \draw[ret] (20,-19.95) -- node[lbl] {200 OK} (4,-19.95);
+  \draw[msg] ( 4,-20.50) -- node[lbl] {POST /api/interviews/:id/analyze-video (async, fire-and-forget)} (24,-20.50);
+  \draw[ret] ( 4,-21.05) -- node[lbl] {emit("interview-ended",\ \{score, summary\})} (0,-21.05);
+
+  \end{tikzpicture}%
+  }
+  \caption{Diagramme de séquence : session d'entretien IA NextHire.}
+  \label{fig:seq-interview}
+\end{figure}
+
+\section{Réalisation et interfaces utilisateur}
+
+\subsection{Écran d'entretien avec avatar 3D}
+
+L'écran principal d'entretien (route \texttt{/call-room/:roomId}, composant
+\texttt{CallRoomActive}) constitue le cœur de l'interaction en direct avec le candidat. Il
+affiche un avatar~3D animé, rendu avec \texttt{three.js} et \texttt{react-three-fiber}, qui
+incarne l'assistante d'entretien \textit{Nour} : l'avatar énonce vocalement les questions et
+synchronise le mouvement de ses lèvres avec l'audio (\textit{lip-sync}). Un panneau de
+transcription en temps réel restitue au candidat ses propres réponses au fur et à mesure de
+la conversation, tandis que la surveillance d'intégrité (vision et identité) s'exécute en
+arrière-plan tout au long de la session (figure~\ref{fig:interview-avatar}).
+
+\begin{figure}[H]
+  \centering
+  \screenshot{interview-avatar.JPG}{Salle d'entretien avec avatar 3D et transcription}
+  \caption{Écran d'entretien avec avatar 3D (assistante \textit{Nour}).}
+  \label{fig:interview-avatar}
+\end{figure}
+
+\subsection{Transcription en direct des réponses}
+
+Pendant que le candidat parle, son audio est transcrit en continu par la pile vocale (Faster-Whisper) et affiché en temps réel dans un panneau dédié, ce qui lui permet de suivre ses propres réponses au fil de l'échange (figure~\ref{fig:transcription}). Cette transcription alimente directement l'évaluation de la réponse par l'agent.
+
+\begin{figure}[H]
+  \centering
+  \screenshot{transcription.JPG}{Panneau de transcription en temps réel des réponses du candidat}
+  \caption{Transcription en direct des réponses du candidat pendant l'entretien.}
+  \label{fig:transcription}
+\end{figure}
+
+\subsection{Déroulement d'un tour d'entretien}
+
+À chaque tour, l'agent énonce une question par la voix de l'avatar, le candidat y répond oralement, puis l'agent évalue la réponse et enchaîne avec la question suivante, dont la difficulté s'ajuste au niveau détecté. La figure~\ref{fig:interview-qa} illustre un tour complet côté candidat.
+
+\begin{figure}[H]
+  \centering
+  \screenshot{interview-qa.JPG}{Question de l'agent et réponse transcrite du candidat}
+  \caption{Déroulement d'un tour d'entretien côté candidat.}
+  \label{fig:interview-qa}
+\end{figure}
+
+\section{Tests et performances}
+
+\subsection{Tests unitaires du moteur d'entretien}
+
+Deux modules de tests unitaires couvrent le moteur d'entretien Python, sous
+\texttt{voice\_engine/tests/}.
+
+\begin{itemize}
+  \item \texttt{test\_smoke.py} (4 tests) : détection d'activité vocale (VAD), repérage des
+        silences et fusion des segments par chevauchement maximal, validés sur des signaux
+        NumPy synthétiques. Les dépendances lourdes (PyTorch, Faster-Whisper, pyannote) sont
+        remplacées par des doublures installées dans \texttt{sys.modules} avant tout import~;
+        ce module ne requiert donc ni modèle ni réseau.
+  \item \texttt{test\_interview\_agent\_conversation.py} (5 tests) : forme de la réponse de
+        l'agent (message + scoring), repli sur une question de secours en cas d'échec du
+        fournisseur LLM, reformulation d'une demande de répétition sans appel LLM, et
+        distinction entre une vraie réponse contenant des répétitions et une demande de
+        répétition. Ce module ne dépend d'aucune bibliothèque lourde~: il importe directement
+        le moteur d'entretien et substitue uniquement le client LLM par une doublure scriptée.
+\end{itemize}
+
+\subsection{Évaluation des performances}
+
+Le cycle vocal d'un tour d'entretien se décompose en trois étapes~: la transcription
+(STT), l'appel au LLM, puis la synthèse vocale (TTS). Sur la machine de développement
+(CPU uniquement, sans accélération GPU), la transcription par Faster-Whisper constitue
+nettement le poste le plus coûteux du cycle et le principal goulot d'étranglement observé
+en environnement de développement~; un déploiement avec accélération GPU réduirait
+fortement ce poste, Faster-Whisper \texttt{small} étant conçu pour fonctionner en deçà du
+temps réel sur GPU.
+
+\begin{sloppypar}
+Pour les deux étapes servies par API externe, un point de conception mérite d'être
+souligné~: le moteur d'entretien NextHire \textbf{fusionne l'évaluation de la réponse et
+la génération de la question suivante en un unique appel JSON} au LLM Groq, plutôt que de
+les traiter en deux requêtes séparées. Cette conception évite un aller-retour LLM
+supplémentaire à chaque tour. Combinée à la synthèse vocale Edge TTS en \textit{streaming}
+(premiers fragments audio émis avant la fin de la synthèse), elle maintient la composante
+de raisonnement et de restitution vocale de l'ordre de la seconde, condition nécessaire
+au maintien d'une conversation perçue comme fluide une fois le goulot d'étranglement de
+la transcription résolu par le GPU.
+\end{sloppypar}
+
+\section{Conclusion}
+
+Ce sprint a livré la fonctionnalité centrale de NextHire~: un entretien vocal synchrone, adaptatif et incarné par un avatar 3D, dont la latence inter-tour reste compatible avec une conversation naturelle. Le sprint suivant consolide cette salle d'entretien en y intégrant la surveillance d'intégrité et en fiabilisant l'ensemble des micro-services.

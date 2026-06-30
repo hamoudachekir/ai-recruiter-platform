@@ -96,7 +96,11 @@ class StartRequest(BaseModel):
     candidate_name: str = ""
     candidate_profile: dict = Field(default_factory=dict)
     interview_style: str = Field("friendly", max_length=40)
-    phase: Literal["intro", "technical"] = "intro"
+    # Accepts the 5 interview phases plus the legacy "intro"/"technical" buckets
+    # (mapped to "introduction"/"technical" by the engine).
+    phase: Literal[
+        "introduction", "experience", "technical", "behavioral", "closing", "intro"
+    ] = "intro"
     preferred_language: str = Field("en", max_length=20)
     # Rich job configuration assembled upstream so every question is generated
     # dynamically from the full job (company context, seniority, criteria, ...).
@@ -115,7 +119,9 @@ class TurnRequest(BaseModel):
 
 class SwitchRequest(BaseModel):
     interview_id: str
-    phase: Literal["intro", "technical"]
+    phase: Literal[
+        "introduction", "experience", "technical", "behavioral", "closing", "intro"
+    ]
 
 
 class EndRequest(BaseModel):

@@ -88,7 +88,7 @@ class InterviewAgentConversationTests(unittest.TestCase):
 
         self.assertIn("agent_message", response)
         self.assertIn("scoring", response)
-        self.assertTrue(_agent_text(response).startswith("Hello, I'm Angelica"))
+        self.assertTrue(_agent_text(response).startswith("Hello, I'm Nour"))
         self.assertEqual(response["agent_message"]["skill_focus"], "background")
 
     def test_repeated_words_inside_real_answer_is_not_repeat_request(self) -> None:

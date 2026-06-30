@@ -1,7 +1,25 @@
+import io
 import os
 import re
+import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+
+# Force UTF-8 stdout/stderr so Windows charmap never crashes print() calls
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+else:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
+from dotenv import load_dotenv
+
+# Load env from Backend/server/.env (contains MONGO_URI)
+_repo_root = Path(__file__).resolve().parents[3]
+load_dotenv(_repo_root / "Backend" / "server" / ".env", override=False)
+load_dotenv(_repo_root / ".env", override=False)
 
 import numpy as np
 from bson import ObjectId
@@ -205,8 +223,10 @@ SKILL_SYNONYMS = {
 
 
 # Initialize MongoDB connection
-client = MongoClient(os.getenv("MONGO_URI"))
-db = client[os.getenv("MONGO_DB_NAME", "ai_recruiter")]
+_mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017/ai_recruiter")
+_mongo_db_name = os.getenv("MONGO_DB_NAME", "ai_recruiter")
+client = MongoClient(_mongo_uri)
+db = client[_mongo_db_name]
 
 # Load the embedding backend
 model = EmbeddingBackend()
@@ -634,6 +654,8 @@ def health():
         "jobs_indexed": len(recommender.job_ids),
         "last_update": recommender.last_update
     })
+
+
 
 
 if __name__ == '__main__':

@@ -31,12 +31,13 @@
 \usepackage{minted}
 \usepackage{color}
 \usepackage{tabularx}
-\usepackage{float}     % provides [H] specifier — forces exact figure placement
+\usepackage{float}     % provides [H] specifier, forces exact figure placement
 \usepackage{booktabs}
 \usepackage{ctable}
 \usepackage{graphicx}
 \usepackage{multirow}
 \usepackage{tikz}
+\usetikzlibrary{positioning, arrows.meta, fit, backgrounds, shapes.geometric}
 \usepackage{seqsplit}
 \usepackage{fontenc}
 \usepackage{wrapfig}
@@ -181,6 +182,17 @@
 
 \newcommand{\highlight}[1] {%
   \textit{#1}%
+}
+
+% Figure « logo » : image centrée de hauteur fixe + légende numérotée.
+% Usage : \logofig{images/fichier.png}{Légende}{fig:label}
+\newcommand{\logofig}[3]{%
+  \begin{figure}[H]%
+    \centering
+    \includegraphics[max width=3.2cm, max height=1.6cm]{#1}%
+    \caption{#2}%
+    \label{#3}%
+  \end{figure}%
 }
 
 \setcounter{secnumdepth}{5}

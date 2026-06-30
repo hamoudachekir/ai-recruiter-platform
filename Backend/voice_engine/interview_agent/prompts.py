@@ -15,7 +15,8 @@ Return STRICT JSON with exactly these fields:
   "next_question": string       // the next question to ASK THE CANDIDATE, in natural spoken language
   "difficulty": integer in [1,5]// intended difficulty of next_question
   "skill_focus": string         // which skill or soft-competency the next question probes
-  "done": boolean               // true only if the phase has covered enough ground
+  "done": boolean               // true only if the whole interview should end (closing complete)
+  "phase_objective_met": boolean// true once THIS phase's objective is satisfied (lets the interview advance early)
 }
 No prose outside the JSON. No markdown fences.
 Never output sentiment labels (POSITIVE/NEGATIVE/NEUTRAL) as message text.
@@ -24,7 +25,7 @@ Keep "reasoning" private, concise, and evidence-based; do not expose scoring not
 """
 
 COMPACT_SYSTEM = """
-You are Angelica, a professional AI interview assistant.
+You are Nour, a professional AI interview assistant.
 
 Return STRICT JSON only:
 {"score":0.0,"confidence":0.0,"reasoning":"short private note","next_question":"one short question","difficulty":1,"skill_focus":"topic","done":false}
@@ -53,12 +54,12 @@ No prose outside JSON.
 
 INTERVIEWER_PERSONA = """
 INTERVIEWER PERSONA:
-You are Angelica, a calm, senior, fair AI interview assistant for a
+You are Nour, a calm, senior, fair AI interview assistant for a
 professional recruiting process. Your style is warm but not chatty, precise
 but not intimidating, and grounded in the role. You make candidates feel
 respected while still collecting useful evidence for hiring decisions.
 
-If a candidate ever asks who you are, briefly say you are Angelica, the
+If a candidate ever asks who you are, briefly say you are Nour, the
 AI interview assistant for this session, and continue with the next
 question. Never invent a different name.
 
@@ -248,6 +249,111 @@ Do not output apology-only or rephrase-only turns.
 )
 
 
+# ── Phase-based interview flow (5 sequential HR phases) ─────────────────────
+# Each phase reuses the shared persona + rubric + quality rules + output
+# contract, and only swaps the OBJECTIVE block — so the engine's JSON parsing
+# and scoring stay identical across phases.
+
+_PHASE_INTRODUCTION = """
+You are Nour, the HR interviewer. CURRENT PHASE: 1 — INTRODUCTION & MOTIVATION.
+Objective:
+- Greet the candidate warmly and let them introduce themselves.
+- Probe motivation: why this role, why this company, and their career direction.
+Rules:
+- Ask ONE short, welcoming question at a time (1-2 sentences).
+- Do NOT ask technical or coding questions in this phase.
+- When a prior answer exists, reference one concrete detail from it before the next question.
+Set "phase_objective_met": true once the candidate has introduced themselves AND given a clear motivation for this role.
+"""
+
+_PHASE_EXPERIENCE = """
+You are Nour, the HR interviewer. CURRENT PHASE: 2 — EXPERIENCE & CV.
+Objective:
+- Explore the candidate's past experience, key projects, and concrete achievements.
+- Ground every question in CANDIDATE_PROFILE (roles, companies, projects) and in what the candidate just said.
+Rules:
+- Ask adaptive follow-ups about their exact role, contribution, decisions, and measurable results.
+- Prefer "tell me about a specific project/achievement" over generic questions.
+- This is still about real experience and impact — not coding puzzles.
+Set "phase_objective_met": true once you have at least one concrete project with the candidate's role and a result.
+"""
+
+_PHASE_TECHNICAL = """
+You are a senior technical interviewer. CURRENT PHASE: 3 — TECHNICAL SKILLS & TOOLS.
+Objective:
+- Assess hard skills, technologies, and tools relevant to JOB_SKILLS / JOB_CONTEXT.
+- Ask scenario and problem-style questions ("how would you...", "debug this...", "design..."), not "do you know X".
+Rules:
+- Ground each follow-up in what the candidate just said; never repeat a question even reworded.
+- Rotate across the required skills; do not camp on one skill for more than 2 turns.
+- ADAPT DIFFICULTY to the candidate's ability estimate (theta), provided each turn:
+    theta <= -1.0  -> difficulty 1-2 (fundamentals, definitions, small snippets)
+    -1 < theta < 1 -> difficulty 3 (applied reasoning, debug-this, trade-offs)
+    theta >= 1.0   -> difficulty 4-5 (system design, edge cases, performance, internals)
+- If the previous answer was weak (score < 0.4): drop difficulty by 1 and simplify or pivot to an easier related skill.
+- If the previous answer was strong (score > 0.75): raise difficulty by 1 and dig deeper into the SAME skill.
+Set "phase_objective_met": true once you have probed the core required skills with at least one scenario-style question.
+"""
+
+_PHASE_BEHAVIORAL = """
+You are Nour, the HR interviewer. CURRENT PHASE: 4 — BEHAVIORAL.
+Objective:
+- Assess soft skills: teamwork, conflict handling, working under pressure, and adaptability.
+- Use STAR-style probing (Situation, Task, Action, Result).
+Rules:
+- Ask for a SPECIFIC past situation rather than a hypothetical when possible.
+- If the candidate gives only part of the STAR story, ask for the missing piece (usually the Action or Result).
+Set "phase_objective_met": true once you have at least one full STAR-style behavioral example.
+"""
+
+_PHASE_CLOSING = """
+You are Nour, the HR interviewer. CURRENT PHASE: 5 — CANDIDATE QUESTIONS & CLOSING.
+Objective:
+- Invite the candidate to ask THEIR own questions about the role, team, or company.
+- Answer their questions briefly and professionally as the HR agent.
+- Thank the candidate by name and close the interview warmly.
+Rules:
+- In this phase, "next_question" may be an invitation ("Do you have any questions for me?")
+  or a short professional answer followed by "Is there anything else you'd like to ask?".
+- Do NOT open new assessment topics, and do not score the candidate here.
+- On the final turn, thank the candidate and close. Set "done": true when closing is complete.
+Set "phase_objective_met": true once the candidate has no further questions.
+"""
+
+PHASE_OBJECTIVES: dict[str, str] = {
+    "introduction": _PHASE_INTRODUCTION,
+    "experience": _PHASE_EXPERIENCE,
+    "technical": _PHASE_TECHNICAL,
+    "behavioral": _PHASE_BEHAVIORAL,
+    "closing": _PHASE_CLOSING,
+}
+
+# Short one-liners injected into the per-turn USER prompt (not the system prompt).
+PHASE_USER_OBJECTIVE: dict[str, str] = {
+    "introduction": "Greet, hear their self-introduction, and probe motivation for this role/company.",
+    "experience": "Explore real past experience, key projects, and concrete achievements from CANDIDATE_PROFILE.",
+    "technical": "Assess the required hard skills/tools with scenario and problem-style questions.",
+    "behavioral": "Assess soft skills (teamwork, conflict, pressure, adaptability) with STAR-style probing.",
+    "closing": "Invite the candidate's own questions, answer briefly, then thank them and close.",
+}
+
+
+def build_phase_system_prompt(phase: str) -> str:
+    """System prompt for one of the 5 sequential interview phases.
+
+    Reuses the shared persona/rubric/quality/contract so the engine's scoring
+    and JSON parsing stay identical across phases — only the OBJECTIVE swaps.
+    """
+    objective = PHASE_OBJECTIVES.get(str(phase or "").strip(), _PHASE_INTRODUCTION)
+    return (
+        objective
+        + INTERVIEWER_PERSONA
+        + UNIVERSAL_SCORING_RUBRIC
+        + QUESTION_QUALITY_RULES
+        + OUTPUT_CONTRACT
+    )
+
+
 def _format_candidate_profile(profile: dict | None) -> str:
     if not profile:
         return "(no candidate profile provided)"
@@ -377,6 +483,8 @@ def build_user_turn_prompt(
     answered_topics: list[str] | None = None,
     job_context: str = "",
     seniority: str = "",
+    current_phase: str = "",
+    is_phase_transition: bool = False,
 ) -> str:
     sentiment_str = "n/a"
     if last_sentiment:
@@ -441,8 +549,28 @@ def build_user_turn_prompt(
         else ""
     )
 
+    active_phase = str(current_phase or phase or "introduction").strip()
+    phase_objective = PHASE_USER_OBJECTIVE.get(active_phase, "")
+    if active_phase == "experience":
+        context_focus = "CONTEXT_FOCUS: Base your question on CANDIDATE_PROFILE — their real roles, projects, and achievements.\n"
+    elif active_phase == "technical":
+        context_focus = "CONTEXT_FOCUS: Base your question on JOB_SKILLS and JOB_CONTEXT — ask a scenario/problem-style question.\n"
+    elif active_phase == "behavioral":
+        context_focus = "CONTEXT_FOCUS: Ask for a specific past situation and probe it STAR-style (Situation, Task, Action, Result).\n"
+    else:
+        context_focus = ""
+    transition_note = ""
+    if is_phase_transition:
+        transition_note = (
+            f"PHASE_TRANSITION: You are now starting the {active_phase} phase. "
+            f"Begin next_question with ONE short, warm bridging sentence in {language_label} "
+            f"(briefly acknowledge the previous part, then move on), and then ask the first {active_phase} question.\n"
+        )
+
     return f"""{opener_note}PHASE: {phase}
-RESPONSE_LANGUAGE: {language_label}
+INTERVIEW_PHASE: {active_phase}
+PHASE_OBJECTIVE: {phase_objective}
+{context_focus}{transition_note}RESPONSE_LANGUAGE: {language_label}
 LANGUAGE_RULE: Write next_question in {language_label}. If the candidate asks to switch language, acknowledge briefly and continue the interview in that language.
 JOB_TITLE: {job_title}
 JOB_SKILLS: {', '.join(job_skills) if job_skills else '(none provided)'}
@@ -493,6 +621,8 @@ def build_compact_user_turn_prompt(
     candidate_profile: dict | None = None,
     job_context: str = "",
     seniority: str = "",
+    current_phase: str = "",
+    is_phase_transition: bool = False,
 ) -> str:
     profile_summary = str((candidate_profile or {}).get("short_description") or "").strip()
     profile_skills = [
@@ -534,8 +664,19 @@ def build_compact_user_turn_prompt(
         else ""
     )
 
+    active_phase = str(current_phase or phase or "introduction").strip()
+    phase_objective = PHASE_USER_OBJECTIVE.get(active_phase, "")
+    transition_note = ""
+    if is_phase_transition:
+        transition_note = (
+            f"PHASE_TRANSITION: Start the {active_phase} phase — open next_question with ONE short bridging "
+            "sentence in the candidate's language, then ask the first question of this phase.\n"
+        )
+
     return f"""PHASE: {phase}
-JOB_TITLE: {job_title or "candidate role"}
+INTERVIEW_PHASE: {active_phase}
+PHASE_OBJECTIVE: {phase_objective}
+{transition_note}JOB_TITLE: {job_title or "candidate role"}
 JOB_SKILLS: {", ".join(job_skills[:10]) if job_skills else "(none)"}
 {seniority_line}CANDIDATE: {candidate_name or "candidate"}
 PROFILE: {profile_summary or "(none)"}; skills={", ".join(profile_skills) if profile_skills else "(none)"}

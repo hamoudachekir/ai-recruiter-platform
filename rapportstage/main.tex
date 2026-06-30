@@ -11,6 +11,7 @@
 \usepackage{utfsym}         % Symboles Unicode
 \usepackage{tabularx}       % Tableaux avancés
 \usepackage{amsmath}        % Formules mathématiques avancées
+\usepackage{amssymb}        % Symboles (\checkmark, etc.)
 \usepackage{pdfpages}       % Inclusion de fichiers PDF
 \usepackage{longtable}      % Tableaux sur plusieurs pages
 \usepackage{caption}        % Gestion des légendes
@@ -33,11 +34,12 @@
 \begin{document}
 
     % ---------------------------------------------------------------
-    % PAGE DE GARDE — incluse depuis cover.pdf (modèle officiel ESPRIT)
+    % PAGE DE GARDE : incluse depuis cover.pdf (modele officiel ESPRIT)
     % La page est insérée sans en-tête ni pied de page et n'est pas
     % comptée dans la pagination (pagecommand={} + noautoscale).
     % ---------------------------------------------------------------
     \includepdf[pages=1, fitpaper=true, pagecommand={\thispagestyle{empty}}]{cover.pdf}
+    \includepdf[pages=1, fitpaper=true, pagecommand={\thispagestyle{empty}}]{1.pdf}
 
     % Interligne 1,15 (consigne ESPRIT « Forme du rapport »)
     \setstretch{1.15}
@@ -48,6 +50,9 @@
     % Inclusion des sections préliminaires (pages liminaires)
     \input{chapitre/01-Dedication}  % Page de dédicace
     \input{chapitre/02-Remerciement}  % Page de remerciements
+
+    % Résumé / Abstract
+    \input{chapitre/00-Resume}
 
     % Configuration de la table des matières
     \addtocontents{toc}{\protect\thispagestyle{MyStyle}}  % Application du style personnalisé
@@ -85,15 +90,24 @@
     \setstretch{1.15}
 
     % Inclusion des chapitres du rapport
-    \input{chapitre/05-Chapitre1}
-    \input{chapitre/06-Chapitre2}
-    \input{chapitre/07-Chapitre3}
-    \input{chapitre/08-Chapitre4}
+    \input{chapitre/05-Chapitre1}     % Ch1 : Cadre général
+    \input{chapitre/06-Chapitre2}     % Ch2 : Analyse et conception
+    % Chapitres 3 à 7 : un chapitre par sprint (réalisation et tests).
+    % Anciens fichiers 07-Chapitre3 (conception, fusionné dans le Ch2) et
+    % 08-Chapitre4 (réalisation, redistribuée par sprint) conservés mais non inclus.
+    \input{chapitre/sprint1}          % Ch3 : Sprint 1 -- Socle de présélection
+    \input{chapitre/sprint2}          % Ch4 : Sprint 2 -- Salle d'entretien
+    \input{chapitre/sprint3}          % Ch5 : Sprint 3 -- Agent vocal adaptatif
+    \input{chapitre/sprint4}          % Ch6 : Sprint 4 -- Consolidation
+    \input{chapitre/sprint5}          % Ch7 : Sprint 5 -- Finalisation
     
     % Conclusion du rapport
     \input{chapitre/11-ConclusionGenerale}  
     
     % Bibliographie
-    \input{chapitre/09-Bibliographie}  
+    \input{chapitre/09-Bibliographie}
+
+    % Dernière page
+    \includepdf[pages=1, fitpaper=true, pagecommand={\thispagestyle{empty}}]{end.pdf}
 
 \end{document}

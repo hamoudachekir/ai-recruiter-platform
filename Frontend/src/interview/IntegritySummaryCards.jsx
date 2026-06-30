@@ -1,4 +1,5 @@
 import './IntegritySummaryCards.css';
+import { summarizeByType } from './integrityEvents';
 
 const toTitle = (value) => {
   const text = String(value || 'low').trim();
@@ -7,6 +8,12 @@ const toTitle = (value) => {
 
 const countEvents = (events, type) => (
   Array.isArray(events) ? events.filter((event) => event.type === type).length : 0
+);
+
+// Distinct incidents for a type (consecutive frames collapsed) — far more
+// meaningful than raw frame counts, which just reflect the sampling rate.
+const countIncidents = (incidentsByType, ...types) => (
+  types.reduce((sum, type) => sum + (incidentsByType[type]?.incidents || 0), 0)
 );
 
 const sumDuration = (events, type) => (
@@ -50,13 +57,17 @@ const riskTone = (level) => {
 export default function IntegritySummaryCards({ report, events = [] }) {
   const metrics = report?.metrics || {};
   const objectiveVisualSignals = report?.objectiveVisualSignals || {};
+  const incidentsByType = summarizeByType(events);
 
   const riskLevel = report?.overallRiskLevel || report?.integrityRisk?.level || 'low';
   const riskScore = Number(report?.riskScore ?? report?.integrityRisk?.score ?? 0);
   const facePresence = Number(objectiveVisualSignals.facePresencePercentage ?? metrics.facePresencePercentage ?? 0);
   const lookingAway = Math.round(Number(objectiveVisualSignals.lookingAwayTotalSeconds ?? metrics.lookingAwayTotalSeconds ?? sumDuration(events, 'LOOKING_AWAY_LONG')));
   const noFace = Math.round(Number(metrics.noFaceTotalSeconds ?? sumDuration(events, 'NO_FACE') + sumDuration(events, 'NO_PERSON_VISIBLE')));
-  const multiplePeople = Number(objectiveVisualSignals.personCountIssues ?? metrics.multiplePersonEvents ?? countEvents(events, 'MULTIPLE_PEOPLE') + countYoloEvents(events, 'MULTIPLE_PEOPLE'));
+  // Distinct incidents, not raw flagged frames — a single person lingering on
+  // camera produces dozens of frames but is one incident for the recruiter.
+  const multiplePeople = countIncidents(incidentsByType, 'MULTIPLE_PEOPLE', 'MULTIPLE_FACES_DETECTED')
+    || Number(objectiveVisualSignals.personCountIssues ?? metrics.multiplePersonEvents ?? 0);
   const tabSwitches = Number(metrics.tabSwitchCount ?? countEvents(events, 'TAB_SWITCH'));
   const fullscreenExits = Number(metrics.fullscreenExitCount ?? countEvents(events, 'FULLSCREEN_EXIT'));
   const phoneDetections = Number(objectiveVisualSignals.phoneDetections ?? metrics.phoneDetections ?? countYoloEvents(events, 'PHONE_VISIBLE'));

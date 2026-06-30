@@ -15,11 +15,14 @@
   margin-bottom: 20px;
 }
 
-.rir-header h3 {
+.rir-container .rir-header h3 {
   margin: 0;
   font-size: 20px;
-  font-weight: 700;
-  color: #0f172a;
+  font-weight: 800;
+  color: #000000 !important;
+  -webkit-text-fill-color: #000000;
+  background: none;
+  letter-spacing: -0.01em;
 }
 
 .rir-header p {
@@ -106,8 +109,17 @@
 
 .rir-section h4 {
   margin: 0 0 12px;
-  font-size: 16px;
-  color: #334155;
+  font-size: 15px;
+  font-weight: 700;
+  color: #000000;
+  letter-spacing: -0.01em;
+}
+
+.rir-disclaimer-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #64748b;
+  font-style: italic;
 }
 
 .rir-section p,
@@ -342,61 +354,145 @@
   color: #991b1b;
 }
 
-/* Event Summary - clean overview */
-.rir-event-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
-  padding: 12px;
-  background: #f1f5f9;
-  border-radius: 8px;
+/* Event Summary — per-type incident cards */
+.rir-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
 }
 
-.rir-event-summary__item {
+.rir-signal-card {
+  position: relative;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.rir-signal-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #cbd5e1;
+}
+
+.rir-signal-card--medium::before { background: #f59e0b; }
+.rir-signal-card--high::before,
+.rir-signal-card--critical::before { background: #ef4444; }
+
+.rir-signal-card__head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: #ffffff;
-  border-radius: 6px;
-  border: 1px solid #e2e8f0;
+  gap: 8px;
 }
 
-.rir-event-summary__count {
-  font-size: 16px;
+.rir-signal-card__icon { font-size: 16px; line-height: 1; }
+
+.rir-signal-card__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.rir-signal-card__value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 28px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1;
+}
+
+.rir-signal-card__value small {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.rir-signal-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.rir-signal-card__chip {
+  font-size: 11px;
   font-weight: 700;
+  color: #334155;
+  background: #f1f5f9;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.rir-signal-card__frames {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.rir-signal-card__range {
+  font-size: 11px;
+  color: #94a3b8;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 6px;
+  margin-top: 2px;
+}
+
+/* Compact footer: timeline + recommendation + limitations */
+.rir-footer {
+  margin-top: 22px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rir-footer__row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.rir-footer__label {
+  flex-shrink: 0;
+  width: 120px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #000000;
+}
+
+.rir-footer__row p {
+  margin: 0;
+  font-size: 14px;
+  color: #475569;
+  line-height: 1.5;
+}
+
+.rir-footer__row--recommend p {
+  font-weight: 600;
   color: #0f172a;
 }
 
-.rir-event-summary__label {
-  font-size: 11px;
-  color: #64748b;
-  text-transform: uppercase;
-  font-weight: 600;
+.rir-footer__limitations {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.5;
 }
 
-/* Condensed Event List */
-.rir-event-list--condensed {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.rir-event-count {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 2px 6px;
-  background: #3b82f6;
-  color: white;
-  font-size: 11px;
-  font-weight: 700;
-  border-radius: 4px;
-}
-
-.rir-duration {
-  color: #64748b;
-  font-size: 11px;
-}
+.rir-footer__limitations strong { color: #64748b; }
 
 .rir-more-events {
   text-align: center;

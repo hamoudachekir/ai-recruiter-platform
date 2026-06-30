@@ -233,7 +233,7 @@ def run_conversation(base_url: str, max_turn_ms: int, request_timeout: float, wr
     else:
         asked_questions.append(question)
     transcript.append({"role": "agent", "text": question, "elapsed_ms": elapsed_ms, "response": response})
-    _print_turn("[AI Angelica]", question or "<empty>", elapsed_ms)
+    _print_turn("[AI Nour]", question or "<empty>", elapsed_ms)
 
     switched_to_technical = False
 
@@ -262,7 +262,7 @@ def run_conversation(base_url: str, max_turn_ms: int, request_timeout: float, wr
             )
             print("-" * 72)
             print("SWITCH TO TECHNICAL")
-            _print_turn("[AI Angelica]", switch_question or "<empty>", switch_ms)
+            _print_turn("[AI Nour]", switch_question or "<empty>", switch_ms)
 
         print("-" * 72)
         print(f"TURN {index}: {turn['label']}")
@@ -284,7 +284,7 @@ def run_conversation(base_url: str, max_turn_ms: int, request_timeout: float, wr
         meta = _agent_meta(response)
         scoring = _scoring(response)
         transcript.append({"role": "agent", "text": question, "elapsed_ms": elapsed_ms, "response": response})
-        _print_turn("[AI Angelica]", question or "<empty>", elapsed_ms)
+        _print_turn("[AI Nour]", question or "<empty>", elapsed_ms)
 
         if not question:
             failures.append(f"Turn {index} returned an empty agent question.")

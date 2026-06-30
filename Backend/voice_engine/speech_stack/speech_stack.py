@@ -1,7 +1,9 @@
 import io
 import json
+import logging
 import os
 import re
+import time
 
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
 import numpy as np
@@ -11,6 +13,8 @@ from faster_whisper import WhisperModel
 from faster_whisper.audio import decode_audio
 
 AudioInput = Union[str, bytes, bytearray, BinaryIO, np.ndarray]
+
+LOGGER = logging.getLogger("speech_stack")
 
 
 def ensure_local_cuda_runtime_path(repo_root: Optional[str] = None) -> Optional[str]:
@@ -55,9 +59,11 @@ class SpeechStack:
         language: Optional[str] = "en",
         beam_size: int = 1,
         vad_filter: bool = True,
+        cpu_threads: int = 0,
         sentiment_model: str = "cardiffnlp/twitter-roberta-base-sentiment-latest",
         neutral_threshold: float = 0.65,
         enable_sentiment: bool = True,
+        enable_segment_sentiment: bool = True,
         enable_transcript_correction: bool = True,
         correction_confidence_threshold: float = 0.98,
         correction_dictionary_path: Optional[str] = None,
@@ -68,8 +74,15 @@ class SpeechStack:
         self.language = language
         self.beam_size = beam_size
         self.vad_filter = vad_filter
+        # 0 lets ctranslate2 pick (often just 4 threads). On CPU we pass the full
+        # core count so transcription uses all the hardware available.
+        self.cpu_threads = int(cpu_threads or 0)
         self.neutral_threshold = neutral_threshold
         self.enable_sentiment = enable_sentiment
+        # Per-segment sentiment runs the transformer once PER segment. On CPU
+        # that is pure latency on the live-draft hot path, so it can be disabled
+        # while still keeping the (single) overall-sentiment call.
+        self.enable_segment_sentiment = bool(enable_segment_sentiment)
         self.sentiment_model = sentiment_model
         self.enable_transcript_correction = bool(enable_transcript_correction)
         self.correction_confidence_threshold = max(0.0, min(float(correction_confidence_threshold), 1.0))
@@ -91,7 +104,10 @@ class SpeechStack:
         if self.enable_sentiment:
             self.sentiment_pipeline = self._load_sentiment_model()
 
-        self.tts_provider = "elevenlabs"
+        # Edge TTS is the call room's only TTS provider: free, low-latency,
+        # multilingual, no API key. ElevenLabs is intentionally disabled (set
+        # TTS_PROVIDER=elevenlabs + TTS_ALLOW_ELEVENLABS=1 only if you ever need it back).
+        self.tts_provider = str(os.getenv("TTS_PROVIDER", "edge") or "edge").strip().lower()
         self.tts_default_language = str(os.getenv("FW_TTS_LANGUAGE", "en") or "en").strip().lower() or "en"
 
         # ── ElevenLabs settings (used when tts_provider == "elevenlabs") ──────
@@ -334,6 +350,7 @@ class SpeechStack:
                     self.model_name,
                     device=self.device,
                     compute_type=candidate,
+                    cpu_threads=self.cpu_threads,
                 )
                 self.active_compute_type = candidate
                 return model
@@ -388,7 +405,9 @@ class SpeechStack:
         raise TypeError("Unsupported audio input type. Expected path, bytes, file-like, or np.ndarray.")
 
     def transcribe(self, audio: AudioInput, custom_terms: Optional[List[str]] = None) -> Dict:
+        _t0 = time.perf_counter()
         audio_np = self._prepare_audio(audio)
+        _t_decode = time.perf_counter()
 
         segments, info = self.whisper_model.transcribe(
             audio_np,
@@ -455,6 +474,19 @@ class SpeechStack:
             sum(no_speech_prob_values) / len(no_speech_prob_values)
             if no_speech_prob_values
             else 0.0
+        )
+
+        _t_end = time.perf_counter()
+        audio_sec = float(len(audio_np)) / 16000.0 if hasattr(audio_np, "__len__") else 0.0
+        LOGGER.info(
+            "[STT] transcribe %.0fms (decode %.0fms + infer %.0fms) "
+            "audio=%.1fs model=%s vad_filter=%s",
+            (_t_end - _t0) * 1000,
+            (_t_decode - _t0) * 1000,
+            (_t_end - _t_decode) * 1000,
+            audio_sec,
+            self.model_name,
+            self.vad_filter,
         )
 
         return {
@@ -550,12 +582,18 @@ class SpeechStack:
         if self.enable_sentiment and self.sentiment_pipeline is not None:
             overall = self.analyze_sentiment(transcription["text"])
 
+        # Per-segment sentiment is the dominant non-Whisper CPU cost (one
+        # transformer pass per segment). When disabled we reuse the single
+        # overall sentiment for every segment so the payload shape is unchanged.
+        run_segment_sentiment = (
+            self.enable_sentiment
+            and self.enable_segment_sentiment
+            and self.sentiment_pipeline is not None
+        )
         segment_results = []
         for item in transcription["segments"]:
             text = item["text"]
-            sentiment = {"label": "NEUTRAL", "score": 0.0}
-            if self.enable_sentiment and self.sentiment_pipeline is not None:
-                sentiment = self.analyze_sentiment(text)
+            sentiment = overall if not run_segment_sentiment else self.analyze_sentiment(text)
 
             segment_results.append(
                 {
