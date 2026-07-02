@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import './lib/httpAuth'; // Registers the global axios 401 handler (clear session + redirect to login)
 import './index.css'; // Tailwind directives — preflight disabled, scoped via [data-wizard-scope]
 import './Dashboard/_styles/index.scss'; // Import Dashboard styles
 import "bootstrap-icons/font/bootstrap-icons.css";

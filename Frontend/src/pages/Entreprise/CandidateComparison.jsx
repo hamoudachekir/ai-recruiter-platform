@@ -242,6 +242,7 @@ const CandidateComparison = () => {
 
   // loading animation
   const [loadingStep, setLoadingStep] = useState(0);
+  const [elapsedSec, setElapsedSec] = useState(0);
   const loadingTimerRef = useRef(null);
 
   // ─── Data fetch ────────────────────────────────────────────────────────────
@@ -303,6 +304,22 @@ const CandidateComparison = () => {
     return () => clearInterval(loadingTimerRef.current);
   }, [view]);
 
+  // Live elapsed-time counter so the recruiter sees the ranking is still
+  // running (the LLM call is synchronous and can take 2-3 minutes) instead of
+  // an ambiguous, seemingly-frozen spinner on the last step.
+  useEffect(() => {
+    if (view !== "loading") {
+      setElapsedSec(0);
+      return undefined;
+    }
+    const startedAt = Date.now();
+    const t = setInterval(
+      () => setElapsedSec(Math.floor((Date.now() - startedAt) / 1000)),
+      1000,
+    );
+    return () => clearInterval(t);
+  }, [view]);
+
   // ─── Actions ───────────────────────────────────────────────────────────────
 
   const handleRunRanking = async () => {
@@ -326,6 +343,12 @@ const CandidateComparison = () => {
         ).catch(() => null);
         if (cr?.data?.candidates) setCandidates(cr.data.candidates);
       }
+      // Flash every step complete (✓) — including "Finalizing report" — before
+      // revealing the results, so the final step gets a clear done indication
+      // instead of spinning until the view swaps out.
+      clearInterval(loadingTimerRef.current);
+      setLoadingStep(LOADING_STEPS.length);
+      await new Promise((resolve) => setTimeout(resolve, 700));
       setView("results");
     } catch (err) {
       const serverMsg = err.response?.data?.error || err.response?.data?.message || "";
@@ -522,7 +545,7 @@ const CandidateComparison = () => {
         )}
 
         {/* ── View: LOADING ─────────────────────────────────────────────── */}
-        {view === "loading" && <LoadingView step={loadingStep} />}
+        {view === "loading" && <LoadingView step={loadingStep} elapsed={elapsedSec} />}
 
         {/* ── View: RESULTS ─────────────────────────────────────────────── */}
         {view === "results" && (
@@ -676,30 +699,36 @@ const SelectView = ({
 // ─────────────────────────────────────────────────────────────────────────────
 // LoadingView
 // ─────────────────────────────────────────────────────────────────────────────
-const LoadingView = ({ step }) => (
-  <div className="cc-loading-view">
-    <div className="cc-loading-ring" />
-    <h3>Analyzing candidates…</h3>
-    <ul className="cc-loading-steps">
-      {LOADING_STEPS.map((s, i) => (
-        <li
-          key={s}
-          className={
-            i < step ? "done" : i === step ? "active" : "pending"
-          }
-        >
-          <span className="cc-step-icon">
-            {i < step ? "✓" : i === step ? "◉" : "○"}
-          </span>
-          {s}
-        </li>
-      ))}
-    </ul>
-    <p className="cc-loading-note">
-      Claude AI is reviewing each candidate — this takes up to 45 seconds.
-    </p>
-  </div>
-);
+const fmtElapsed = (s) =>
+  `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+const LoadingView = ({ step, elapsed }) => {
+  const done = step >= LOADING_STEPS.length;
+  return (
+    <div className="cc-loading-view">
+      <div className="cc-loading-ring" />
+      <h3>{done ? "Report ready" : "Analyzing candidates…"}</h3>
+      <ul className="cc-loading-steps">
+        {LOADING_STEPS.map((s, i) => (
+          <li
+            key={s}
+            className={i < step ? "done" : i === step ? "active" : "pending"}
+          >
+            <span className="cc-step-icon">
+              {i < step ? "✓" : i === step ? "◉" : "○"}
+            </span>
+            {s}
+          </li>
+        ))}
+      </ul>
+      <p className="cc-loading-elapsed">Elapsed {fmtElapsed(elapsed)}</p>
+      <p className="cc-loading-note">
+        Claude AI is reviewing each candidate. Larger candidate pools can take
+        up to 2–3 minutes — please keep this tab open.
+      </p>
+    </div>
+  );
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ResultsView
