@@ -2,6 +2,7 @@
 \WarningsOff*
 \LoadClassWithOptions{report}
 \usepackage[a4paper,left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\emergencystretch=3em % laisse TeX étirer légèrement l'espacement plutôt que de déborder en marge
 \usepackage{environ}
 \usepackage{verse}
 \usepackage[table]{xcolor}

@@ -69,4 +69,29 @@ const requireEnterprise = async (req, res, next) => {
     }
 };
 
-module.exports = { verifyToken, requireEnterprise };
+/**
+ * Require the caller to have role = 'CANDIDATE'.
+ *
+ * Mirrors requireEnterprise: falls back to a DB lookup for legacy tokens
+ * that don't carry a role claim, so existing candidate sessions keep
+ * working without forcing a re-login.
+ *
+ * Must run after verifyToken so req.user._id is populated.
+ */
+const requireCandidate = async (req, res, next) => {
+    try {
+        if (req.user?.role === 'CANDIDATE') return next();
+        if (!req.user?._id) return res.status(403).json({ message: 'Candidate role required' });
+        const user = await UserModel.findById(req.user._id).select('role').lean();
+        if (!user || user.role !== 'CANDIDATE') {
+            return res.status(403).json({ message: 'Candidate role required' });
+        }
+        req.user.role = user.role;
+        return next();
+    } catch (err) {
+        console.error('requireCandidate lookup failed:', err);
+        return res.status(500).json({ message: 'Server error' });
+    }
+};
+
+module.exports = { verifyToken, requireEnterprise, requireCandidate };

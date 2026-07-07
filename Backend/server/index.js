@@ -3152,6 +3152,7 @@ app.use("/api/job-rooms", jobInterviewRoomRoutes);
 app.use("/quiz", quizRoutes);
 app.use("/api/internal/scheduling", schedulingInternalRoute);
 app.use("/api/recruiter/calendar", recruiterCalendarRoute);
+app.use("/api/cv", require("./routes/cvTailoringRoute"));
 
 // ─── Admin Dashboard API ───────────────────────────────────────────────────
 // All routes prefixed /api/admin — no auth required for the local backoffice.
@@ -3354,6 +3355,8 @@ if (!fs.existsSync(audioDir)) {
 }
 
 const uploadDir = path.join(__dirname, "uploads");
+const tailoredCvDir = path.join(uploadDir, "tailored-cvs");
+if (!fs.existsSync(tailoredCvDir)) fs.mkdirSync(tailoredCvDir, { recursive: true });
 const resumeUpload = multer({
   storage: multer.diskStorage({
     destination: uploadDir,

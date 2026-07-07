@@ -90,16 +90,17 @@
     \setstretch{1.15}
 
     % Inclusion des chapitres du rapport
-    \input{chapitre/05-Chapitre1}     % Ch1 : Cadre général
-    \input{chapitre/06-Chapitre2}     % Ch2 : Analyse et conception
-    % Chapitres 3 à 7 : un chapitre par sprint (réalisation et tests).
-    % Anciens fichiers 07-Chapitre3 (conception, fusionné dans le Ch2) et
-    % 08-Chapitre4 (réalisation, redistribuée par sprint) conservés mais non inclus.
-    \input{chapitre/sprint1}          % Ch3 : Sprint 1 -- Socle de présélection
-    \input{chapitre/sprint2}          % Ch4 : Sprint 2 -- Salle d'entretien
-    \input{chapitre/sprint3}          % Ch5 : Sprint 3 -- Agent vocal adaptatif
-    \input{chapitre/sprint4}          % Ch6 : Sprint 4 -- Consolidation
-    \input{chapitre/sprint5}          % Ch7 : Sprint 5 -- Finalisation
+    % Ch1 : Sprint 0 -- Cadrage et conception (fichiers 05 + 06 fusionnés en un seul
+    % chapitre : 06 ne débute plus par \chapter et prolonge donc le chapitre ouvert par 05).
+    \input{chapitre/05-Chapitre1}     % Ch1 (1/2) : cadrage général du projet
+    \input{chapitre/06-Chapitre2}     % Ch1 (2/2) : analyse et conception
+    % Chapitres 2 à 6 : un chapitre par sprint (réalisation et tests).
+    % Anciens fichiers 07-Chapitre3 et 08-Chapitre4 conservés mais non inclus.
+    \input{chapitre/sprint1}          % Ch2 : Sprint 1 -- Socle de présélection
+    \input{chapitre/sprint2}          % Ch3 : Sprint 2 -- Salle d'entretien
+    \input{chapitre/sprint3}          % Ch4 : Sprint 3 -- Agent vocal adaptatif
+    \input{chapitre/sprint4}          % Ch5 : Sprint 4 -- Consolidation
+    \input{chapitre/sprint5}          % Ch6 : Sprint 5 -- Finalisation
     
     % Conclusion du rapport
     \input{chapitre/11-ConclusionGenerale}  

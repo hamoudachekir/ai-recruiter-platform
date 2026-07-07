@@ -1,0 +1,76 @@
+.resume-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 22, 0.62);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  z-index: 1200;
+}
+
+.resume-viewer-shell {
+  width: min(960px, 100%);
+  height: min(92vh, 1050px);
+  background: #2b2f36;
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.resume-viewer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.1rem;
+  background: #1c1f24;
+  color: #fff;
+}
+
+.resume-viewer-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resume-viewer-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.rv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.rv-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
+.rv-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.rv-btn--primary { background: #0f5c5a; border-color: #0f5c5a; }
+.rv-btn--primary:hover:not(:disabled) { background: #0c4a48; }
+
+.resume-viewer-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: #525659;
+}
+
+@media (max-width: 640px) {
+  .resume-viewer-shell { height: 90vh; }
+}

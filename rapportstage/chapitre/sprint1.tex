@@ -29,34 +29,42 @@ L'objectif principal de ce sprint est défini comme suit~:
 
 \subsection{Backlog du sprint}
 
-Le tableau~\ref{tab:backlog-s1} présente le backlog de ce sprint~: les éléments du \textit{product backlog} (récits utilisateurs et tâches techniques) sélectionnés pour cet incrément, accompagnés de leur priorité.
+Le tableau~\ref{tab:backlog-s1} présente le backlog de ce sprint~: les récits utilisateurs et tâches techniques sélectionnés depuis le \textit{product backlog} lors de la réunion de planification (\textit{sprint planning}). Comme pour le \textit{product backlog}, chaque élément est priorisé selon la méthode \textbf{MoSCoW} (\textbf{Must}, \textbf{Should}, \textbf{Could}) et estimé en \textit{story points} sur la suite de Fibonacci (1, 2, 3, 5, 8, 13), soit un engagement de 48~points pour ce sprint.
 
 \begin{table}[H]
   \centering
   \footnotesize
   \renewcommand{\arraystretch}{1.3}
   \setlength{\tabcolsep}{5pt}
-  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.3cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.8cm}|}
+  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.1cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.7cm}|>{\centering\arraybackslash}p{0.9cm}|}
     \hline
     \rowcolor{blue!10}
-    \textbf{ID} & \textbf{Récit utilisateur / tâche} & \textbf{Priorité} \\
+    \textbf{ID} & \textbf{Récit utilisateur / tâche} & \textbf{Priorité} & \textbf{Est.} \\
     \hline
-    T-01 & Initialiser le dépôt Git et la structure \textit{front-end} (React/Vite) et \textit{back-end} (Node.js/Express). & Haute \\
+    T-01 & Initialiser le dépôt Git et la structure \textit{front-end} (React/Vite) et \textit{back-end} (Node.js/Express). & Must & 5 \\
     \hline
-    US-01 & En tant que candidat, je veux créer un compte et me connecter (JWT ou Google OAuth) afin d'accéder à la plateforme. & Haute \\
+    S1 & En tant que candidat, je veux créer un compte et me connecter (JWT ou Google OAuth) afin d'accéder à la plateforme. & Must & 5 \\
     \hline
-    US-02 & En tant que candidat, je veux téléverser mon CV et obtenir automatiquement un profil structuré. & Haute \\
+    S2 & En tant que candidat, je veux téléverser mon CV et obtenir automatiquement un profil structuré (extraction, OCR, analyse NLP). & Must & 8 \\
     \hline
-    US-03 & En tant que candidat, je veux recevoir des offres recommandées correspondant à mon profil. & Haute \\
+    S3 & En tant que candidat, je veux consulter les offres d'emploi et soumettre une candidature. & Must & 3 \\
     \hline
-    US-04 & En tant que candidat, je veux relier mon compte LinkedIn afin d'enrichir mon profil. & Moyenne \\
+    S4 & En tant que candidat, je veux recevoir des offres recommandées correspondant à mon profil. & Must & 5 \\
     \hline
-    US-05 & En tant que recruteur, je veux publier une offre d'emploi via l'assistant de création (\textit{Job Wizard}). & Haute \\
+    S5 & En tant que candidat, je veux relier mon compte LinkedIn afin d'enrichir mon profil. & Should & 3 \\
     \hline
-    US-06 & En tant que recruteur, je veux consulter le quiz de présélection généré automatiquement pour chaque candidature et le score obtenu par le candidat. & Haute \\
+    S6 & En tant que recruteur, je veux publier une offre d'emploi via l'assistant de création (\textit{Job Wizard}). & Must & 5 \\
+    \hline
+    S7 & En tant que candidat, je veux passer le quiz de présélection généré automatiquement pour ma candidature afin d'accéder à l'entretien. & Must & 5 \\
+    \hline
+    S8 & En tant que recruteur, je veux consulter le quiz de présélection de chaque candidature et le score obtenu par le candidat. & Must & 3 \\
+    \hline
+    S9 & En tant que candidat, je veux suivre le statut de ma candidature depuis mon tableau de bord afin de rester informé de son avancement. & Should & 3 \\
+    \hline
+    S10 & En tant que recruteur, je veux consulter la liste des candidatures et les profils détaillés afin d'étudier les candidats. & Must & 3 \\
     \hline
   \end{tabularx}
-  \caption{Backlog du Sprint~1.}
+  \caption{Backlog du Sprint~1 : socle applicatif et présélection intelligente.}
   \label{tab:backlog-s1}
 \end{table}
 
@@ -70,7 +78,7 @@ L'ensemble s'appuie sur une base technique commune~: un \textit{front-end} React
 
 \subsection{Architecture du socle}
 
-L'architecture micro-services et le pipeline de recommandation hybride ont été présentés en détail au chapitre~2. Ce sprint en concrétise le socle~: le serveur Node.js joue le rôle de point d'entrée unique (\textit{Backend For Frontend}), l'authentification est centralisée par jetons JWT, et la présélection des candidats repose sur deux micro-services Python indépendants, l'un dédié à l'analyse des CV, l'autre à la recommandation d'offres.
+L'architecture micro-services et le pipeline de recommandation hybride ont été présentés en détail au chapitre~\ref{ch:sprint0} (Sprint~0). Ce sprint en concrétise le socle~: le serveur Node.js joue le rôle de point d'entrée unique (\textit{Backend For Frontend}), l'authentification est centralisée par jetons JWT, et la présélection des candidats repose sur deux micro-services Python indépendants, l'un dédié à l'analyse des CV, l'autre à la recommandation d'offres.
 
 \subsection{Inscription, authentification et routage par rôle}
 
@@ -161,113 +169,6 @@ Le candidat téléverse son CV~; le serveur le confie à un micro-service d'anal
   \label{fig:seq-cv-reco}
 \end{figure}
 
-\section{Environnement de développement}
-
-\subsection{Outils et technologies utilisés}
-
-Le tableau~\ref{tab:dev-tools} recense les principaux outils de développement utilisés tout
-au long du projet.
-
-\begin{table}[H]
-  \centering
-  \footnotesize
-  \renewcommand{\arraystretch}{1.35}
-  \setlength{\tabcolsep}{5pt}
-  \begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{3.8cm}|>{\centering\arraybackslash}p{2.2cm}|>{\raggedright\arraybackslash}X|}
-    \hline
-    \rowcolor{blue!10}
-    \textbf{Outil} & \textbf{Version} & \textbf{Rôle} \\
-    \hline
-    Visual Studio Code & 1.95 & Éditeur de code principal \\
-    \hline
-    Docker Desktop & 29.5.2 & Orchestration locale des conteneurs \\
-    \hline
-    Git & 2.54.0 & Gestion de version \\
-    \hline
-    GitHub & & Hébergement du dépôt distant et gestion des branches \\
-    \hline
-    Node.js & 26.2.0 & Environnement d'exécution JavaScript (BFF) \\
-    \hline
-    npm & 11.13.0 & Gestion des paquets Node.js \\
-    \hline
-    Python & 3.12 & Environnement des micro-services IA \\
-    \hline
-    pip / venv & 23.x & Gestion des paquets Python et environnements virtuels \\
-    \hline
-    Postman & & Tests manuels des API REST \\
-    \hline
-    Groq API & & Inférence LLM cloud (\texttt{openai/gpt-oss-120b}) \\
-    \hline
-    NVIDIA NIM & & Fournisseur LLM cloud testé pour l'analyse post-entretien (\texttt{meta/llama-3.3-70b-instruct}), parmi plusieurs \textit{back-ends} interchangeables \\
-    \hline
-    Google OAuth 2.0 & & Authentification sociale et API Google Calendar \\
-    \hline
-    MongoDB Compass & & Interface graphique de gestion de la base de données \\
-    \hline
-  \end{tabularx}
-  \caption{Outils de développement et versions utilisés dans le projet NextHire.}
-  \label{tab:dev-tools}
-\end{table}
-
-\subsection{Organisation du projet}
-
-Le projet est organisé sous la forme d'un monodépôt (\textit{monorepo}) dont la racine
-est le répertoire \texttt{ai-recruiter-platform}. Le code source est réparti en deux
-grandes branches : \texttt{Backend/} regroupe l'ensemble des services serveur, et
-\texttt{Frontend/} contient l'application web React. Chaque service dispose de son propre
-manifeste de dépendances (\texttt{package.json} pour Node.js, \texttt{requirements.txt}
-pour Python), ce qui garantit un isolement strict des environnements d'exécution.
-
-\begin{sloppypar}
-L'organisation des services dans \texttt{Backend/} est la suivante :
-\texttt{server/} (BFF Node.js), \texttt{voice\_engine/} (agent d'entretien et pile audio
-Python), \texttt{analysis\_service/} (pipeline LangGraph d'analyse post-entretien),
-\texttt{face\_verification\_service/} (vérification d'identité InsightFace),
-\texttt{yolo-service/} (détection d'objets YOLOv8n) et \texttt{scheduling/}
-(intégration Google Calendar). Les services Python disposent chacun d'un fichier
-\texttt{docker-compose.yml} permettant de les lancer de manière isolée.
-\end{sloppypar}
-
-Le flux de travail adopte une stratégie Git par branches de fonctionnalité
-(\textit{feature-branch workflow}) : chaque nouvelle fonctionnalité ou correction de bogue
-est développée sur une branche dédiée, soumise à revue, puis fusionnée dans la branche
-principale \texttt{main}. Les variables d'environnement ne sont jamais versionnées ; chaque
-service lit sa configuration depuis un fichier \texttt{.env} local au démarrage et échoue
-immédiatement avec un message explicite si une variable requise est absente.
-
-\subsection{Environnements d'exécution}
-
-La plateforme a été développée et testée dans deux environnements complémentaires, choisis
-en fonction des ressources matérielles requises par chaque service.
-
-\paragraph{Machine locale (Windows 10 + Docker Desktop).}
-La machine locale sous Windows~10 constitue l'environnement de développement principal.
-Docker Desktop y fournit un moteur de conteneurisation natif qui permet de lancer les
-services Python dans des conteneurs isolés sans modifier l'environnement système. Le
-front-end React et le BFF Node.js s'exécutent quant à eux directement sur la machine hôte,
-respectivement sur les ports 5173 (serveur de développement Vite) et 3001 (Express).
-MongoDB (port~27017) et Redis (port~6379) tournent également en local et sont accessibles
-par l'ensemble des services via les variables d'environnement \texttt{MONGO\_URI} et
-\texttt{REDIS\_URL}.
-
-\paragraph{Inférence IA via API cloud.}
-Les opérations d'inférence coûteuses en ressources GPU, à savoir la génération de texte (LLM
-\texttt{openai/gpt-oss-120b} via Groq) et la transcription vocale (Faster-Whisper), sont
-déléguées à des API cloud spécialisées. Le service d'analyse post-entretien suit la même
-logique~: son client LLM est interchangeable par configuration (Gemini, NVIDIA NIM, OpenAI,
-Anthropic ou Ollama local), NVIDIA NIM (modèle \texttt{meta/llama-3.3-70b-instruct}) étant
-l'un des fournisseurs cloud testés. Cette approche évite l'installation de modèles
-volumineux sur la machine de développement et garantit une latence maîtrisée, indépendamment
-des capacités graphiques du poste local.
-
-\paragraph{Point d'entrée unique (port 3001).}
-Plutôt que d'exposer un port distinct pour chaque service, seul le port du BFF Node.js
-(3001) est visible depuis le client. En développement, le proxy Vite redirige
-automatiquement les appels \texttt{/api/**} et les connexions WebSocket vers ce port
-unique. Le BFF joue ainsi le rôle de passerelle centrale : il vérifie le jeton JWT,
-orchestre les appels vers les micro-services Python internes et maintient la connexion
-Socket.IO pour les échanges en temps réel, sans que le front-end n'ait connaissance de
-l'architecture interne des services.
 \section{Réalisation et interfaces utilisateur}
 
 \subsection{API REST du back-end}
@@ -331,7 +232,7 @@ L'authentification repose sur les jetons web JSON (JWT). Le déroulement est le 
         et son mot de passe.
   \item Le backend recherche l'utilisateur, vérifie le mot de passe haché avec
         \texttt{bcrypt}, puis génère un JWT signé contenant l'identifiant, l'adresse courriel
-        et le rôle de l'utilisateur (\texttt{jwt.sign(\{id, email, role\})}).
+        et le rôle de l'utilisateur (\texttt{jwt.sign(\allowbreak\{id, email, role\}\allowbreak)}).
   \item Le client transmet ce JWT en tant que jeton \textit{Bearer} dans l'en-tête
         \texttt{Authorization} de toutes les requêtes suivantes.
   \item Le middleware \texttt{verifyToken} valide la signature et la date d'expiration du
@@ -388,7 +289,7 @@ d'expressions régulières bilingues (français/anglais). Ce pipeline extrait le
 structurés du profil~: \texttt{name}, \texttt{email}, \texttt{phone}, \texttt{skills},
 \texttt{languages}, \texttt{experience} (titre, entreprise, durée, description) et
 \texttt{education}. Les compétences sont reconnues à partir d'un dictionnaire de référence
-(\texttt{skills\_list.txt}), puis normalisées (par exemple \texttt{nodejs}~$\rightarrow$~%
+(\texttt{skills\_\allowbreak list.txt}), puis normalisées (par exemple \texttt{nodejs}~$\rightarrow$~%
 \texttt{Node.js}) et filtrées par un validateur qui écarte les faux positifs (mots génériques,
 fragments de phrases, encodages corrompus). Un \textbf{détecteur de domaine} classe enfin le
 profil parmi dix familles métier (IA / \textit{Machine Learning}, \textit{data science},
@@ -521,7 +422,7 @@ En complément du CV, le candidat peut relier son compte LinkedIn à son profil.
 Dès sa connexion, le candidat arrive sur une page d'accueil qui met en avant une liste
 d'offres recommandées personnalisées (figure~\ref{fig:candidate-home}). Le \textit{front-end}
 React interroge la route \texttt{GET /recommendation/for-user}, qui relaie la requête au
-micro-service de recommandation Python (port~5001) décrit au chapitre~2. Pour la page
+micro-service de recommandation Python (port~5001) décrit au chapitre~\ref{ch:sprint0} (Sprint~0). Pour la page
 d'accueil, le backend demande jusqu'à dix offres (\texttt{top\_k}~=~10) avec un seuil de
 similarité abaissé à $0{,}2$ (au lieu de $0{,}3$ par défaut), afin d'élargir l'éventail
 d'offres proposées au candidat.
@@ -565,7 +466,8 @@ accéder au profil de chaque candidat (figure~\ref{fig:recruiter-dashboard}).
 
 \begin{figure}[H]
   \centering
-  \screenshot{recruiter-dashboard.JPG}{Espace entreprise : offres et candidatures}
+  \includegraphics[width=0.9\textwidth,keepaspectratio]{../screenshoot/profilentre.JPG}\\[6pt]
+  \includegraphics[width=0.9\textwidth,keepaspectratio]{../screenshoot/profjiob.JPG}
   \caption{Tableau de bord recruteur avec vue des offres et des candidatures.}
   \label{fig:recruiter-dashboard}
 \end{figure}
@@ -583,8 +485,8 @@ La création d'une offre s'effectue via l'assistant de création (\textit{Job Wi
 
 \section{Tests}
 
-À ce stade du projet, la validation s'est appuyée sur des tests manuels des points de terminaison REST réalisés avec Postman~: création de compte, connexion par JWT, téléversement et analyse de CV, génération des recommandations d'offres et publication d'une offre côté recruteur. Le parcours d'inscription et de complétion de profil a par ailleurs été vérifié de bout en bout dans le navigateur. Les suites de tests automatisées, mutualisées à l'échelle de la plateforme, sont présentées au chapitre~7 (Sprint~5).
+À ce stade du projet, la validation s'est appuyée sur des tests manuels des points de terminaison REST réalisés avec Postman~: création de compte, connexion par JWT, téléversement et analyse de CV, génération des recommandations d'offres et publication d'une offre côté recruteur. Le parcours d'inscription et de complétion de profil a par ailleurs été vérifié de bout en bout dans le navigateur. Les suites de tests automatisées, mutualisées à l'échelle de la plateforme, sont présentées au chapitre~\ref{ch:sprint5} (Sprint~5).
 
 \section{Conclusion}
 
-Ce sprint a livré un socle fonctionnel~: inscription, authentification, analyse de CV, recommandation d'offres et quiz de présélection, ainsi que les premiers espaces candidat et recruteur. Le sprint suivant s'appuie sur ces fondations pour introduire la planification des entretiens et la première version de la salle d'entretien en temps réel.
+Ce sprint a livré un socle fonctionnel~: inscription, authentification, analyse de CV, recommandation d'offres et quiz de présélection, ainsi que les premiers espaces candidat et recruteur. Conformément au cadre Scrum, cet incrément a été démontré à nos encadrantes lors de la revue de sprint~; la rétrospective a notamment mis en évidence la grande hétérogénéité des CV réels, ce qui a conduit à renforcer le pipeline d'extraction (reconstruction par colonnes, repli OCR) et à constituer des jeux d'essai plus variés pour les sprints suivants. Le sprint suivant s'appuie sur ces fondations pour introduire la planification des entretiens et la première version de la salle d'entretien en temps réel.

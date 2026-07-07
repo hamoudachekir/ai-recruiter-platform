@@ -1,4 +1,5 @@
 \chapter[Sprint 5 : Aide à la décision et finalisation]{Sprint 5 : Aide à la décision, rapports pondérés\\et finalisation de la plateforme}
+\label{ch:sprint5}
 \begin{spacing}{1.2}
 \minitoc
 \thispagestyle{MyStyle}
@@ -17,7 +18,7 @@
 
 \section{Introduction}
 
-Le cinquième et dernier sprint enrichit la plateforme de ses fonctionnalités d'aide à la décision et la prépare au déploiement. Il introduit l'analyse multimodale post-entretien, la comparaison et le classement des candidats, le tableau de bord administrateur, puis consolide la sécurité et la conformité avant la phase de finalisation, de tests et de durcissement.
+Le cinquième et dernier sprint enrichit la plateforme de ses fonctionnalités d'aide à la décision et la prépare au déploiement. Il introduit l'analyse multimodale post-entretien, la comparaison et le classement des candidats, le tableau de bord administrateur, ainsi qu'une fonctionnalité premium côté candidat, l'adaptation assistée par IA du CV à une offre, puis consolide la sécurité et la conformité avant la phase de finalisation, de tests et de durcissement.
 
 \section{Objectifs du sprint}
 
@@ -29,30 +30,46 @@ L'objectif principal de ce sprint est défini comme suit~:
 
 \subsection{Backlog du sprint}
 
-Le tableau~\ref{tab:backlog-s5} présente le backlog du Sprint~5.
+Le tableau~\ref{tab:backlog-s5} présente le backlog du Sprint~5, composé des récits utilisateurs et des tâches techniques retenus pour cet incrément. Comme pour le \textit{product backlog}, chaque élément est priorisé selon la méthode \textbf{MoSCoW} (\textbf{Must}, \textbf{Should}, \textbf{Could}) et estimé en \textit{story points} sur la suite de Fibonacci (1, 2, 3, 5, 8, 13), soit un engagement de 73~points pour ce sprint.
 
 \begin{table}[H]
   \centering
   \footnotesize
   \renewcommand{\arraystretch}{1.3}
   \setlength{\tabcolsep}{5pt}
-  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.1cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.8cm}|}
+  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.1cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.7cm}|>{\centering\arraybackslash}p{0.9cm}|}
     \hline
     \rowcolor{blue!10}
-    \textbf{ID} & \textbf{Récit utilisateur} & \textbf{Priorité} \\
+    \textbf{ID} & \textbf{Récit utilisateur / tâche} & \textbf{Priorité} & \textbf{Est.} \\
     \hline
-    S1 & En tant que recruteur, je veux un rapport d'entretien pondéré selon les critères du poste. & Haute \\
+    T-10 & Développer le service d'analyse post-entretien multimodale (orchestration LangGraph, LLM NVIDIA NIM) combinant émotion faciale et sentiment vocal. & Must & 8 \\
     \hline
-    S2 & En tant que recruteur, je veux comparer et classer les candidats d'un même poste. & Haute \\
+    T-11 & Durcir la sécurité et la conformité~: autorisation par rôles (RBAC), limitation de débit et conformité RGPD. & Must & 8 \\
     \hline
-    S3 & En tant que recruteur, je veux revoir en détail un entretien terminé (transcription, scores, intégrité). & Haute \\
+    T-12 & Mettre en place la stratégie de tests (unitaires, intégration, bout en bout) et mesurer la couverture de code. & Must & 5 \\
     \hline
-    S4 & En tant qu'administrateur, je veux superviser l'activité de la plateforme via un tableau de bord. & Moyenne \\
+    S1 & En tant que recruteur, je veux un rapport d'entretien pondéré selon les critères du poste. & Must & 8 \\
     \hline
-    S5 & En tant qu'utilisateur, je veux que mes données soient protégées (RBAC, RGPD, chiffrement). & Haute \\
+    S2 & En tant que recruteur, je veux comparer et classer les candidats d'un même poste. & Must & 8 \\
+    \hline
+    S3 & En tant que recruteur, je veux revoir en détail un entretien terminé (transcription, scores, intégrité). & Must & 5 \\
+    \hline
+    S4 & En tant qu'administrateur, je veux superviser l'activité de la plateforme via un tableau de bord. & Must & 5 \\
+    \hline
+    S5 & En tant qu'utilisateur, je veux que mes données soient protégées (RBAC, RGPD, chiffrement). & Must & 5 \\
+    \hline
+    S6 & En tant que recruteur, je veux disposer d'indices affectifs (émotion faciale, sentiment vocal) issus de l'analyse multimodale post-entretien. & Should & 5 \\
+    \hline
+    S7 & En tant qu'utilisateur, je veux échanger via la messagerie temps réel et être assisté par un agent conversationnel (NextBot). & Should & 5 \\
+    \hline
+    S8 & En tant que recruteur, je veux enregistrer une décision finale (accepter, refuser ou réexaminer) afin de statuer sur la candidature. & Must & 3 \\
+    \hline
+    S9 & En tant que recruteur, je veux gérer le profil de mon entreprise et ses départements afin d'alimenter l'assistant de création d'offres. & Could & 3 \\
+    \hline
+    S10 & En tant que candidat, je veux adapter automatiquement mon CV à une offre donnée en validant chaque reformulation proposée, afin d'améliorer l'adéquation de ma candidature. & Should & 5 \\
     \hline
   \end{tabularx}
-  \caption{Backlog du Sprint~5 : Aide à la décision et finalisation.}
+  \caption{Backlog du Sprint~5 : aide à la décision et finalisation.}
   \label{tab:backlog-s5}
 \end{table}
 
@@ -182,7 +199,7 @@ Analysis via un pipeline LangGraph.
 
 \subsection{Analyse multimodale post-entretien}
 
-Distincte du détecteur de fraude, dont les signaux restent de simples constats objectifs, l'analyse multimodale post-entretien enrichit l'évaluation du candidat par deux sources complémentaires de signal affectif. Pour l'\textbf{émotion faciale}, le service d'analyse s'appuie sur \textit{Py-Feat}, une boîte à outils entraînée sur le corpus \textit{AffectNet} d'images de visages réels. Plutôt que de prédire directement des probabilités d'émotion, souvent peu fiables, Py-Feat extrait les \textit{unités d'action faciales} (FACS, \textit{Facial Action Coding System}), mouvements élémentaires des muscles du visage, à partir desquelles sont dérivés les états émotionnels normalisés (joie, surprise, neutralité, etc.). Pour le \textbf{sentiment vocal}, la réponse du candidat, une fois transcrite par Faster-Whisper, est soumise à un modèle de classification de séquences fondé sur \textit{RoBERTa} (\texttt{cardiffnlp/twitter-roberta-base-sentiment-latest}), qui restitue une polarité (positif, neutre, négatif) assortie d'un score de confiance.
+Distincte du détecteur de fraude, dont les signaux restent de simples constats objectifs, l'analyse multimodale post-entretien enrichit l'évaluation du candidat par deux sources complémentaires de signal affectif. Pour l'\textbf{émotion faciale}, le service d'analyse s'appuie sur \textit{Py-Feat}, une boîte à outils entraînée sur le corpus \textit{AffectNet} d'images de visages réels. Plutôt que de prédire directement des probabilités d'émotion, souvent peu fiables, Py-Feat extrait les \textit{unités d'action faciales} (FACS, \textit{Facial Action Coding System}), mouvements élémentaires des muscles du visage, à partir desquelles sont dérivés les états émotionnels normalisés (joie, surprise, neutralité, etc.). Pour le \textbf{sentiment vocal}, la réponse du candidat, une fois transcrite par Faster-Whisper, est soumise à un modèle de classification de séquences fondé sur \textit{RoBERTa} (\texttt{cardiffnlp/\allowbreak twitter-roberta-base-\allowbreak sentiment-latest}), qui restitue une polarité (positif, neutre, négatif) assortie d'un score de confiance.
 
 Il importe de souligner que ces signaux multimodaux sont traités comme des \textit{indices complémentaires}, destinés à contextualiser la prestation du candidat (par exemple, moduler le comportement de l'agent en cas de stress détecté), et non comme un déterminant de la décision. Aucune note d'embauche n'est calculée à partir de l'émotion ou du sentiment : l'évaluation des compétences repose sur le contenu des réponses, et la décision finale demeure une prérogative exclusive du recruteur humain. Ce parti pris répond aux préoccupations éthiques bien documentées concernant l'inférence d'états affectifs en contexte de recrutement.
 
@@ -309,8 +326,8 @@ recruteur et un assistant conversationnel alimenté par un LLM.
 
 Les échanges sont persistés via un modèle \texttt{Message} (expéditeur, destinataire,
 texte, horodatage, statut de lecture) exposé par une API REST dédiée
-(\texttt{POST /api/messages/send}, \texttt{GET /api/messages/history/:user1/:user2},
-\texttt{GET /api/messages/user/:userId}). La livraison en temps réel repose sur Socket.IO~:
+(\texttt{POST /api/\allowbreak messages/\allowbreak send}, \texttt{GET /api/\allowbreak messages/\allowbreak history/\allowbreak :user1/\allowbreak :user2},
+\texttt{GET /api/\allowbreak messages/\allowbreak user/\allowbreak :userId}). La livraison en temps réel repose sur Socket.IO~:
 l'émission d'un message déclenche un événement \texttt{send-message} côté serveur, relayé
 au destinataire via \texttt{receive-message}, tandis que l'historique de la conversation est
 chargé par requête REST à l'ouverture de la discussion. Le composant \texttt{MessagePopup}
@@ -344,6 +361,96 @@ et non d'une recherche par similarité.
   \label{fig:chatbot}
 \end{figure}
 
+\section{Génération de CV adapté à l'offre (\textit{CV Tailoring})}
+
+Parallèlement aux fonctionnalités d'aide à la décision destinées au recruteur, ce sprint introduit une fonctionnalité premium à destination du \textbf{candidat}~: l'adaptation assistée par IA de son CV à une offre donnée. À partir d'une description de poste que le candidat colle librement (ou de l'offre déjà ouverte dans la plateforme), un modèle de langage reformule le CV pour en rapprocher le vocabulaire et la mise en avant des exigences de l'offre, \textbf{sans jamais inventer d'information}. Le candidat valide ensuite chaque changement proposé, puis exporte un CV au format PDF.
+
+\subsection{Principe et garanties}
+
+La fonctionnalité repose sur quatre garanties de conception~:
+
+\begin{itemize}
+  \item \textbf{Aucune fabrication de faits.} L'IA ne peut que reformuler, réordonner et adapter le vocabulaire~; les noms d'entreprises, les dates, les intitulés de diplômes et les chiffres demeurent intacts. Un garde-fou automatique signale toute information absente du CV d'origine.
+  \item \textbf{Validation humaine.} Chaque modification est présentée côte à côte avec le texte original et n'est appliquée qu'après acceptation explicite du candidat, qui peut aussi la refuser ou l'éditer manuellement.
+  \item \textbf{Bilinguisme.} La langue de sortie (français ou anglais) est déterminée automatiquement à partir du CV, indépendamment de la langue de l'offre~: un CV anglais soumis à une offre française reste rédigé en anglais, et inversement.
+  \item \textbf{Conformité RGPD.} La génération du PDF s'appuie sur une instance de Reactive Resume \textbf{auto-hébergée} (conteneurs Docker), de sorte que les données du candidat ne quittent jamais l'infrastructure de la plateforme.
+\end{itemize}
+
+\subsection{Architecture et chaîne de traitement}
+
+La fonctionnalité est implémentée sous la forme d'un microservice Python dédié (\texttt{cv\_tailoring\_service}, port~8014), exposé au client à travers la passerelle Node.js (\texttt{POST /api/cv/tailor} et \texttt{POST /api/cv/tailor/export}). La chaîne de traitement se décompose comme suit~:
+
+\begin{sloppypar}
+\begin{enumerate}
+  \item \textbf{Extraction des mots-clés.} Les exigences saillantes de l'offre sont extraites par pondération \textbf{TF-IDF} (\textit{scikit-learn}), fournissant la liste de mots-clés cibles ainsi qu'un score de correspondance affiché au candidat.
+  \item \textbf{Reformulation contrainte.} Le CV structuré et les mots-clés sont soumis au modèle \texttt{gpt-oss-120b} via l'API Groq, en \textbf{mode JSON strict} (\textit{response\_format} à schéma imposé) qui garantit une sortie structurée et directement exploitable. Le \textit{prompt} système impose les règles anti-fabrication et la langue cible.
+  \item \textbf{Détection de langue.} Un détecteur déterministe (signaux lexicaux français contre anglais) fixe la langue de rédaction avant l'appel, évitant que la langue de l'offre n'entraîne un basculement indésirable.
+  \item \textbf{Vérification factuelle.} Un garde-fou fondé sur la reconnaissance d'entités nommées (\textit{spaCy}) compare les entités du texte reformulé à celles du CV d'origine et signale toute information potentiellement inventée.
+  \item \textbf{Restitution et différentiel.} Le client calcule un différentiel mot à mot entre l'original et la proposition, met en évidence les ajouts et suppressions, et présente chaque changement dans une interface de validation.
+  \item \textbf{Génération du PDF.} Une fois les changements validés, le CV est transmis à l'instance auto-hébergée de Reactive Resume, qui produit le PDF final selon le modèle choisi (rendu par un Chrome sans interface). Le CV peut alors être téléchargé ou rattaché à la candidature (persisté dans MongoDB).
+\end{enumerate}
+\end{sloppypar}
+
+Le tableau~\ref{tab:cv-tailoring-stack} récapitule les composants et technologies mobilisés.
+
+\begin{table}[H]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.3}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{3.6cm}|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}p{4.2cm}|}
+    \hline
+    \rowcolor{blue!10}
+    \textbf{Composant} & \textbf{Rôle} & \textbf{Technologie} \\
+    \hline
+    Interface de validation & Révision, édition et aperçu en direct du CV & React \\
+    \hline
+    Passerelle & Authentification, orchestration, rattachement à la candidature & Node.js / Express \\
+    \hline
+    Service d'adaptation & Cœur du traitement (port~8014) & Python / FastAPI \\
+    \hline
+    Extraction de mots-clés & Identification des exigences de l'offre & TF-IDF (\textit{scikit-learn}) \\
+    \hline
+    Reformulation & Réécriture ciblée à structure garantie & LLM \texttt{gpt-oss-120b} (Groq), JSON strict \\
+    \hline
+    Vérification factuelle & Détection des informations inventées & \textit{spaCy} (NER) \\
+    \hline
+    Génération du PDF & Rendu final multi-modèles, auto-hébergé & Reactive Resume (Docker) \\
+    \hline
+  \end{tabularx}
+  \caption{Composants et technologies de la génération de CV adapté.}
+  \label{tab:cv-tailoring-stack}
+\end{table}
+
+\subsection{Interface de validation et export}
+
+L'interface, accessible depuis un onglet dédié du profil candidat, s'organise en deux panneaux synchronisés. Le candidat colle la description de l'offre puis lance la génération (figure~\ref{fig:cv-tailoring-form}). Le panneau de gauche liste alors chaque changement proposé (résumé, descriptions d'expériences, ordre des compétences) avec le texte original et la proposition mise en évidence~; le candidat accepte, refuse ou édite chaque élément. Le panneau de droite reflète en direct le CV consolidé et permet de choisir le modèle de mise en forme (figure~\ref{fig:cv-tailoring-review}). Un indicateur de couverture des mots-clés de l'offre guide le candidat vers un CV mieux ciblé.
+
+\begin{figure}[H]
+  \centering
+  \screenshot{cv-tailoring-form.JPG}{Saisie de la description de poste et lancement de la génération}
+  \caption{Adaptation de CV~: saisie de l'offre et génération.}
+  \label{fig:cv-tailoring-form}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \screenshot{cv-tailoring-review.JPG}{Interface de validation à deux panneaux~: différentiel des changements et aperçu en direct}
+  \caption{Adaptation de CV~: validation des changements et aperçu en direct.}
+  \label{fig:cv-tailoring-review}
+\end{figure}
+
+Une fois la révision terminée, le CV est exporté au format PDF selon l'un des modèles professionnels proposés, avec une couleur d'accent adaptée et des compétences regroupées par catégories (figure~\ref{fig:cv-tailoring-pdf}). Le document peut être téléchargé ou directement rattaché à la candidature.
+
+\begin{figure}[H]
+  \centering
+  \screenshot{cv-tailoring-pdf.JPG}{CV adapté généré au format PDF selon le modèle sélectionné}
+  \caption{Adaptation de CV~: PDF final généré par l'instance auto-hébergée.}
+  \label{fig:cv-tailoring-pdf}
+\end{figure}
+
+Le microservice d'adaptation est couvert par une suite de 58~tests unitaires (\textit{pytest}) exécutés sans infrastructure externe (les appels à Groq, à MongoDB et à Reactive Resume sont remplacés par des doublures), validant l'extraction des mots-clés, la détection de langue, le garde-fou factuel, le mappage vers Reactive Resume et les points d'entrée du service.
+
 \section{Sécurité et conformité}
 
 La sécurité de NextHire repose sur une stratégie de défense en profondeur : plusieurs couches
@@ -362,7 +469,7 @@ chemins :
         l'accès est accordé immédiatement sans requête base de données.
   \item \textbf{Repli base de données.} Pour les jetons antérieurs ne portant pas encore
         le champ \texttt{role} (compatibilité ascendante), le middleware interroge MongoDB
-        (\texttt{User.findById().select('role').lean()}) et met à jour \texttt{req.user.role}
+        (\texttt{User.findById()\allowbreak.select('role')\allowbreak.lean()}) et met à jour \texttt{req.user.role}
         en mémoire pour les middlewares aval.
 \end{itemize}
 
@@ -581,4 +688,4 @@ tableau~\ref{tab:analysis-coverage} présente la couverture des modules les plus
 
 \section{Conclusion}
 
-Ce dernier sprint a complété NextHire par ses fonctionnalités d'aide à la décision, analyse multimodale, comparaison et classement des candidats, revue d'entretien, et par son tableau de bord administrateur, tout en renforçant la sécurité et la conformité RGPD. La suite de tests automatisés (211~vérifications, taux de réussite de 100~\% hors infrastructure) et les mesures de performance valident la faisabilité technique de la solution. La conclusion générale du rapport reviendra sur les apports de la plateforme et ses perspectives d'évolution.
+Ce dernier sprint a complété NextHire par ses fonctionnalités d'aide à la décision, analyse multimodale, comparaison et classement des candidats, revue d'entretien, et par son tableau de bord administrateur, ainsi que par une fonctionnalité premium d'adaptation de CV à l'offre côté candidat, tout en renforçant la sécurité et la conformité RGPD. La suite de tests automatisés (211~vérifications, taux de réussite de 100~\% hors infrastructure) et les mesures de performance valident la faisabilité technique de la solution. La revue de ce dernier sprint, conduite avec nos encadrantes, a validé l'incrément final et clos le \textit{product backlog}~; la rétrospective de clôture a confirmé la pertinence du découpage en cinq sprints, chaque incrément ayant pu être démontré de bout en bout à son terme. La conclusion générale du rapport reviendra sur les apports de la plateforme et ses perspectives d'évolution.

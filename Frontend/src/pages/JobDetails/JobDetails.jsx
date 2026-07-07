@@ -19,6 +19,7 @@ import {
   FaCode,
   FaGraduationCap
 } from "react-icons/fa";
+import TailorCvButton from "../CvTailoring/TailorCvButton";
 import "./JobDetails.css";
 
 const JobDetails = () => {
@@ -351,6 +352,8 @@ const JobDetails = () => {
                 </div>
                 
                 <p>Ready to take the next step in your career? Submit your application now and join our team!</p>
+                {/* Premium: adapt CV to this offer (cosmetic badge; no gating this iteration) */}
+                <TailorCvButton jobId={id} />
                 <button
                   className="apply-btn"
                   onClick={handleApply}

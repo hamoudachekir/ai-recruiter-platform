@@ -7,6 +7,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import Navbar from "../components/Navbar/Navbar";
 import Footer from "../components/Footer/Footer";
 import LinkedInSection from "../components/LinkedInSection";
+import TailorCvPanel from "../pages/CvTailoring/TailorCvPanel";
+import ResumeViewerModal from "./ResumeViewerModal";
 import { compressProfileImage, createAdjustedProfileImage } from "../utils/imageCompression";
 import "./Profile.css";
 
@@ -31,6 +33,7 @@ const Profile = () => {
   const [applications, setApplications] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
   const [linkedinData, setLinkedinData] = useState(null);
+  const [viewerPdf, setViewerPdf] = useState(null); // { url, title } | null
 
   const buildImageSrc = (value) => {
     if (!value) return "/images/team-1.jpg";
@@ -305,6 +308,15 @@ const Profile = () => {
 
               {user.role === "CANDIDATE" && (
                 <button
+                  className={activeTab === "tailor" ? "tab active" : "tab"}
+                  onClick={() => setActiveTab("tailor")}
+                >
+                  ✨ Adapter mon CV
+                </button>
+              )}
+
+              {user.role === "CANDIDATE" && (
+                <button
                   className={activeTab === "linkedin" ? "tab active" : "tab"}
                   onClick={() => setActiveTab("linkedin")}
                 >
@@ -491,14 +503,13 @@ const Profile = () => {
                         <span className="cv-ready-title">Resume uploaded</span>
                         <span className="cv-ready-sub">Your CV is attached to your profile.</span>
                       </div>
-                      <a
-                        href={`http://localhost:3001${resumeUrl}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
                         className="app-action app-action--view"
+                        onClick={() => setViewerPdf({ url: `http://localhost:3001${resumeUrl}`, title: "Mon CV" })}
                       >
                         <FaExternalLinkAlt /> View
-                      </a>
+                      </button>
                     </div>
                   ) : (
                     <div className="cv-dropzone">
@@ -523,6 +534,22 @@ const Profile = () => {
                     <p className={`cv-status ${uploadStatus.includes("success") ? "text-success" : "text-danger"}`}>
                       {uploadStatus.includes("success") ? <FaCheckCircle /> : <FaTimesCircle />} {uploadStatus}
                     </p>
+                  )}
+                </div>
+              )}
+
+              {activeTab === "tailor" && user.role === "CANDIDATE" && (
+                <div className="cv-pane">
+                  {resumeUrl ? (
+                    <TailorCvPanel embedded />
+                  ) : (
+                    <div className="cv-dropzone">
+                      <FaCloudUploadAlt className="cv-dropzone-icon" />
+                      <p className="cv-dropzone-title">Uploadez d’abord votre CV</p>
+                      <span className="cv-dropzone-sub">
+                        Rendez-vous dans l’onglet <strong>CV</strong> pour ajouter votre resume avant de l’adapter à une offre.
+                      </span>
+                    </div>
                   )}
                 </div>
               )}
@@ -592,14 +619,16 @@ const Profile = () => {
 
                             <div className="application-actions">
                               {app.cv && (
-                                <a
-                                  href={`http://localhost:3001${app.cv}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                                <button
+                                  type="button"
                                   className="app-action app-action--view"
+                                  onClick={() => setViewerPdf({
+                                    url: `http://localhost:3001${app.cv}`,
+                                    title: app.jobId?.title ? `CV — ${app.jobId.title}` : "CV",
+                                  })}
                                 >
                                   <FaFilePdf /> View CV
-                                </a>
+                                </button>
                               )}
                               <button
                                 className="app-action app-action--delete"
@@ -627,6 +656,14 @@ const Profile = () => {
       </div>
 
       <Footer />
+
+      {viewerPdf && (
+        <ResumeViewerModal
+          url={viewerPdf.url}
+          title={viewerPdf.title}
+          onClose={() => setViewerPdf(null)}
+        />
+      )}
     </>
   );
 };

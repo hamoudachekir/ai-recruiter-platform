@@ -29,30 +29,38 @@ L'objectif principal de ce sprint est défini comme suit~:
 
 \subsection{Backlog du sprint}
 
-Pour atteindre cet objectif, un ensemble de récits utilisateurs a été sélectionné depuis le \textit{product backlog} afin de constituer le backlog du Sprint~2 (tableau~\ref{tab:backlog-s2}).
+Pour atteindre cet objectif, un sous-ensemble du \textit{product backlog} a été sélectionné puis affiné en récits utilisateurs et tâches techniques, afin de constituer le backlog du Sprint~2 (tableau~\ref{tab:backlog-s2}). Comme pour le \textit{product backlog}, chaque élément est priorisé selon la méthode \textbf{MoSCoW} (\textbf{Must}, \textbf{Should}, \textbf{Could}) et estimé en \textit{story points} sur la suite de Fibonacci (1, 2, 3, 5, 8, 13), soit un engagement de 46~points pour ce sprint.
 
 \begin{table}[H]
   \centering
   \footnotesize
   \renewcommand{\arraystretch}{1.3}
   \setlength{\tabcolsep}{5pt}
-  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.1cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.8cm}|}
+  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.1cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.7cm}|>{\centering\arraybackslash}p{0.9cm}|}
     \hline
     \rowcolor{blue!10}
-    \textbf{ID} & \textbf{Récit utilisateur} & \textbf{Priorité} \\
+    \textbf{ID} & \textbf{Récit utilisateur / tâche} & \textbf{Priorité} & \textbf{Est.} \\
     \hline
-    S1 & En tant que recruteur, je veux lancer la planification et proposer au candidat des créneaux issus de mon calendrier Google. & Haute \\
+    T-02 & Mettre en place le micro-service de planification (FastAPI) intégré au calendrier Google (OAuth~2.0) et à l'envoi de courriels de confirmation. & Must & 8 \\
     \hline
-    S2 & En tant que candidat, je veux choisir l'un des créneaux proposés afin de confirmer mon entretien, avec notification automatique par courriel. & Haute \\
+    T-03 & Établir l'infrastructure de communication temps réel~: serveur de signalisation Socket.IO et échange de flux audio/vidéo WebRTC. & Must & 8 \\
     \hline
-    S3 & En tant que recruteur, je veux créer une salle d'entretien partageable associée à un poste. & Haute \\
+    S1 & En tant que recruteur, je veux lancer la planification et proposer au candidat des créneaux issus de mon calendrier Google. & Must & 5 \\
     \hline
-    S4 & En tant que candidat, je veux consulter en temps réel les salles d'entretien disponibles et demander à en rejoindre une. & Haute \\
+    S2 & En tant que candidat, je veux choisir l'un des créneaux proposés afin de confirmer mon entretien, avec notification automatique par courriel. & Must & 3 \\
     \hline
-    S5 & En tant que recruteur, je veux admettre le candidat dans la salle et démarrer la session d'entretien en direct. & Haute \\
+    S3 & En tant que recruteur, je veux créer une salle d'entretien partageable associée à un poste et à un candidat. & Must & 3 \\
+    \hline
+    S4 & En tant que candidat, je veux consulter en temps réel les salles d'entretien disponibles et demander à en rejoindre une. & Must & 5 \\
+    \hline
+    S5 & En tant que recruteur, je veux admettre le candidat dans la salle et démarrer la session d'entretien en direct. & Must & 3 \\
+    \hline
+    S6 & En tant que participant, je veux dialoguer en audio et vidéo en direct dans la salle, les changements d'état de la session étant diffusés en temps réel à tous les participants. & Must & 8 \\
+    \hline
+    T-04 & Améliorer les interfaces des espaces candidat et recruteur (planification, liste des salles, salle d'entretien en direct). & Should & 3 \\
     \hline
   \end{tabularx}
-  \caption{Backlog du Sprint~2 : Planification et salle d'entretien temps réel.}
+  \caption{Backlog du Sprint~2 : planification et salle d'entretien temps réel.}
   \label{tab:backlog-s2}
 \end{table}
 
@@ -75,7 +83,7 @@ La salle traverse trois états successifs~: \textbf{en attente} (\textit{waiting
 
 \section{Conception détaillée et architecture}
 
-La conception de ce sprint s'appuie sur les trois protocoles complémentaires présentés au chapitre~2~: REST pour les opérations CRUD, Socket.IO pour la signalisation et les échanges en temps réel, et WebRTC pour les flux audio et vidéo pair-à-pair. Les trois sections suivantes détaillent les principaux flux, planification, création et jonction de la salle, établissement de la connexion temps réel, chacun illustré par un diagramme de séquence.
+La conception de ce sprint s'appuie sur les trois protocoles complémentaires présentés au chapitre~\ref{ch:sprint0} (Sprint~0)~: REST pour les opérations CRUD, Socket.IO pour la signalisation et les échanges en temps réel, et WebRTC pour les flux audio et vidéo pair-à-pair. Les trois sections suivantes détaillent les principaux flux, planification, création et jonction de la salle, établissement de la connexion temps réel, chacun illustré par un diagramme de séquence.
 
 \subsection{Planification des entretiens}
 
@@ -133,7 +141,7 @@ Le cycle de vie d'une session est piloté par le routeur \texttt{callRoom} en co
   \item \texttt{GET /api/call-rooms/:roomId} retourne le contexte complet de la session (profil candidat, exigences du poste, statut).
 \end{itemize}
 
-\noindent La signalisation temps réel s'appuie sur les événements Socket.IO émis par les clients (\texttt{call-room-created}, \texttt{call-room-join-request}, \texttt{confirm-candidate-join}), que le serveur relaie sous des noms dédiés (\texttt{new-call-room}, \texttt{candidate-join-request}, \texttt{join-confirmed}), ainsi que sur \texttt{call-room-status-update} pour la mise à jour de la liste des salles disponibles. La figure~\ref{fig:seq-room} en présente l'enchaînement.
+\noindent La signalisation temps réel s'appuie sur les événements Socket.IO émis par les clients (\texttt{call-\allowbreak room-\allowbreak created}, \texttt{call-\allowbreak room-\allowbreak join-\allowbreak request}, \texttt{confirm-\allowbreak candidate-\allowbreak join}), que le serveur relaie sous des noms dédiés (\texttt{new-\allowbreak call-\allowbreak room}, \texttt{candidate-\allowbreak join-\allowbreak request}, \texttt{join-\allowbreak confirmed}), ainsi que sur \texttt{call-\allowbreak room-\allowbreak status-\allowbreak update} pour la mise à jour de la liste des salles disponibles. La figure~\ref{fig:seq-room} en présente l'enchaînement.
 
 \begin{figure}[H]
   \centering
@@ -264,8 +272,8 @@ Une fois le candidat admis, les deux participants se retrouvent dans la salle d'
 
 \section{Tests}
 
-La validation de ce sprint a porté sur l'intégration du module de planification (création d'événements Google Calendar et envoi des courriels de confirmation) et sur la signalisation WebRTC/Socket.IO de la salle d'entretien, vérifiée manuellement avec deux clients connectés simultanément (un candidat, un recruteur)~: création de la salle, demande et confirmation de jonction, puis établissement de la connexion audio/vidéo. Les tests automatisés de bout en bout du parcours recruteur sont présentés au chapitre~7 (Sprint~5).
+La validation de ce sprint a porté sur l'intégration du module de planification (création d'événements Google Calendar et envoi des courriels de confirmation) et sur la signalisation WebRTC/Socket.IO de la salle d'entretien, vérifiée manuellement avec deux clients connectés simultanément (un candidat, un recruteur)~: création de la salle, demande et confirmation de jonction, puis établissement de la connexion audio/vidéo. Les tests automatisés de bout en bout du parcours recruteur sont présentés au chapitre~\ref{ch:sprint5} (Sprint~5).
 
 \section{Conclusion}
 
-Ce sprint a doté NextHire d'un canal d'entretien synchrone complet~: planification intégrée au calendrier, création et jonction d'une salle d'entretien sécurisée, et établissement d'une communication audio et vidéo temps réel entre le candidat et le recruteur. Le sprint suivant exploite cette salle pour y faire intervenir l'agent d'entretien vocal adaptatif, cœur fonctionnel de la plateforme.
+Ce sprint a doté NextHire d'un canal d'entretien synchrone complet~: planification intégrée au calendrier, création et jonction d'une salle d'entretien sécurisée, et établissement d'une communication audio et vidéo temps réel entre le candidat et le recruteur. La revue de sprint a permis de dérouler le parcours complet, de la planification jusqu'à la salle en direct, devant nos encadrantes~; la rétrospective a souligné le coût de mise au point de la signalisation WebRTC (traversée NAT, permissions médias), d'où la décision de tester systématiquement les fonctionnalités temps réel sur plusieurs navigateurs et conditions réseau dès les sprints suivants. Le sprint suivant exploite cette salle pour y faire intervenir l'agent d'entretien vocal adaptatif, cœur fonctionnel de la plateforme.

@@ -75,6 +75,10 @@ const applicationSchema = new mongoose.Schema({
     },
   ],
   aiCoach: { type: mongoose.Schema.Types.Mixed, default: null },
+  tailoredCvPath: { type: String, default: null },
+  tailoredCvJson: { type: mongoose.Schema.Types.Mixed, default: null },
+  tailoredCvChanges: [{ type: String }],
+  tailoredCvGeneratedAt: { type: Date, default: null },
 });
 
 

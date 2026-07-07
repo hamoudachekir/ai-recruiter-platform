@@ -1,14 +1,3 @@
-\chapter[Chapitre 2 : Analyse et conception]{Chapitre 2 : Analyse et conception}
-\begin{spacing}{1.2}
-\minitoc
-\thispagestyle{MyStyle}
-\end{spacing}
-\clearpage
-
-\section{Introduction}
-
-Ce chapitre rassemble l'analyse et la conception de la plateforme NextHire. Il s'ouvre sur un état de l'art des travaux académiques et des solutions industrielles du recrutement assisté par l'IA, du traitement de la parole et de la vision par ordinateur. Il présente ensuite l'architecture micro-services du système et ses composants, formalise les besoins fonctionnels et non-fonctionnels, puis détaille la modélisation UML (cas d'utilisation et classes). Il se conclut par les choix de technologies et de \textit{frameworks} retenus pour chaque couche de la plateforme. L'objectif est de justifier nos choix techniques et de poser les fondations conceptuelles sur lesquelles s'appuie la réalisation présentée, sprint par sprint, dans les chapitres suivants.
-
 \section{État de l'art}
 
 Le recrutement assisté par l'IA a fortement évolué avec l'essor des grands modèles de langage et de l'analyse multimodale. Cette section situe brièvement les approches existantes dans les quatre domaines qui fondent notre plateforme, IA appliquée au recrutement, modèles de langage et \textit{workflows} agentiques, traitement de la parole et vision par ordinateur, et précise, pour chacun, le positionnement retenu.
@@ -196,30 +185,62 @@ Le stockage repose sur trois couches :
 
 \subsection{Architecture physique}
 
-NextHire adopte une architecture \textbf{en trois couches} (\textit{three-tier}), dans laquelle chaque couche assure un rôle distinct et où les services sont déployés comme des processus indépendants. La figure~\ref{fig:three-tier} en illustre l'organisation.
+L'architecture physique décrit la manière dont les composants de NextHire sont \emph{déployés} sur les nœuds d'exécution, ainsi que les liaisons réseau qui les relient. Plutôt qu'un découpage en couches, elle se lit comme un \textbf{diagramme de déploiement} organisé autour de trois types de nœuds~: les postes clients, l'hôte serveur et les services externes. La figure~\ref{fig:deploiement} en donne la vue d'ensemble.
 
 \begin{itemize}
-  \item \textbf{Couche de présentation.} Interface visible par l'utilisateur, assurée par l'application web React~19 / Vite. Elle réunit le \textit{front office} candidat (profil, recommandations d'offres, salle d'entretien avec avatar~3D) et le \textit{back office} recruteur et administrateur (tableaux de bord, comparaison des candidats). Elle capte les entrées (téléversement du CV, réponses orales via webcam et microphone) et restitue les résultats (scores, transcriptions, rapports). Elle dialogue avec la couche application par REST et par WebSocket (Socket.IO)~; pour la visioconférence des salles d'appel, deux instances de la couche de présentation établissent en outre une connexion \textbf{WebRTC pair-à-pair} directe entre navigateurs, le serveur Node se limitant à relayer la signalisation (offres/réponses SDP, candidats ICE) via Socket.IO, sans jamais relayer le flux audio/vidéo lui-même.
-  \item \textbf{Couche application.} Cœur de la logique métier et de l'orchestration. Le serveur Node.js / Express (BFF, port~3001) constitue le point d'entrée unique~: il vérifie le jeton JWT, applique la limitation de débit, puis orchestre les micro-services Python d'IA : agent d'entretien (IRT-lite), pile vocale STT/TTS, vérification faciale (InsightFace), détection d'objets (YOLOv8n), analyse post-entretien (LangGraph), modèles de scoring (correspondance CV/offre, évaluation d'entretien), planification (Google Calendar) et services IA classiques (analyse de CV, recommandation, génération de quiz). Elle traite les entrées, applique les règles métier et renvoie les sorties.
-  \item \textbf{Couche de données.} Épine dorsale de la gestion et de la persistance. Elle regroupe MongoDB (base \texttt{ai\_recruiter}, via Mongoose et PyMongo), Redis (état des sessions de l'agent et files de tâches RQ) et le disque local (fichiers binaires déposés par Multer~: CV, enregistrements audio, photos de profil). C'est la seule couche à dialoguer directement avec les systèmes de stockage persistants.
+  \item \textbf{Postes clients (navigateurs).} L'application est une \textit{Single Page Application} React~19 / Vite exécutée dans le navigateur du candidat et dans celui du recruteur~; aucune installation n'est requise côté client. Le poste candidat capte les entrées (téléversement du CV, réponses orales via webcam et microphone) et rend l'avatar~3D (Three.js), tandis que le poste recruteur donne accès aux tableaux de bord et à la comparaison des candidats. Lors d'une session d'entretien, les deux navigateurs établissent une connexion \textbf{WebRTC pair-à-pair} qui transporte directement le flux audio/vidéo de l'un à l'autre~; le serveur se limite à relayer la signalisation (offres/réponses SDP, candidats ICE) via Socket.IO et ne voit jamais passer le flux média.
+  \item \textbf{Hôte serveur (environnement d'exécution Docker).} Un même hôte héberge, sous forme de processus indépendants (conteneurs Docker), l'ensemble du \textit{back-end}. Le serveur Node.js / Express (BFF, port~3001), couplé à Socket.IO, constitue le \textbf{point d'entrée unique}~: il vérifie le jeton JWT, applique la limitation de débit, relaie la signalisation WebRTC, puis orchestre par appels REST internes les micro-services Python, chacun exposé sur son propre port~: agent d'entretien (\texttt{:8013}), pile vocale STT/TTS (\texttt{:8012}), vérification faciale InsightFace (\texttt{:8011}), détection d'objets YOLOv8n (\texttt{:8001}), analyse post-entretien LangGraph (\texttt{:8090}), planification (\texttt{:5004}) et services IA classiques Flask (analyse de CV~\texttt{:5002}, recommandation~\texttt{:5001}, génération de quiz~\texttt{:5003}, scoring~\texttt{:5000} et~\texttt{:7000}). Les données résident sur ce même hôte~: MongoDB (\texttt{:27017}, via Mongoose et PyMongo), Redis (\texttt{:6379}, sessions de l'agent et files de tâches RQ) et le disque local (fichiers binaires déposés par Multer~: CV, enregistrements audio, photos de profil).
+  \item \textbf{Services externes (cloud).} Certaines capacités sont déléguées à des fournisseurs tiers, joints par API HTTPS~: Groq pour l'inférence LLM (\texttt{openai/\allowbreak gpt-oss-120b}), Mistral~AI pour la génération des quiz, EdgeTTS et ElevenLabs pour la synthèse vocale, Google Calendar pour la planification et un service SMTP (Gmail) pour les notifications par courriel.
 \end{itemize}
 
 \begin{figure}[H]
-  \centering
+  \noindent\makebox[\textwidth][c]{%
+  \resizebox{\textwidth}{!}{%
   \begin{tikzpicture}[
-    font=\small,
+    font=\scriptsize,
     >={Stealth[length=2mm]},
-    layer/.style={draw, rounded corners=3pt, align=center, text width=11.5cm, minimum height=1.5cm},
+    dev/.style={draw, rounded corners=2pt, fill=blue!10, align=center, text width=3.05cm, inner sep=3pt},
+    bff/.style={draw, rounded corners=2pt, fill=orange!22, align=center, text width=5.6cm, inner sep=3pt},
+    proc/.style={draw, rounded corners=2pt, fill=orange!12, align=center, text width=5.6cm, inner sep=3pt},
+    store/.style={draw, rounded corners=2pt, fill=green!16, align=center, text width=1.7cm, minimum height=0.9cm, inner sep=2pt},
+    cloud/.style={draw, rounded corners=2pt, fill=violet!12, align=center, text width=2.95cm, inner sep=3pt},
+    lk/.style={<->, thick},
+    lbl/.style={font=\scriptsize, align=center, fill=white, inner sep=1.5pt},
   ]
-    \node[layer, fill=blue!12]   (pres) at (0, 0)    {\textbf{Couche de présentation}\\[1pt]{\footnotesize Application web React~19 / Vite : \textit{front office} candidat, \textit{back office} recruteur \& administrateur, avatar 3D}};
-    \node[layer, fill=orange!15] (app)  at (0,-2.1)  {\textbf{Couche application}\\[1pt]{\footnotesize BFF Node.js / Express (JWT, orchestration) + micro-services Python (agent IRT, STT/TTS, InsightFace, YOLOv8n, analyse LangGraph, scoring, planification)}};
-    \node[layer, fill=green!14]  (data) at (0,-4.2)  {\textbf{Couche de données}\\[1pt]{\footnotesize MongoDB \texttt{ai\_recruiter} (Mongoose / PyMongo), Redis (sessions, RQ), disque local (Multer)}};
-    \draw[<->] (pres) -- node[right, font=\footnotesize] {REST / WebSocket (Socket.IO)} (app);
-    \draw[<->] (app)  -- node[right, font=\footnotesize] {Mongoose / PyMongo / Multer} (data);
-    \draw[<->] (pres.north) to[out=70,in=110,looseness=6] node[above, font=\footnotesize, align=center] {WebRTC pair-à-pair (navigateur~$\leftrightarrow$~navigateur)} (pres.north);
-  \end{tikzpicture}
-  \caption{Architecture physique en trois couches de NextHire.}
-  \label{fig:three-tier}
+    % --- Postes clients (gauche) ---
+    \node[dev] (cand) at (0, 0.3)  {\textbf{Poste candidat}\\[1pt]{\itshape nœud client — navigateur}\\[2pt]SPA React 19 / Vite\\ capture webcam + micro\\ avatar 3D (Three.js)\\ pair WebRTC};
+    \node[dev] (recr) at (0,-3.9)  {\textbf{Poste recruteur}\\[1pt]{\itshape nœud client — navigateur}\\[2pt]SPA React 19 / Vite\\ tableaux de bord\\ comparaison des candidats};
+    \draw[<->, thick, red!65!black] (cand.west) -- ++(-0.6,0)
+        |- node[lbl, pos=0.25, left] {WebRTC\\ pair-à-pair\\ (flux A/V)} (recr.west);
+
+    % --- Hôte serveur (centre) ---
+    \node[bff]  (bff)   at (7.0, 1.35) {\textbf{BFF Node.js / Express + Socket.IO}~~\texttt{:3001}\\[1pt]{\scriptsize point d'entrée unique : JWT, limitation de débit,\\ relais de signalisation WebRTC, orchestration}};
+    \node[proc] (micro) at (7.0, -1.7) {\textbf{Micro-services Python} — un processus par service\\[1pt]{\scriptsize Interview Agent \texttt{:8013} $\cdot$ Speech STT/TTS \texttt{:8012}\\ Face Verify \texttt{:8011} $\cdot$ YOLO \texttt{:8001} $\cdot$ Scheduling \texttt{:5004}\\ Analysis + LangGraph \texttt{:8090}\\ IA Flask : CV \texttt{:5002}, reco \texttt{:5001}, quiz \texttt{:5003}, scoring \texttt{:5000}/\texttt{:7000}}};
+    \node[store] (mongo) at (5.0, -4.6) {MongoDB\\ \texttt{:27017}};
+    \node[store] (redis) at (7.0, -4.6) {Redis\\ \texttt{:6379}};
+    \node[store] (disk)  at (9.0, -4.6) {Disque local\\ (Multer)};
+
+    \draw[lk] (bff) -- node[lbl, pos=0.5] {REST interne (localhost)} (micro);
+    \draw[lk] (micro.south) -- node[lbl, pos=0.55] {Mongoose / PyMongo / RQ} (redis.north);
+
+    \begin{scope}[on background layer]
+      \node[draw, dashed, rounded corners=4pt, fill=gray!4, inner sep=4mm,
+            fit=(bff)(micro)(mongo)(disk)] (host) {};
+    \end{scope}
+    \node[anchor=south west, font=\scriptsize\bfseries] at (host.north west)
+          {Hôte serveur — \textit{nœud d'exécution} (conteneurs Docker)};
+
+    % --- Liaisons postes clients <-> BFF ---
+    \draw[lk] (cand.east) -- node[lbl, pos=0.5] {REST + WebSocket\\ (Socket.IO) \texttt{:3001}} (bff.west);
+    \draw[lk] (recr.east) -- (bff.west);
+
+    % --- Services externes (droite) ---
+    \node[cloud] (ext) at (13.1, -1.7) {\textbf{Services externes}\\[1pt]{\itshape nœud cloud}\\[2pt]{\scriptsize Groq — LLM \texttt{gpt-oss-120b}\\ Mistral AI — quiz\\ EdgeTTS / ElevenLabs — TTS\\ Google Calendar\\ SMTP (Gmail) — courriels}};
+    \draw[lk] (micro.east) -- node[lbl, above] {HTTPS} (ext.west);
+  \end{tikzpicture}%
+  }}
+  \caption{Architecture physique de NextHire : diagramme de déploiement (postes clients, hôte serveur conteneurisé et services externes).}
+  \label{fig:deploiement}
 \end{figure}
 
 \subsection{Architecture logique}
@@ -254,101 +275,107 @@ L'architecture logique décrit l'organisation interne du système, ses fonctions
 
 Cette section formalise les exigences de la plateforme NextHire selon deux dimensions complémentaires : les besoins fonctionnels, qui décrivent ce que le système doit permettre à chaque acteur d'accomplir, et les besoins non-fonctionnels, qui précisent les contraintes de qualité que le système doit respecter indépendamment des fonctionnalités.
 
-\subsection{Besoins fonctionnels}
+\subsection{Besoins fonctionnels (product backlog)}
 
-Les besoins fonctionnels sont organisés par acteur. Chaque exigence est identifiée par un code de la forme \textbf{BF-X-\textit{nn}}, où \textbf{X} désigne l'acteur (\textbf{C} = Candidat, \textbf{R} = Recruteur, \textbf{A} = Administrateur) et \textit{nn} le numéro séquentiel. La priorité est exprimée sur trois niveaux : \textbf{H} (Haute), \textbf{M} (Moyenne), \textbf{B} (Basse). Ils sont détaillés respectivement dans les tableaux~\ref{tab:bf-candidat}, \ref{tab:bf-recruteur} et~\ref{tab:bf-admin}.
+Les besoins fonctionnels sont formalisés sous la forme d'un \textbf{product backlog} Agile. Chaque exigence est exprimée comme une \textit{user story} au format « En tant que \dots, je veux \dots, afin de \dots », puis regroupée par \textit{epic} --- un epic par acteur (\textbf{C}~=~Candidat, \textbf{R}~=~Recruteur, \textbf{A}~=~Administrateur) --- et identifiée par un code \textbf{US-X-\textit{nn}}. Chaque story est priorisée selon la méthode \textbf{MoSCoW} (\textbf{Must}, \textbf{Should}, \textbf{Could}), estimée en \textit{story points} sur la suite de Fibonacci (1, 2, 3, 5, 8, 13) et rattachée au \textbf{sprint} au cours duquel elle a été réalisée. Les backlogs des trois epics sont détaillés dans les tableaux~\ref{tab:bf-candidat}, \ref{tab:bf-recruteur} et~\ref{tab:bf-admin}.
 
 \bigskip
-\noindent\textbf{Acteur : Candidat}
+\noindent\textbf{Epic 1 --- Candidat}
 
 \begin{table}[H]
   \centering
   \footnotesize
   \renewcommand{\arraystretch}{1.3}
-  \begin{tabularx}{\textwidth}{|p{1.5cm}|X|c|}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.3cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.6cm}|>{\centering\arraybackslash}p{0.9cm}|>{\centering\arraybackslash}p{1.1cm}|}
     \hline
-    \textbf{ID} & \textbf{Description} & \textbf{Priorité} \\
+    \rowcolor{blue!10}
+    \textbf{ID} & \textbf{User story} & \textbf{Priorité} & \textbf{Est.} & \textbf{Sprint} \\
     \hline
-    BF-C-01 & S'inscrire sur la plateforme et compléter son profil (informations personnelles, téléversement du CV). & H \\
+    US-C-01 & En tant que candidat, je veux m'inscrire et compléter mon profil (informations personnelles, CV) afin de pouvoir postuler aux offres. & Must & 5 & 1 \\
     \hline
-    BF-C-02 & Relier son compte LinkedIn à son profil afin d'importer automatiquement les données professionnelles. & M \\
+    US-C-02 & En tant que candidat, je veux relier mon compte LinkedIn afin d'importer automatiquement mes données professionnelles. & Should & 3 & 1 \\
     \hline
-    BF-C-03 & Consulter les offres d'emploi disponibles et soumettre une candidature. & H \\
+    US-C-03 & En tant que candidat, je veux consulter les offres d'emploi et soumettre une candidature afin de postuler aux postes qui m'intéressent. & Must & 3 & 1 \\
     \hline
-    BF-C-04 & Recevoir des recommandations d'offres personnalisées fondées sur le profil et les compétences détectés dans le CV. & H \\
+    US-C-04 & En tant que candidat, je veux recevoir des recommandations d'offres personnalisées afin de trouver les postes adaptés à mon profil. & Must & 5 & 1 \\
     \hline
-    BF-C-05 & Passer un quiz de présélection associé à une offre avant d'accéder à l'entretien. & H \\
+    US-C-05 & En tant que candidat, je veux passer un quiz de présélection associé à une offre afin d'accéder à l'entretien. & Must & 5 & 1 \\
     \hline
-    BF-C-06 & Planifier un entretien via le module de planification (\textit{scheduling}) intégré au calendrier. & H \\
+    US-C-06 & En tant que candidat, je veux planifier mon entretien via le calendrier intégré afin de choisir un créneau adapté. & Must & 5 & 2 \\
     \hline
-    BF-C-07 & Effectuer une vérification d'identité faciale avant le début de l'entretien. & H \\
+    US-C-07 & En tant que candidat, je veux effectuer une vérification d'identité faciale avant l'entretien afin d'en garantir l'intégrité. & Must & 5 & 4 \\
     \hline
-    BF-C-08 & Participer à un entretien en direct avec l'agent IA (avatar 3D parlant) au sein d'une salle d'appel sécurisée. & H \\
+    US-C-08 & En tant que candidat, je veux passer un entretien en direct avec l'agent IA (avatar 3D parlant) dans une salle sécurisée afin de démontrer mes compétences. & Must & 13 & 3 \\
     \hline
-    BF-C-09 & Consulter son score, la transcription et le rapport post-entretien généré par l'IA. & H \\
+    US-C-09 & En tant que candidat, je veux consulter mon score, ma transcription et mon rapport post-entretien afin de connaître ma performance. & Must & 8 & 5 \\
     \hline
-    BF-C-10 & Échanger avec le recruteur via la messagerie en temps réel intégrée à la plateforme. & M \\
+    US-C-10 & En tant que candidat, je veux échanger avec le recruteur via la messagerie temps réel afin de communiquer facilement. & Should & 5 & 5 \\
     \hline
-    BF-C-11 & Suivre l'évolution du statut de sa candidature depuis son tableau de bord candidat. & M \\
+    US-C-11 & En tant que candidat, je veux suivre le statut de ma candidature depuis mon tableau de bord afin de rester informé de son avancement. & Should & 3 & 1 \\
     \hline
   \end{tabularx}
-  \caption{Besoins fonctionnels -- acteur Candidat.}
+  \caption{Product backlog --- epic Candidat.}
   \label{tab:bf-candidat}
 \end{table}
 
 \bigskip
-\noindent\textbf{Acteur : Recruteur}
+\noindent\textbf{Epic 2 --- Recruteur}
 
 \begin{table}[H]
   \centering
   \footnotesize
   \renewcommand{\arraystretch}{1.3}
-  \begin{tabularx}{\textwidth}{|p{1.5cm}|X|c|}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.3cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.6cm}|>{\centering\arraybackslash}p{0.9cm}|>{\centering\arraybackslash}p{1.1cm}|}
     \hline
-    \textbf{ID} & \textbf{Description} & \textbf{Priorité} \\
+    \rowcolor{blue!10}
+    \textbf{ID} & \textbf{User story} & \textbf{Priorité} & \textbf{Est.} & \textbf{Sprint} \\
     \hline
-    BF-R-01 & Créer et publier des offres d'emploi via l'assistant de création (\textit{Job Wizard}) guidé par l'IA. & H \\
+    US-R-01 & En tant que recruteur, je veux créer et publier des offres via l'assistant guidé par l'IA (\textit{Job Wizard}) afin de rédiger rapidement des offres structurées. & Must & 5 & 1 \\
     \hline
-    BF-R-02 & Consulter, pour chaque candidature reçue, le quiz de présélection personnalisé généré automatiquement par l'IA et le score obtenu. & H \\
+    US-R-02 & En tant que recruteur, je veux consulter le quiz de présélection et le score de chaque candidature afin d'évaluer objectivement les candidats. & Must & 3 & 1 \\
     \hline
-    BF-R-03 & Consulter la liste des candidatures reçues ainsi que les profils détaillés des candidats. & H \\
+    US-R-03 & En tant que recruteur, je veux consulter la liste des candidatures et les profils détaillés afin d'étudier les candidats. & Must & 3 & 1 \\
     \hline
-    BF-R-04 & Gérer et rejoindre les salles d'entretien en cours depuis le tableau de bord. & H \\
+    US-R-04 & En tant que recruteur, je veux gérer et rejoindre les salles d'entretien en cours afin de suivre les entretiens depuis mon tableau de bord. & Must & 5 & 2 \\
     \hline
-    BF-R-05 & Consulter les résumés exécutifs, transcriptions complètes et scores pondérés générés automatiquement par l'IA. & H \\
+    US-R-05 & En tant que recruteur, je veux consulter les résumés exécutifs, transcriptions et scores pondérés afin de décider sans revoir tout l'entretien. & Must & 8 & 5 \\
     \hline
-    BF-R-06 & Comparer et classer les candidats pour un poste donné à partir du moteur de ranking multicritères. & H \\
+    US-R-06 & En tant que recruteur, je veux comparer et classer les candidats d'un poste via le moteur de \textit{ranking} afin d'identifier les meilleurs profils. & Must & 8 & 5 \\
     \hline
-    BF-R-07 & Consulter les rapports d'intégrité (niveau de risque, événements de fraude, captures d'écran d'anomalies). & H \\
+    US-R-07 & En tant que recruteur, je veux consulter les rapports d'intégrité (risque, fraude, captures d'anomalies) afin de garantir la fiabilité de l'entretien. & Must & 5 & 4 \\
     \hline
-    BF-R-08 & Enregistrer une décision finale (acceptation, refus ou à réexaminer) sur la candidature. & H \\
+    US-R-08 & En tant que recruteur, je veux enregistrer une décision finale (accepter, refuser ou réexaminer) afin de statuer sur la candidature. & Must & 3 & 5 \\
     \hline
-    BF-R-09 & Suivre, par salle d'entretien, des compteurs de session agrégés (sessions totales, terminées, en cours) depuis le tableau de bord. & M \\
+    US-R-09 & En tant que recruteur, je veux suivre des compteurs de session agrégés par salle (totales, terminées, en cours) afin de piloter l'activité d'entretien. & Should & 2 & 4 \\
     \hline
-    BF-R-10 & Gérer le profil de l'entreprise et les départements utilisés par l'assistant de création d'offres. & B \\
+    US-R-10 & En tant que recruteur, je veux gérer le profil de mon entreprise et ses départements afin d'alimenter l'assistant de création d'offres. & Could & 3 & 5 \\
     \hline
   \end{tabularx}
-  \caption{Besoins fonctionnels -- acteur Recruteur.}
+  \caption{Product backlog --- epic Recruteur.}
   \label{tab:bf-recruteur}
 \end{table}
 
 \bigskip
-\noindent\textbf{Acteur : Administrateur}
+\noindent\textbf{Epic 3 --- Administrateur}
 
 \begin{table}[H]
   \centering
   \footnotesize
   \renewcommand{\arraystretch}{1.3}
-  \begin{tabularx}{\textwidth}{|p{1.5cm}|X|c|}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.3cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.6cm}|>{\centering\arraybackslash}p{0.9cm}|>{\centering\arraybackslash}p{1.1cm}|}
     \hline
-    \textbf{ID} & \textbf{Description} & \textbf{Priorité} \\
+    \rowcolor{blue!10}
+    \textbf{ID} & \textbf{User story} & \textbf{Priorité} & \textbf{Est.} & \textbf{Sprint} \\
     \hline
-    BF-A-01 & Accéder au tableau de bord d'administration et consulter les statistiques globales de la plateforme. & H \\
+    US-A-01 & En tant qu'administrateur, je veux accéder au tableau de bord d'administration et aux statistiques globales afin de superviser l'activité de la plateforme. & Must & 5 & 5 \\
     \hline
-    BF-A-02 & Superviser l'ensemble des entités du système : utilisateurs, entreprises, offres, candidatures et entretiens. & H \\
+    US-A-02 & En tant qu'administrateur, je veux superviser l'ensemble des entités (utilisateurs, entreprises, offres, candidatures, entretiens) afin d'assurer la gouvernance du système. & Must & 5 & 5 \\
     \hline
   \end{tabularx}
-  \caption{Besoins fonctionnels -- acteur Administrateur.}
+  \caption{Product backlog --- epic Administrateur.}
   \label{tab:bf-admin}
 \end{table}
 
@@ -766,7 +793,7 @@ InsightFace~\cite{deng2019}, avec le pack de modèles \texttt{buffalo\_l}, calcu
 
 \subsubsection{Py-Feat et RoBERTa : émotion faciale et sentiment vocal}
 
-Le service d'analyse post-entretien intègre deux modules complémentaires. Py-Feat~\cite{jolly2022} applique des modèles entraînés sur AffectNet pour prédire, trame par trame, les sept émotions de base du FACS (\textit{Facial Action Coding System}) ; en l'absence de PyTorch, le service bascule automatiquement sur DeepFace. L'analyse du sentiment de la transcription est assurée par \texttt{cardiffnlp/twitter-roberta-base-sentiment-latest}, un \textit{transformer} RoBERTa qui produit un score de tonalité (positif / neutre / négatif). Ces deux résultats sont exposés au recruteur dans la \textit{behavioral timeline} du rapport, à titre indicatif uniquement.
+Le service d'analyse post-entretien intègre deux modules complémentaires. Py-Feat~\cite{jolly2022} applique des modèles entraînés sur AffectNet pour prédire, trame par trame, les sept émotions de base du FACS (\textit{Facial Action Coding System}) ; en l'absence de PyTorch, le service bascule automatiquement sur DeepFace. L'analyse du sentiment de la transcription est assurée par \texttt{cardiffnlp/\allowbreak twitter-roberta-base-\allowbreak sentiment-latest}, un \textit{transformer} RoBERTa qui produit un score de tonalité (positif / neutre / négatif). Ces deux résultats sont exposés au recruteur dans la \textit{behavioral timeline} du rapport, à titre indicatif uniquement.
 
 \logofig{images/pyfeat.png}{Logo de Py-Feat.}{fig:pyfeat}
 
@@ -809,4 +836,4 @@ La communication temps réel entre le \textit{front-end} et les services Python 
 
 \section{Conclusion}
 
-Ce chapitre a constitué le cœur analytique et conceptuel de notre travail. Nous avons d'abord dressé un panorama de l'état de l'art du recrutement assisté par l'IA, du traitement de la parole et de la vision par ordinateur, qui a justifié la pile technologique retenue : Groq et Mistral AI pour l'inférence LLM, Faster-Whisper pour la transcription, EdgeTTS pour la synthèse vocale, FAISS et Sentence-Transformers pour la recommandation, InsightFace, MediaPipe et YOLOv8 pour la surveillance, et React/Three.js pour l'interface. Nous avons ensuite formalisé les besoins fonctionnels et non-fonctionnels, détaillé l'architecture micro-services de NextHire et sa modélisation UML (cas d'utilisation et classes). Les chapitres suivants présentent la mise en œuvre concrète de cette conception, sprint par sprint, accompagnée des diagrammes de séquence et des tests correspondants.
+Ce chapitre de cadrage et de conception (Sprint~0) a posé l'ensemble des fondations du projet. Nous avons d'abord situé le travail dans son contexte~: l'entreprise d'accueil, la problématique du recrutement assisté par l'IA, l'étude de l'existant, la solution proposée, puis la méthodologie Agile Scrum et le découpage en cinq sprints. Nous avons ensuite dressé un panorama de l'état de l'art du recrutement assisté par l'IA, du traitement de la parole et de la vision par ordinateur, qui a justifié la pile technologique retenue : Groq et Mistral AI pour l'inférence LLM, Faster-Whisper pour la transcription, EdgeTTS pour la synthèse vocale, FAISS et Sentence-Transformers pour la recommandation, InsightFace, MediaPipe et YOLOv8 pour la surveillance, et React/Three.js pour l'interface. Nous avons enfin formalisé les besoins fonctionnels et non-fonctionnels, détaillé l'architecture micro-services de NextHire et sa modélisation UML (cas d'utilisation et classes). Les chapitres suivants présentent la mise en œuvre concrète de cette conception, sprint par sprint, accompagnée des diagrammes de séquence et des tests correspondants.

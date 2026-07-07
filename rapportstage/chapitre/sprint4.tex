@@ -29,30 +29,38 @@ L'objectif principal de ce sprint est défini comme suit~:
 
 \subsection{Backlog du sprint}
 
-Le tableau~\ref{tab:backlog-s4} présente le backlog du Sprint~4.
+Le tableau~\ref{tab:backlog-s4} présente le backlog du Sprint~4, composé des récits utilisateurs et des tâches techniques retenus pour cet incrément. Comme pour le \textit{product backlog}, chaque élément est priorisé selon la méthode \textbf{MoSCoW} (\textbf{Must}, \textbf{Should}, \textbf{Could}) et estimé en \textit{story points} sur la suite de Fibonacci (1, 2, 3, 5, 8, 13), soit un engagement de 51~points pour ce sprint.
 
 \begin{table}[H]
   \centering
   \footnotesize
   \renewcommand{\arraystretch}{1.3}
   \setlength{\tabcolsep}{5pt}
-  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.1cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.8cm}|}
+  \begin{tabularx}{\textwidth}{|>{\centering\arraybackslash}p{1.1cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.7cm}|>{\centering\arraybackslash}p{0.9cm}|}
     \hline
     \rowcolor{blue!10}
-    \textbf{ID} & \textbf{Récit utilisateur} & \textbf{Priorité} \\
+    \textbf{ID} & \textbf{Récit utilisateur / tâche} & \textbf{Priorité} & \textbf{Est.} \\
     \hline
-    S1 & En tant que recruteur, je veux être alerté si un autre visage ou une autre personne apparaît pendant l'entretien. & Haute \\
+    T-08 & Implémenter le détecteur d'intégrité multicouche~: analyse côté client (MediaPipe), vérification faciale (InsightFace) et détection d'objets (YOLOv8n). & Must & 13 \\
     \hline
-    S2 & En tant que recruteur, je veux détecter la présence d'objets interdits (téléphone, écran, notes). & Haute \\
+    T-09 & Fiabiliser et stabiliser la salle d'entretien et l'ensemble des micro-services (correctifs et mises à jour). & Must & 5 \\
     \hline
-    S3 & En tant que recruteur, je veux vérifier en continu que le candidat est bien la personne enrôlée. & Haute \\
+    S1 & En tant que recruteur, je veux être alerté si un autre visage ou une autre personne apparaît pendant l'entretien. & Must & 5 \\
     \hline
-    S4 & En tant que candidat, je veux passer un contrôle préalable (caméra, microphone, identité) avant d'entrer en entretien. & Haute \\
+    S2 & En tant que recruteur, je veux détecter la présence d'objets interdits (téléphone, écran, notes). & Must & 5 \\
     \hline
-    S5 & En tant que recruteur, je veux consulter un rapport d'intégrité horodaté à l'issue de l'entretien. & Haute \\
+    S3 & En tant que recruteur, je veux vérifier en continu que le candidat est bien la personne enrôlée. & Must & 8 \\
+    \hline
+    S4 & En tant que candidat, je veux passer un contrôle préalable (caméra, microphone, identité) avant d'entrer en entretien. & Must & 5 \\
+    \hline
+    S5 & En tant que recruteur, je veux consulter un rapport d'intégrité horodaté à l'issue de l'entretien. & Must & 5 \\
+    \hline
+    S6 & En tant que candidat, je veux que l'accès à l'entretien soit refusé si mon identité ne peut être confirmée (vérification faciale \textit{fail-closed}). & Should & 3 \\
+    \hline
+    S7 & En tant que recruteur, je veux suivre des compteurs de session agrégés par salle (totales, terminées, en cours) afin de piloter l'activité d'entretien. & Should & 2 \\
     \hline
   \end{tabularx}
-  \caption{Backlog du Sprint~4 : Surveillance d'intégrité.}
+  \caption{Backlog du Sprint~4 : surveillance d'intégrité et consolidation.}
   \label{tab:backlog-s4}
 \end{table}
 
@@ -76,11 +84,11 @@ les traitent en mémoire sans jamais les persister :
 \begin{itemize}
   \item \textbf{Analyse côté client (React).} Le composant \texttt{VisionMonitor} exécute
         directement dans le navigateur le modèle \textit{MediaPipe Face Landmarker}
-        (bibliothèque \texttt{@mediapipe/tasks-vision}) à une cadence de 5~images/s. Il assure
+        (bibliothèque \texttt{@mediapipe/\allowbreak tasks-vision}) à une cadence de 5~images/s. Il assure
         la détection du visage, le contrôle de présence, de centrage, de distance, de
         l'éclairage et de l'attention, sans transmettre la vidéo au serveur.
   \item \textbf{Service de vérification d'identité (Python / Flask).} Le service
-        \texttt{face\_verification\_service} encapsule le modèle \textit{InsightFace}
+        \texttt{face\_\allowbreak verification\_\allowbreak service} encapsule le modèle \textit{InsightFace}
         (\texttt{buffalo\_l}) via ONNXRuntime pour la confrontation d'identité 1:1.
   \item \textbf{Service de détection d'objets (Python / FastAPI).} Le service
         \texttt{yolo-service} encapsule le modèle \textit{YOLOv8n} pour la détection d'objets
@@ -282,8 +290,8 @@ pour détecter en temps réel tout comportement suspect.
 
 Le \texttt{VisionMonitor} client s'appuie sur \textit{MediaPipe Face Landmarker} pour
 localiser le visage du candidat sur chaque trame. L'absence prolongée de visage déclenche une
-violation \texttt{NO\_FACE\_DETECTED}, tandis que la détection de plusieurs visages déclenche
-\texttt{MULTIPLE\_FACES\_DETECTED}. En parallèle, la vérification d'identité continue est
+violation \texttt{NO\_\allowbreak FACE\_\allowbreak DETECTED}, tandis que la détection de plusieurs visages déclenche
+\texttt{MULTIPLE\_\allowbreak FACES\_\allowbreak DETECTED}. En parallèle, la vérification d'identité continue est
 confiée au service \textit{InsightFace} : pour chaque trame contrôlée, le service calcule
 un \textit{embedding} facial normalisé de 512 dimensions et le compare, par similarité
 cosinus, à l'\textit{embedding} de référence enregistré lors de l'inscription. Une similarité
@@ -371,7 +379,7 @@ bloque l'accès à la salle d'entretien plutôt que de le laisser passer.
 \begin{itemize}
   \item \textbf{Service indisponible.} Si le micro-service de vérification faciale ne répond
         pas, la décision de démarrage est refusée (\texttt{status: 'failed',
-        reason: 'face\_verification\_disabled'}).
+        reason: 'face\_\allowbreak verification\_\allowbreak disabled'}).
   \item \textbf{Candidat non enrôlé.} Si aucun profil facial n'a été préalablement enregistré
         pour le candidat, l'accès est bloqué et un événement d'audit
         \texttt{NOT\_ENROLLED} est enregistré.
@@ -405,4 +413,4 @@ est atteint, et toute configuration ambiguë conduit à un refus plutôt qu'à u
 
 \section{Conclusion}
 
-Ce sprint a fiabilisé la salle d'entretien en la dotant d'une surveillance d'intégrité multicouche et d'une vérification d'identité \textit{fail-closed}, sans jamais exposer les images brutes du candidat. Le sprint suivant complète la plateforme par l'aide à la décision (rapports pondérés, comparaison des candidats), le tableau de bord administrateur et la phase de finalisation.
+Ce sprint a fiabilisé la salle d'entretien en la dotant d'une surveillance d'intégrité multicouche et d'une vérification d'identité \textit{fail-closed}, sans jamais exposer les images brutes du candidat. La revue de sprint a démontré la détection en conditions réelles (second visage, téléphone, perte d'attention)~; la rétrospective s'est concentrée sur la maîtrise des faux positifs, traitée par le croisement des couches de détection et l'ajustement des seuils de confirmation, un enseignement réinvesti dans le réglage du rapport d'intégrité. Le sprint suivant complète la plateforme par l'aide à la décision (rapports pondérés, comparaison des candidats), le tableau de bord administrateur et la phase de finalisation.
