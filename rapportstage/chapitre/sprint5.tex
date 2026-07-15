@@ -686,6 +686,277 @@ tableau~\ref{tab:analysis-coverage} présente la couverture des modules les plus
   \label{tab:analysis-coverage}
 \end{table}
 
+\section{Benchmarks et justification des choix de modèles d'IA}
+
+NextHire repose sur quatre briques d'intelligence artificielle~: l'OCR, qui extrait le texte des
+CV téléversés~; la reconnaissance vocale (STT), qui transcrit les réponses du candidat en direct~;
+la synthèse vocale (TTS), qui donne une voix à l'avatar~; et le LLM, qui conduit l'entretien puis
+analyse la session. Chacune de ces briques admet plusieurs implémentations libres ou gratuites, aux
+compromis très différents. Retenir les outils les plus répandus par défaut aurait été un choix par
+habitude et non par ingénierie~: nous avons donc mesuré, pour chaque brique, plusieurs candidats
+concurrents sur nos propres données et dans les conditions d'exécution réelles de la plateforme.
+Cette section présente le protocole de mesure, les résultats comparatifs et la justification de
+chaque décision.
+
+\subsection{Protocole de mesure et métriques}
+
+Toutes les mesures ont été conduites sur la machine de développement (CPU uniquement, sans GPU
+disponible), dans le même environnement que les relevés de latence présentés plus haut. Le
+protocole obéit à trois règles destinées à garantir l'équité de la comparaison~: chaque candidat
+d'une même famille reçoit \textbf{exactement les mêmes entrées} (mêmes CV, même clip audio, mêmes
+\textit{prompts})~; les sorties sont confrontées à une \textbf{vérité terrain} établie une seule
+fois, indépendamment des modèles évalués~; et les modèles sont exécutés dans leur
+\textbf{configuration de production}, sans réglage favorable à l'un d'eux. Les mesures de temps
+sont relevées après une exécution de chauffe, afin d'exclure le coût de chargement initial des
+poids. Le tableau~\ref{tab:bench-metrics} définit les métriques employées.
+
+\begin{table}[H]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.25}
+  \setlength{\tabcolsep}{6pt}
+  \begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{1.8cm}|>{\raggedright\arraybackslash}X|>{\centering\arraybackslash}p{1.3cm}|}
+    \hline
+    \rowcolor{blue!10}
+    \textbf{Métrique} & \textbf{Définition} & \textbf{Sens} \\
+    \hline
+    WER & \textit{Word Error Rate} --- taux d'erreur au niveau du mot~: somme des substitutions, insertions et suppressions rapportée au nombre de mots de la référence. & $\downarrow$ \\ \hline
+    CER & \textit{Character Error Rate} --- même principe appliqué au caractère. Plus sévère que le WER, il révèle les restitutions partielles (accents, chiffres, ponctuation). & $\downarrow$ \\ \hline
+    Accuracy & Proportion du contenu du document effectivement restitué et exploitable en aval. & $\uparrow$ \\ \hline
+    Temps & Durée de traitement bout en bout d'un document ou d'un énoncé. & $\downarrow$ \\ \hline
+    RTF & \textit{Real-Time Factor} --- rapport entre le temps de traitement et la durée de l'audio. Un RTF inférieur à~1 signifie que le modèle traite l'audio plus vite qu'il n'est produit, condition nécessaire au temps réel. & $\downarrow$ \\ \hline
+    RMS & \textit{Root Mean Square} --- niveau moyen du signal audio synthétisé. Indicateur de contrôle~: il atteste que la sortie est bien formée et normalisée, sans constituer un critère de qualité. & --- \\ \hline
+    Score & Note globale sur~10 agrégeant la pertinence, le naturel et la fiabilité des réponses du LLM. & $\uparrow$ \\ \hline
+    Hallucination & Note sur~10 quantifiant les affirmations non étayées par le contexte fourni au modèle. & $\downarrow$ \\ \hline
+  \end{tabularx}
+  \caption{Métriques employées pour l'évaluation comparative des modèles.}
+  \label{tab:bench-metrics}
+\end{table}
+
+Aucune de ces métriques ne décide seule~: chaque brique est gouvernée par une contrainte
+dominante différente. L'OCR s'exécute hors ligne, au téléversement du CV, et privilégie donc la
+fidélité d'extraction sous une contrainte de temps souple. Le STT et le TTS s'insèrent dans la
+boucle conversationnelle et sont soumis au temps réel. Le LLM, enfin, occupe deux rôles distincts
+dont les exigences s'opposent, ce qui conduira à retenir deux modèles plutôt qu'un.
+
+\subsection{OCR --- extraction du texte des CV}
+
+Trois moteurs OCR libres ont été confrontés sur un corpus de CV réels comportant des documents
+bruités (numérisations inclinées, PDF image, mises en page multi-colonnes), représentatifs de ce
+que reçoit la plateforme. Le tableau~\ref{tab:bench-ocr} en présente les résultats.
+
+\begin{table}[H]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.3}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{2.1cm}|>{\centering\arraybackslash}p{1.6cm}|>{\centering\arraybackslash}p{1.5cm}|>{\centering\arraybackslash}p{1.5cm}|>{\centering\arraybackslash}p{1.9cm}|>{\raggedright\arraybackslash}X|}
+    \hline
+    \rowcolor{blue!10}
+    \textbf{Modèle} & \textbf{Temps} & \textbf{WER} $\downarrow$ & \textbf{CER} $\downarrow$ & \textbf{Accuracy} $\uparrow$ & \textbf{Verdict} \\
+    \hline
+    Tesseract & 3,6~s & 0,00 & 0,45 & 0,60 & $\times$ Accuracy trompeuse \\ \hline
+    EasyOCR & 75--90~s & 0,45--0,50 & 0,55--0,60 & 0,30--0,35 & $\times$ Trop lent \\ \hline
+    \rowcolor{green!8}
+    \textbf{PaddleOCR} & \textbf{9--12~s} & \textbf{0,35--0,45} & \textbf{0,52--0,58} & \textbf{0,80} & $\checkmark$ \textbf{Retenu} \\ \hline
+  \end{tabularx}
+  \caption{Comparaison des moteurs OCR pour l'extraction du texte des CV.}
+  \label{tab:bench-ocr}
+\end{table}
+
+Le cas de Tesseract mérite une lecture attentive, car il illustre le danger d'une métrique isolée.
+Son WER nul semble parfait, mais il coexiste avec un CER de~0,45~: annoncer qu'aucun mot n'est
+erroné alors que près d'un caractère sur deux l'est constitue une contradiction interne. Ce couple
+de valeurs ne traduit pas une extraction fidèle mais un artefact de mesure~: sur les documents
+bruités, Tesseract ne restitue qu'une fraction du texte, et le WER, calculé sur le peu de contenu
+effectivement produit, en devient flatteur. L'accuracy de~0,60 confirme cette lecture --- deux
+cinquièmes du document sont perdus. EasyOCR, à l'inverse, échoue sur un critère sans ambiguïté~:
+75 à~90~secondes par CV rendraient le téléversement inutilisable, pour une accuracy inférieure de
+moitié à celle de PaddleOCR.
+
+\paragraph{Pourquoi PaddleOCR~?}
+\begin{itemize}
+  \item \textbf{Huit fois plus rapide qu'EasyOCR} (9--12~s contre 75--90~s), ce qui maintient le téléversement d'un CV dans une durée acceptable pour l'utilisateur~;
+  \item \textbf{meilleure fiabilité sur documents bruités}, avec une accuracy de~0,80 --- la seule des trois à dépasser le seuil rendant l'extraction exploitable par le classifieur scikit-learn en aval~;
+  \item \textbf{cohérence entre ses métriques}~: contrairement à Tesseract, ses WER et CER concordent, signe que le texte est restitué dans son ensemble et non par fragments.
+\end{itemize}
+
+\subsection{STT --- transcription en direct de l'entretien}
+
+La transcription conditionne toute la boucle conversationnelle~: elle est la première étape du
+tour de parole et son coût se répercute intégralement sur la latence perçue. Trois moteurs ont été
+évalués sur un clip de référence dont la transcription exacte était connue
+(tableau~\ref{tab:bench-stt}).
+
+\begin{table}[H]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.3}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{2.6cm}|>{\centering\arraybackslash}p{1.5cm}|>{\centering\arraybackslash}p{1.5cm}|>{\centering\arraybackslash}p{1.5cm}|>{\centering\arraybackslash}p{1.3cm}|>{\raggedright\arraybackslash}X|}
+    \hline
+    \rowcolor{blue!10}
+    \textbf{Modèle} & \textbf{WER} $\downarrow$ & \textbf{CER} $\downarrow$ & \textbf{Temps} $\downarrow$ & \textbf{RTF} $\downarrow$ & \textbf{Verdict} \\
+    \hline
+    \rowcolor{green!8}
+    \textbf{Faster-Whisper} & \textbf{0,028} & \textbf{0,004} & \textbf{1,55} & \textbf{0,44} & $\checkmark$ \textbf{Retenu} \\ \hline
+    Vosk & 0,209 & 0,037 & 0,94 & 0,27 & $\times$ WER trop élevé \\ \hline
+    Whisper & 0,006 & 0,001 & 1,33 & 0,38 & Plus précis mais trop lourd \\ \hline
+  \end{tabularx}
+  \caption{Comparaison des moteurs de reconnaissance vocale (STT).}
+  \label{tab:bench-stt}
+\end{table}
+
+Ce comparatif oppose deux tentations symétriques. Vosk est le plus rapide (RTF de~0,27) mais son
+WER de~0,209 signifie qu'environ un mot sur cinq est erroné~: comme la transcription alimente
+directement le LLM chargé d'évaluer la réponse, une telle dégradation se propagerait à la notation
+du candidat, ce qui est rédhibitoire pour un outil de recrutement. Whisper, à l'opposé, atteint la
+meilleure précision (WER de~0,006) mais au prix d'une empreinte mémoire et d'un coût de calcul que
+notre cible de déploiement ne peut absorber pour des sessions concurrentes.
+
+\paragraph{Pourquoi Faster-Whisper~?}
+\begin{itemize}
+  \item \textbf{Précision quasi identique à Whisper} (WER de~0,028 contre~0,006)~: l'écart, de l'ordre de deux mots sur mille, est sans effet observable sur l'évaluation produite par le LLM~;
+  \item \textbf{beaucoup plus léger}, grâce à la réimplémentation CTranslate2 et à la quantification \texttt{int8}, avec un RTF de~0,44 --- inférieur à~0,5 et donc compatible avec le temps réel~;
+  \item \textbf{WER sept fois plus faible que Vosk} pour un RTF qui reste dans le budget temps réel~: le gain de vitesse de Vosk ne compensait pas la perte de fidélité.
+\end{itemize}
+
+\subsection{TTS --- la voix de l'avatar}
+
+La synthèse vocale conditionne la crédibilité de l'avatar~: une voix robotique dégrade
+l'expérience du candidat et compromet la synchronisation labiale. La qualité d'une voix étant
+partiellement subjective, elle a été objectivée par un test d'intelligibilité~: chaque énoncé
+synthétisé a été re-transcrit automatiquement, puis comparé au texte d'origine. Le WER de la
+colonne correspondante mesure donc la \textbf{fidélité de restitution de la voix}, et non une
+erreur de transcription (tableau~\ref{tab:bench-tts}).
+
+\begin{table}[H]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.3}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{2.1cm}|>{\centering\arraybackslash}p{1.5cm}|>{\centering\arraybackslash}p{1.3cm}|>{\centering\arraybackslash}p{1.5cm}|>{\centering\arraybackslash}p{1.5cm}|>{\raggedright\arraybackslash}X|}
+    \hline
+    \rowcolor{blue!10}
+    \textbf{Modèle} & \textbf{Temps} $\downarrow$ & \textbf{RTF} $\downarrow$ & \textbf{RMS} & \textbf{WER} $\downarrow$ & \textbf{Verdict} \\
+    \hline
+    \rowcolor{green!8}
+    \textbf{Edge TTS} & \textbf{1,24} & \textbf{0,35} & \textbf{0,059} & \textbf{0,199} & $\checkmark$ \textbf{Retenu} \\ \hline
+    gTTS & 0,76 & 0,21 & 0,080 & 0,215 & Correct, moins naturel \\ \hline
+    pyttsx3 & 0,16 & 0,05 & 0,070 & 0,691 & $\times$ Qualité faible \\ \hline
+  \end{tabularx}
+  \caption{Comparaison des moteurs de synthèse vocale (TTS).}
+  \label{tab:bench-tts}
+\end{table}
+
+Le résultat de pyttsx3 démontre l'intérêt du test d'intelligibilité. C'est de loin le plus rapide
+(0,16~s, RTF de~0,05) car il s'appuie sur la synthèse locale du système d'exploitation, mais son
+WER de~0,691 révèle qu'une voix synthétique n'est pas seulement moins agréable~: elle devient
+littéralement moins compréhensible. gTTS constitue une solution correcte, dont le WER de~0,215
+reste proche d'Edge TTS, mais sa restitution monolithique --- le fichier audio n'est disponible
+qu'une fois entièrement généré --- interdit le rendu progressif dont dépend l'avatar. Les valeurs
+de RMS, comprises entre~0,059 et~0,080, confirment que les trois moteurs produisent un signal
+correctement normalisé~; ce critère ne départage donc pas les candidats.
+
+\paragraph{Pourquoi Edge TTS~?}
+\begin{itemize}
+  \item \textbf{Voix neuronale naturelle} assortie du WER le plus faible du comparatif (0,199), soit la meilleure intelligibilité mesurée~;
+  \item \textbf{diffusion en flux} (\textit{streaming})~: l'audio est transmis par fragments dès les premiers octets, ce qui permet la synchronisation labiale fluide de l'avatar react-three-fiber et masque une partie de la latence de synthèse~;
+  \item \textbf{gratuit et sans clé d'API}, ce qui supprime une dépendance contractuelle et un coût récurrent sur un composant sollicité à chaque tour de parole~;
+  \item son RTF de~0,35 reste largement sous le seuil du temps réel, rendant son surcoût de vitesse face à pyttsx3 sans conséquence perceptible.
+\end{itemize}
+
+\subsection{LLM --- moteur d'entretien et analyse post-entretien}
+
+Le LLM est la brique la plus déterminante, et la seule à occuper \textbf{deux rôles aux exigences
+opposées}. En entretien, le modèle doit évaluer la réponse et formuler la question suivante pendant
+que le candidat attend~: la latence y est une contrainte de premier ordre. En analyse
+post-entretien, le modèle produit le rapport qui fondera une décision de recrutement, hors de toute
+contrainte de temps~: la fiabilité prime. Trois modèles ont été évalués sur un jeu de
+\textit{prompts} représentatif des deux usages (tableau~\ref{tab:bench-llm}).
+
+\begin{table}[H]
+  \centering
+  \scriptsize
+  \renewcommand{\arraystretch}{1.3}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{2.5cm}|>{\centering\arraybackslash}p{1.2cm}|>{\centering\arraybackslash}p{1.4cm}|>{\centering\arraybackslash}p{1.3cm}|>{\centering\arraybackslash}p{1.3cm}|>{\centering\arraybackslash}p{1.4cm}|>{\raggedright\arraybackslash}X|}
+    \hline
+    \rowcolor{blue!10}
+    \textbf{Modèle} & \textbf{Score} $\uparrow$ & \textbf{Latence} $\downarrow$ & \textbf{Pertin.} $\uparrow$ & \textbf{Naturel} $\uparrow$ & \textbf{Halluc.} $\downarrow$ & \textbf{Verdict} \\
+    \hline
+    \rowcolor{green!8}
+    \textbf{llama-3.3-\allowbreak 70b} & \textbf{7,834} & 0,63 & 8,82 & 8,32 & \textbf{1,4} & $\checkmark$ \textbf{Retenu} --- analyse \\ \hline
+    \rowcolor{green!8}
+    \textbf{gpt-oss-120b} & 7,481 & \textbf{0,52} & 8,50 & 8,10 & 3,4 & $\checkmark$ \textbf{Retenu} --- direct \\ \hline
+    gpt-oss-20b & 7,308 & 0,71 & 8,98 & 8,34 & 8,6 & $\times$ Hallucination élevée \\ \hline
+  \end{tabularx}
+  \caption{Comparaison des LLM pour la conduite d'entretien et l'analyse post-entretien.}
+  \label{tab:bench-llm}
+\end{table}
+
+Le cas de gpt-oss-20b est le plus instructif du benchmark~: il obtient \textbf{les meilleures notes
+de pertinence (8,98) et de naturel (8,34)} de tout le comparatif, tout en étant écarté. Ses
+réponses sont en effet les plus convaincantes en apparence, mais son taux d'hallucination de~8,6
+signifie qu'elles inventent massivement des faits absents du contexte --- compétences non
+mentionnées, expériences reconstituées. Dans un outil de recrutement, un modèle éloquent qui
+fabule est plus dangereux qu'un modèle terne~: ses inventions sont précisément celles qu'un
+recruteur relira sans les soupçonner. Sa latence pourtant correcte (0,71~s) ne pouvait donc pas le
+sauver, et son score global (7,308) traduit ce compromis défavorable.
+
+Les deux modèles restants n'étant départagés par aucun critère unique --- llama-3.3-70b domine sur
+la fiabilité, gpt-oss-120b sur la latence --- nous avons retenu une \textbf{affectation par rôle}
+plutôt qu'un compromis unique, ce qui explique la coexistence de deux fournisseurs d'inférence dans
+l'architecture (Groq et NVIDIA NIM).
+
+\paragraph{Entretien en direct $\rightarrow$ gpt-oss-120b (via Groq).}
+\begin{itemize}
+  \item \textbf{Latence la plus basse} (0,52~s), critère décisif dès lors que le candidat attend la question suivante en temps réel~;
+  \item \textbf{sorties JSON structurées et fiables}, qui permettent de fusionner l'évaluation de la réponse et la génération de la question suivante en un unique appel~;
+  \item \textbf{hallucination acceptable dans ce contexte} (3,4)~: en entretien, le modèle formule des questions à partir d'un contexte fourni et ne produit aucun jugement définitif~; le risque est donc borné, contrairement à la phase d'analyse.
+\end{itemize}
+
+\paragraph{Analyse post-entretien $\rightarrow$ llama-3.3-70b (via NVIDIA NIM).}
+\begin{itemize}
+  \item \textbf{Meilleur score global} du comparatif (7,834)~;
+  \item \textbf{hallucination la plus faible} (1,4), soit six fois moins que gpt-oss-20b~: le rapport post-entretien engageant une décision de recrutement, chaque affirmation doit être étayée par la transcription~;
+  \item \textbf{aucune contrainte de temps réel}~: l'analyse s'exécute en tâche de fond via un \textit{worker}, ce qui rend son surcoût de latence (0,63~s contre~0,52~s) sans importance et permet de faire primer la fiabilité.
+\end{itemize}
+
+\subsection{Synthèse des modèles retenus}
+
+Le tableau~\ref{tab:bench-summary} récapitule les quatre décisions et le critère qui a emporté
+chacune d'elles. Un enseignement transversal s'en dégage~: dans les quatre cas, le modèle retenu
+n'est jamais celui qui domine sur la métrique la plus visible. PaddleOCR n'a pas le meilleur WER,
+Faster-Whisper n'a pas la meilleure précision, Edge TTS n'est pas le plus rapide et gpt-oss-120b
+n'a pas le meilleur score global. Chaque choix résulte du \textbf{croisement d'au moins deux
+métriques avec la contrainte dominante de la brique concernée} --- démarche que le contre-exemple
+de Tesseract, dont le WER parfait masquait une extraction lacunaire, justifie à lui seul.
+
+\begin{table}[H]
+  \centering
+  \footnotesize
+  \renewcommand{\arraystretch}{1.3}
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{|>{\raggedright\arraybackslash}p{1.5cm}|>{\raggedright\arraybackslash}p{2.9cm}|>{\raggedright\arraybackslash}X|>{\raggedright\arraybackslash}p{3.0cm}|}
+    \hline
+    \rowcolor{blue!10}
+    \textbf{Brique} & \textbf{Modèle retenu} & \textbf{Critère décisif} & \textbf{Écartés} \\
+    \hline
+    OCR & PaddleOCR & Seul à concilier une accuracy exploitable (0,80) et un temps compatible avec le téléversement & Tesseract (accuracy trompeuse), EasyOCR (trop lent) \\ \hline
+    STT & Faster-Whisper & Précision quasi égale à Whisper pour un RTF de~0,44 compatible temps réel & Vosk (WER de~0,209), Whisper (trop lourd) \\ \hline
+    TTS & Edge TTS & Meilleure intelligibilité (WER de~0,199) et diffusion en flux pour la synchronisation labiale & gTTS (pas de flux), pyttsx3 (WER de~0,691) \\ \hline
+    LLM (direct) & \texttt{gpt-oss-120b} (Groq) & Latence la plus basse (0,52~s) sous contrainte temps réel & gpt-oss-20b (hallucination de~8,6) \\ \hline
+    LLM (analyse) & \texttt{llama-3.3-70b} (NVIDIA NIM) & Hallucination la plus faible (1,4), fiabilité prioritaire hors temps réel & gpt-oss-20b (hallucination de~8,6) \\ \hline
+  \end{tabularx}
+  \caption{Synthèse des modèles retenus et du critère décisif de chaque choix.}
+  \label{tab:bench-summary}
+\end{table}
+
+\noindent\textit{Légende des tableaux comparatifs~:} $\downarrow$ une valeur basse est préférable~;
+$\uparrow$ une valeur haute est préférable~; $\checkmark$ modèle retenu~; $\times$ modèle écarté.
+Les lignes surlignées correspondent aux modèles intégrés à la plateforme.
+
 \section{Conclusion}
 
-Ce dernier sprint a complété NextHire par ses fonctionnalités d'aide à la décision, analyse multimodale, comparaison et classement des candidats, revue d'entretien, et par son tableau de bord administrateur, ainsi que par une fonctionnalité premium d'adaptation de CV à l'offre côté candidat, tout en renforçant la sécurité et la conformité RGPD. La suite de tests automatisés (211~vérifications, taux de réussite de 100~\% hors infrastructure) et les mesures de performance valident la faisabilité technique de la solution. La revue de ce dernier sprint, conduite avec nos encadrantes, a validé l'incrément final et clos le \textit{product backlog}~; la rétrospective de clôture a confirmé la pertinence du découpage en cinq sprints, chaque incrément ayant pu être démontré de bout en bout à son terme. La conclusion générale du rapport reviendra sur les apports de la plateforme et ses perspectives d'évolution.
+Ce dernier sprint a complété NextHire par ses fonctionnalités d'aide à la décision, analyse multimodale, comparaison et classement des candidats, revue d'entretien, et par son tableau de bord administrateur, ainsi que par une fonctionnalité premium d'adaptation de CV à l'offre côté candidat, tout en renforçant la sécurité et la conformité RGPD. La suite de tests automatisés (211~vérifications, taux de réussite de 100~\% hors infrastructure) et les mesures de performance valident la faisabilité technique de la solution~; le benchmark comparatif des quatre briques d'IA (OCR, STT, TTS et LLM) documente en outre, chiffres à l'appui, le choix de chaque modèle intégré à la plateforme. La revue de ce dernier sprint, conduite avec nos encadrantes, a validé l'incrément final et clos le \textit{product backlog}~; la rétrospective de clôture a confirmé la pertinence du découpage en cinq sprints, chaque incrément ayant pu être démontré de bout en bout à son terme. La conclusion générale du rapport reviendra sur les apports de la plateforme et ses perspectives d'évolution.

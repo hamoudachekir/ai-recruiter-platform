@@ -248,9 +248,9 @@ L'architecture physique décrit la manière dont les composants de NextHire sont
 L'architecture logique décrit l'organisation interne du système, ses fonctions principales et leurs interactions. La couche web de NextHire (\textit{front-end} React et \textit{back-end} Node.js) s'appuie sur le patron \textbf{Modèle-Vue-Contrôleur} (MVC), qui sépare la représentation des données de la manière dont l'utilisateur interagit avec elles. Cette séparation rend le code plus modulaire, plus facile à maintenir et à tester. La figure~\ref{fig:mvc} en présente le flux d'interaction.
 
 \begin{itemize}
-  \item \textbf{Le Modèle} représente les données et la logique métier de l'application. Il est matérialisé par les schémas Mongoose (\texttt{User}, \texttt{Job}, \texttt{Application}, \texttt{Quiz}, \texttt{JobInterviewRoom}, \texttt{CallRoom}, \texttt{ComparisonReport}, \texttt{Message}) persistés dans MongoDB et constitue la source unique de vérité de l'état de l'application. Il gère et valide les données, sans aucune connaissance directe de l'interface.
-  \item \textbf{La Vue} représente l'interface utilisateur. Assurée par les composants React, elle se limite à présenter les données du modèle à l'utilisateur~; elle contient un minimum de logique et se concentre sur la façon dont les données sont affichées.
-  \item \textbf{Le Contrôleur} fait l'intermédiaire entre le modèle et la vue. Les routeurs et contrôleurs Express du BFF reçoivent les requêtes issues de la vue, appliquent la logique métier, orchestrent au besoin les micro-services d'IA, puis mettent à jour le modèle. Une fois le modèle actualisé, ils renvoient à la vue l'état mis à jour (réponses JSON) afin qu'elle reflète le nouvel état.
+  \item \textbf{Le Modèle} — dans NextHire, il prend la forme des schémas Mongoose (\texttt{User}, \texttt{Job}, \texttt{Application}, \texttt{Quiz}, \texttt{JobInterviewRoom}, \texttt{CallRoom}, \texttt{ComparisonReport}, \texttt{Message}) persistés dans MongoDB. Il porte les données et la logique métier, en valide la cohérence et fait autorité sur l’état de l’application~; il ignore délibérément tout de l’interface qui l’affiche.
+  \item \textbf{La Vue} — elle est assurée par les composants React. Son rôle se borne à restituer à l’utilisateur les données que lui transmet le modèle~; elle embarque le minimum de logique et se concentre sur la seule présentation.
+  \item \textbf{Le Contrôleur} — ce sont les routeurs et contrôleurs Express du BFF. Ils reçoivent les requêtes émises par la vue, appliquent la logique métier, orchestrent au besoin les micro-services d’IA, puis actualisent le modèle avant de lui renvoyer l’état mis à jour sous forme de réponses JSON.
 \end{itemize}
 
 \begin{figure}[H]
@@ -466,7 +466,7 @@ La figure~\ref{fig:usecase} illustre l'ensemble de ces cas d'utilisation.
 
 \begin{figure}[H]
   \noindent\makebox[\textwidth][c]{%
-    \includegraphics[width=1.15\textwidth,keepaspectratio]{diagrams/usecase.JPG}%
+    \includegraphics[width=\textwidth,keepaspectratio]{diagrams/uc_hd.png}%
   }
   \caption{Diagramme de cas d'utilisation de NextHire.}
   \label{fig:usecase}
