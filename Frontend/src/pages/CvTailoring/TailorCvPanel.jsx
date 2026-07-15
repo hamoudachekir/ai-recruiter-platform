@@ -1,4 +1,4 @@
-import { useMemo, useState, useLayoutEffect, useRef } from 'react';
+import { useMemo, useState, useLayoutEffect, useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
 import { tailorCv, exportTailoredPdf } from './cvTailoringApi';
 import { wordDiff, buildChanges, mergeCv } from './cvDiff';
@@ -76,6 +76,7 @@ export default function TailorCvPanel({ jobId = null, onClose = null, embedded =
   const docRef = useRef(null);
   const paneRef = useRef(null);
   const printRef = useRef(null);
+  const jdRef = useRef(null); // job-description textarea — focused on open
   const historyRef = useRef({ past: [], future: [] });
   // Cache of the last server-generated PDF, keyed by (template + merged CV) so
   // "Voir le CV final" / "Télécharger PDF" don't regenerate when nothing changed.
@@ -177,6 +178,19 @@ export default function TailorCvPanel({ jobId = null, onClose = null, embedded =
       mq.removeEventListener?.('change', measure);
     };
   }, [result, previewMode]);
+
+  // On open (panel/modal mount, before any result), drop the caret straight
+  // into the job-description field and scroll it into view so the candidate can
+  // paste immediately.
+  useEffect(() => {
+    if (result) return undefined;
+    const t = setTimeout(() => {
+      jdRef.current?.focus();
+      jdRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const needsJobText = !jobId;
   const canGenerate = Boolean(jobId) || jobText.trim().length > 0;
@@ -297,7 +311,7 @@ export default function TailorCvPanel({ jobId = null, onClose = null, embedded =
           <label className="tailor-jd-label" htmlFor="tailor-jd">
             Description du poste {needsJobText ? '(requis)' : '(optionnel)'}
           </label>
-          <textarea id="tailor-jd" className="tailor-jd-input"
+          <textarea id="tailor-jd" className="tailor-jd-input" ref={jdRef}
             placeholder={needsJobText
               ? 'Collez ici la description du poste visé (LinkedIn, Indeed…) — indispensable ici, aucune offre de page n’est en contexte.'
               : 'Collez ici la description du poste (LinkedIn, Indeed…) pour cibler la reformulation. Sinon, l’offre de cette page est utilisée.'}

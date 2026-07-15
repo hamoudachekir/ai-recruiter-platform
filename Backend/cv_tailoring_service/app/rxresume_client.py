@@ -115,6 +115,13 @@ class RxResumeClient:
 
     def save_pdf(self, content: bytes, candidate_id: str) -> str:
         out_dir = get_settings().tailored_cv_upload_dir
+        if not os.path.isabs(out_dir):
+            # Resolve relative to the service root (…/cv_tailoring_service), NOT
+            # the process CWD. The returned URL is always /uploads/tailored-cvs/…,
+            # which Express serves from Backend/server/uploads/tailored-cvs, so
+            # the file must land there no matter where the service was launched.
+            service_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            out_dir = os.path.abspath(os.path.join(service_root, out_dir))
         os.makedirs(out_dir, exist_ok=True)
         filename = f"tailored-{candidate_id}-{uuid.uuid4().hex[:8]}.pdf"
         with open(os.path.join(out_dir, filename), "wb") as f:

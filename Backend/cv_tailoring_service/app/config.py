@@ -3,7 +3,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load THIS service's own .env explicitly (anchored on the package dir) so the
+# right credentials are used regardless of the process working directory.
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 
 @dataclass(frozen=True)

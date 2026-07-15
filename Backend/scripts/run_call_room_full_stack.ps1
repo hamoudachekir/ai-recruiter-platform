@@ -37,8 +37,8 @@ function Stop-PortProcess {
 }
 
 # Always kill old processes on core ports to ensure new code is loaded
-Write-Host "[INFO] Clearing old processes on ports 3001 5173 8001 8011 8012 8013 8090..."
-foreach ($port in @(3001, 5173, 8001, 8011, 8012, 8013, 8090)) {
+Write-Host "[INFO] Clearing old processes on ports 3001 5173 8001 8011 8012 8013 8014 8090..."
+foreach ($port in @(3001, 5173, 8001, 8011, 8012, 8013, 8014, 8090)) {
     Stop-PortProcess -Port $port
 }
 Start-Sleep -Milliseconds 800
@@ -160,6 +160,21 @@ Start-Process `
     -WindowStyle Minimized | Out-Null
 Write-Host "[STARTED] Face verification service (8011)"
 
+# 7) CV Tailoring service (8014) — FastAPI/uvicorn on the shared .venv.
+#    config.py calls load_dotenv(), so the working directory must be the service
+#    dir for its .env (Groq key, Reactive Resume credentials) to be picked up.
+$cvDir = (Join-Path $repoRoot 'Backend\cv_tailoring_service')
+$cvLogDir = Join-Path $cvDir '.launch-logs'
+if (-not (Test-Path $cvLogDir)) { New-Item -ItemType Directory -Path $cvLogDir | Out-Null }
+$cvOutLog = Join-Path $cvLogDir 'cv-tailoring-8014.out.log'
+$cvErrLog = Join-Path $cvLogDir 'cv-tailoring-8014.err.log'
+$cvCmd = "set PYTHONUTF8=1&& `"$venvPython`" -m uvicorn app.main:app --app-dir `"$cvDir`" --host 127.0.0.1 --port 8014 > `"$cvOutLog`" 2> `"$cvErrLog`""
+Start-Process `
+    -FilePath 'cmd.exe' `
+    -ArgumentList @('/c', 'start', '"CV Tailoring service (8014)"', '/MIN', '/D', "`"$cvDir`"", 'cmd.exe', '/c', $cvCmd) `
+    -WindowStyle Hidden | Out-Null
+Write-Host "[STARTED] CV Tailoring service (8014) -- logs at $cvOutLog"
+
 Write-Host ""
 Write-Host "[INFO] Waiting for health checks..."
 Wait-Health -Name 'Analysis service' -Url 'http://127.0.0.1:8090/health' -TimeoutSec 120
@@ -167,6 +182,7 @@ Wait-Health -Name 'YOLO service'     -Url 'http://127.0.0.1:8001/health' -Timeou
 Wait-Health -Name 'Speech stack'     -Url 'http://127.0.0.1:8012/health' -TimeoutSec 180
 Wait-Health -Name 'Interview agent'  -Url 'http://127.0.0.1:8013/health' -TimeoutSec 180
 Wait-Health -Name 'Face verification'-Url 'http://127.0.0.1:8011/health' -TimeoutSec 60
+Wait-Health -Name 'CV Tailoring'     -Url 'http://127.0.0.1:8014/health' -TimeoutSec 120
 
 Write-Host ""
 Write-Host "[READY] Open these URLs:" -ForegroundColor Green
@@ -177,3 +193,4 @@ Write-Host "  - YOLO health:      http://127.0.0.1:8001/health"
 Write-Host "  - Speech health:    http://127.0.0.1:8012/health"
 Write-Host "  - Agent health:     http://127.0.0.1:8013/health"
 Write-Host "  - Face verify:      http://127.0.0.1:8011/health"
+Write-Host "  - CV Tailoring:     http://127.0.0.1:8014/health"
