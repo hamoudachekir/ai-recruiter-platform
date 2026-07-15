@@ -24,6 +24,12 @@ dist/
 build/
 .cache/
 coverage/
+.coverage
+.coverage.*
+
+# Agent tooling scratch state
+.superpowers/
+.launch-logs/
 
 # Environment and local config
 .env
