@@ -1,7 +1,7 @@
 \chapter[Sprint 5 : Aide à la décision et finalisation]{Sprint 5 : Aide à la décision, rapports pondérés\\et finalisation de la plateforme}
 \label{ch:sprint5}
 \begin{spacing}{1.2}
-\minitoc
+\minitoc%
 \thispagestyle{MyStyle}
 \end{spacing}
 \clearpage
@@ -442,6 +442,8 @@ L'interface, accessible depuis un onglet dédié du profil candidat, s'organise 
 
 Une fois la révision terminée, le CV est exporté au format PDF selon l'un des modèles professionnels proposés, avec une couleur d'accent adaptée et des compétences regroupées par catégories (figure~\ref{fig:cv-tailoring-pdf}). Le document peut être téléchargé ou directement rattaché à la candidature.
 
+% Garde la dernière entrée de la liste des figures sur la même page que 6.9.
+\addtocontents{lof}{\protect\enlargethispage{5\baselineskip}}
 \begin{figure}[H]
   \centering
   \screenshot{cv-tailoring-pdf.JPG}{CV adapté généré au format PDF selon le modèle sélectionné}

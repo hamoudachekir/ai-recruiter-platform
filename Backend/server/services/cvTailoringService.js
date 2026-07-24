@@ -81,6 +81,42 @@ async function callTailor({ candidateId, jobId, cvJson, jobText }) {
   return data;
 }
 
+async function analyzeJob({ candidateId, cvJson, jobText, jobTitle, company, sourceUrl }) {
+  const { data } = await axios.post(`${TAILORING_URL}/analyze`, {
+    candidate_id: candidateId,
+    cv_json: cvJson,
+    job_text: jobText,
+    job_title: jobTitle || '',
+    company: company || '',
+    source_url: sourceUrl || '',
+  });
+  return data;
+}
+
+async function generateCoverLetter({ cvJson, jobText, jobTitle, company, language }) {
+  const { data } = await axios.post(`${TAILORING_URL}/cover-letter`, {
+    cv_json: cvJson,
+    job_text: jobText,
+    job_title: jobTitle || '',
+    company: company || '',
+    language: language || 'fr',
+  });
+  return data;
+}
+
+async function listCopilotApplications(candidateId) {
+  const { data } = await axios.get(`${TAILORING_URL}/applications/${candidateId}`);
+  return data;
+}
+
+async function updateCopilotApplication({ candidateId, applicationId, status, notes }) {
+  const { data } = await axios.patch(
+    `${TAILORING_URL}/applications/${candidateId}/${applicationId}`,
+    { status, notes }
+  );
+  return data;
+}
+
 async function callExport({ candidateId, jobId, cvJson, tailored, template }) {
   const { data } = await axios.post(`${TAILORING_URL}/export-pdf`, {
     candidate_id: candidateId, job_id: jobId, cv_json: cvJson, tailored_cv_json: tailored,
@@ -95,5 +131,9 @@ module.exports = {
   parseCv,
   buildCvJsonFromProfile,
   callTailor,
+  analyzeJob,
+  generateCoverLetter,
+  listCopilotApplications,
+  updateCopilotApplication,
   callExport,
 };

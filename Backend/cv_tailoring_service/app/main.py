@@ -1,8 +1,23 @@
 from fastapi import FastAPI, HTTPException
-from app.schema import TailorRequest, TailorResponse, ExportRequest, ExportResponse
-from app.service import run_tailor, JobNotFound, NoJobSpecified, TailorRejected
+
+from app.applications import list_applications, save_analysis, update_application
+from app.cover_letter import generate_cover_letter
+from app.fit import analyze_fit
 from app.llm import LlmError, LlmRateLimited
 from app.rxresume_client import RxResumeClient, RxResumeError
+from app.schema import (
+    AnalyzeRequest,
+    AnalyzeResponse,
+    ApplicationRecord,
+    ApplicationUpdate,
+    CoverLetterRequest,
+    CoverLetterResponse,
+    ExportRequest,
+    ExportResponse,
+    TailorRequest,
+    TailorResponse,
+)
+from app.service import JobNotFound, NoJobSpecified, TailorRejected, run_tailor
 
 app = FastAPI(title="cv-tailoring-service")
 
@@ -29,6 +44,47 @@ def tailor(req: TailorRequest):
         raise HTTPException(status_code=429, detail={"message": str(e)})
     except LlmError as e:
         raise HTTPException(status_code=502, detail=f"LLM reformulation failed: {e}")
+
+
+@app.post("/analyze", response_model=AnalyzeResponse)
+def analyze(req: AnalyzeRequest):
+    analysis = analyze_fit(req.cv_json.model_dump(), req.job_text)
+    application = save_analysis(
+        candidate_id=req.candidate_id,
+        job_text=req.job_text,
+        analysis=analysis,
+        job_title=req.job_title,
+        company=req.company,
+        source_url=req.source_url,
+    )
+    return AnalyzeResponse(analysis=analysis, application_id=application.id)
+
+
+@app.post("/cover-letter", response_model=CoverLetterResponse)
+def cover_letter(req: CoverLetterRequest):
+    return CoverLetterResponse(
+        content=generate_cover_letter(
+            cv_json=req.cv_json.model_dump(),
+            job_text=req.job_text,
+            job_title=req.job_title,
+            company=req.company,
+            language=req.language,
+        ),
+        language=req.language,
+    )
+
+
+@app.get("/applications/{candidate_id}", response_model=list[ApplicationRecord])
+def applications(candidate_id: str):
+    return list_applications(candidate_id)
+
+
+@app.patch("/applications/{candidate_id}/{application_id}", response_model=ApplicationRecord)
+def application_update(candidate_id: str, application_id: int, req: ApplicationUpdate):
+    application = update_application(application_id, candidate_id, req)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return application
 
 
 @app.post("/export-pdf", response_model=ExportResponse)

@@ -1,6 +1,11 @@
 import { useMemo, useState, useLayoutEffect, useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
-import { tailorCv, exportTailoredPdf } from './cvTailoringApi';
+import {
+  analyzeJob,
+  exportTailoredPdf,
+  generateCoverLetter,
+  tailorCv,
+} from './cvTailoringApi';
 import { wordDiff, buildChanges, mergeCv } from './cvDiff';
 import { printHtml } from './printCv';
 import CvPaper from './CvPaper';
@@ -48,6 +53,9 @@ DiffText.propTypes = { original: PropTypes.string, proposed: PropTypes.string };
 
 export default function TailorCvPanel({ jobId = null, onClose = null, embedded = false }) {
   const [jobText, setJobText] = useState('');
+  const [jobTitle, setJobTitle] = useState('');
+  const [company, setCompany] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
   const [jdOpen, setJdOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState('');
@@ -64,6 +72,10 @@ export default function TailorCvPanel({ jobId = null, onClose = null, embedded =
   const [pdf, setPdf] = useState(null);
   const [showDoc, setShowDoc] = useState(false);
   const [finalPdf, setFinalPdf] = useState(null); // { url, title } — server-generated PDF viewer
+  const [fitAnalysis, setFitAnalysis] = useState(null);
+  const [applicationId, setApplicationId] = useState(null);
+  const [coverLetter, setCoverLetter] = useState('');
+  const [letterLanguage, setLetterLanguage] = useState('fr');
 
   // Preview controls
   const [showDiff, setShowDiff] = useState(false);
@@ -202,12 +214,41 @@ export default function TailorCvPanel({ jobId = null, onClose = null, embedded =
     }
     setLoading(true); setError(''); setPdf(null); setPhase('Analyse de l’offre et reformulation…');
     try {
+      if (jobText.trim()) {
+        const fit = await analyzeJob({ jobText, jobTitle, company, sourceUrl });
+        setFitAnalysis(fit.analysis);
+        setApplicationId(fit.application_id);
+      }
       setResult(await tailorCv(jobId, jobText));
       setDecisions({}); setEdits({}); setEditingId(null); setPage(1); setTab('pending'); setJdOpen(false);
       historyRef.current = { past: [], future: [] };
     } catch (e) {
       setError(e.response?.data?.detail?.message || e.response?.data?.message || 'Échec de la reformulation. Réessayez dans une minute.');
     } finally { setLoading(false); setPhase(''); }
+  }
+
+  async function runCoverLetter() {
+    if (!jobText.trim()) {
+      setError('Collez la description du poste pour générer la lettre.');
+      return;
+    }
+    setLoading(true); setError(''); setPhase('Génération de la lettre de motivation…');
+    try {
+      const out = await generateCoverLetter({
+        jobText,
+        jobTitle,
+        company,
+        language: letterLanguage,
+      });
+      setCoverLetter(out.content);
+    } catch (e) {
+      setError(e.response?.data?.detail || e.response?.data?.message || 'Lettre indisponible.');
+    } finally { setLoading(false); setPhase(''); }
+  }
+
+  async function copyCoverLetter() {
+    if (!coverLetter) return;
+    await navigator.clipboard.writeText(coverLetter);
   }
 
   const rxLabel = RXRESUME_TEMPLATES.find((t) => t.id === rxTemplate)?.label || rxTemplate;
@@ -311,6 +352,14 @@ export default function TailorCvPanel({ jobId = null, onClose = null, embedded =
           <label className="tailor-jd-label" htmlFor="tailor-jd">
             Description du poste {needsJobText ? '(requis)' : '(optionnel)'}
           </label>
+          <div className="copilot-meta-grid">
+            <input type="text" value={jobTitle} onChange={(e) => setJobTitle(e.target.value)}
+              placeholder="Intitulé du poste (optionnel)" disabled={loading} />
+            <input type="text" value={company} onChange={(e) => setCompany(e.target.value)}
+              placeholder="Entreprise (optionnel)" disabled={loading} />
+            <input type="url" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)}
+              placeholder="Lien de l’offre (optionnel)" disabled={loading} />
+          </div>
           <textarea id="tailor-jd" className="tailor-jd-input" ref={jdRef}
             placeholder={needsJobText
               ? 'Collez ici la description du poste visé (LinkedIn, Indeed…) — indispensable ici, aucune offre de page n’est en contexte.'
@@ -339,6 +388,39 @@ export default function TailorCvPanel({ jobId = null, onClose = null, embedded =
       )}
       {loading && <div className="tailor-panel__loading"><span className="spinner" /> {phase}</div>}
       {error && <div className="tailor-panel__error">{error}</div>}
+
+      {fitAnalysis && (
+        <div className="copilot-fit">
+          <div className="copilot-fit__score">
+            <strong>{fitAnalysis.score}%</strong>
+            <span className={`score-badge ${fitAnalysis.recommendation === 'apply' ? 'score-badge--ok' : fitAnalysis.recommendation === 'consider' ? 'score-badge--mid' : 'score-badge--warn'}`}>
+              {fitAnalysis.recommendation === 'apply' ? 'Postuler' : fitAnalysis.recommendation === 'consider' ? 'À évaluer' : 'Faible priorité'}
+            </span>
+          </div>
+          <div>
+            <p><strong>Correspondances :</strong> {(fitAnalysis.matched_skills || []).join(', ') || 'Aucune compétence explicite détectée'}</p>
+            {!!fitAnalysis.missing_skills?.length && <p><strong>Écarts :</strong> {fitAnalysis.missing_skills.join(', ')}</p>}
+            {applicationId && <small>Offre enregistrée dans le suivi local · #{applicationId}</small>}
+          </div>
+          <div className="copilot-letter-actions">
+            <select value={letterLanguage} onChange={(e) => setLetterLanguage(e.target.value)}>
+              <option value="fr">Lettre FR</option>
+              <option value="en">Cover letter EN</option>
+            </select>
+            <button type="button" onClick={runCoverLetter} disabled={loading}>Générer la lettre</button>
+          </div>
+        </div>
+      )}
+
+      {coverLetter && (
+        <div className="copilot-letter">
+          <div className="copilot-letter__head">
+            <h4>Lettre de motivation</h4>
+            <button type="button" onClick={copyCoverLetter}>Copier</button>
+          </div>
+          <textarea value={coverLetter} onChange={(e) => setCoverLetter(e.target.value)} />
+        </div>
+      )}
 
       {result && (
         <div className="tailor-review-layout">

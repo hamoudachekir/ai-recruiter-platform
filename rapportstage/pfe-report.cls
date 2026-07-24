@@ -43,7 +43,8 @@
 \usepackage{fontenc}
 \usepackage{wrapfig}
 \usepackage{setspace}
-\usepackage[all]{nowidow}
+% Widow control without the aggressive [all] mode (which leaves near-empty pages).
+\usepackage{nowidow}
 \usepackage{acronym}
 \usepackage{array,ragged2e}
 \usepackage{enumitem}
@@ -110,7 +111,7 @@
     } %\centering
 
 % chapter tiltes spacing
-\titlespacing*{\chapter}{0pt}{0pt}{50pt}
+\titlespacing*{\chapter}{0pt}{0pt}{30pt}
 
 \titleformat{\section}[block]%
   {\Large\bfseries}{\thesection}%

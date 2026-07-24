@@ -16,7 +16,7 @@
 \usepackage{longtable}      % Tableaux sur plusieurs pages
 \usepackage{caption}        % Gestion des légendes
 \usepackage{ragged2e}       % Alignement du texte justifié
-\justifying                % Justification du texte dans tout le document
+\justifying% Justification du texte dans tout le document
 \include{Commands}          % Inclusion d'un fichier contenant des commandes personnalisées
 
 % Configuration des métadonnées du PDF généré
@@ -28,18 +28,19 @@
 }
 
 % Activation des mini-tables des matières pour chaque chapitre
-\dominitoc
+\dominitoc%
 
 % Début du document
 \begin{document}
 
     % ---------------------------------------------------------------
-    % PAGE DE GARDE : incluse depuis cover.pdf (modele officiel ESPRIT)
-    % La page est insérée sans en-tête ni pied de page et n'est pas
-    % comptée dans la pagination (pagecommand={} + noautoscale).
+    % PAGES DE GARDE : modèle officiel ESPRIT (couverture + page intérieure)
+    % Incluses sans en-tête ni pied de page, hors pagination du corps.
+    % page2.pdf = hamouda PG 2_page-0001 (1).pdf (période, encadrant, sujet)
     % ---------------------------------------------------------------
-    \includepdf[pages=1, fitpaper=true, pagecommand={\thispagestyle{empty}}]{cover.pdf}
-    \includepdf[pages=1, fitpaper=true, pagecommand={\thispagestyle{empty}}]{1.pdf}
+    % Cover/page2/end en A4 plein format (edge-to-edge, sans bandes blanches).
+    \includepdf[pages=1, width=\paperwidth, height=\paperheight, pagecommand={\thispagestyle{empty}}]{cover.pdf}
+    \includepdf[pages=1, width=\paperwidth, height=\paperheight, pagecommand={\thispagestyle{empty}}]{page2.pdf}
 
     % Interligne 1,15 (consigne ESPRIT « Forme du rapport »)
     \setstretch{1.15}
@@ -64,11 +65,11 @@
     % Configuration de la liste des figures
     \addtocontents{lof}{\protect\thispagestyle{MyStyle}}
     \renewcommand{\listfigurename}{LISTE DES FIGURES}  % Changement du titre de la liste des figures
-    \begin{spacing}{1}
+    \begin{spacing}{0.95}
     \listoffigures  % Génération de la liste des figures
     \end{spacing}
     \addcontentsline{toc}{chapter}{\listfigurename}  % Ajout de la liste des figures dans la table des matières
-    \adjustmtc  % Ajustement des mini-tables des matières
+    \adjustmtc% Ajustement des mini-tables des matières
 
     % Configuration de la liste des tableaux
     \addtocontents{lof}{\protect\thispagestyle{MyStyle}}
@@ -77,7 +78,7 @@
     \listoftables  % Génération de la liste des tableaux
     \end{spacing}
     \addcontentsline{toc}{chapter}{\listtablename}  % Ajout de la liste des tableaux dans la table des matières
-    \adjustmtc  % Ajustement des mini-tables des matières
+    \adjustmtc% Ajustement des mini-tables des matières
 
     % Inclusion des autres sections du rapport
     \input{chapitre/03-ListeDesAbr}  % Liste des abréviations
@@ -103,12 +104,14 @@
     \input{chapitre/sprint5}          % Ch6 : Sprint 5 -- Finalisation
     
     % Conclusion du rapport
-    \input{chapitre/11-ConclusionGenerale}  
-    
+    \input{chapitre/11-ConclusionGenerale}
+
     % Bibliographie
     \input{chapitre/09-Bibliographie}
 
-    % Dernière page
-    \includepdf[pages=1, fitpaper=true, pagecommand={\thispagestyle{empty}}]{end.pdf}
+    % Dernière page (A4 plein format) — pas de page blanche traînante après la 4e de couverture
+    \clearpage
+    \pagestyle{empty}
+    \includepdf[pages=1, width=\paperwidth, height=\paperheight, pagecommand={\thispagestyle{empty}}]{end.pdf}
 
 \end{document}

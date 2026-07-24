@@ -8,6 +8,18 @@ const svc = require('../services/cvTailoringService');
 const router = express.Router();
 const uploadDir = path.join(__dirname, '..', 'uploads');
 
+async function loadCandidateCv(candidateId) {
+  const user = await UserModel.findById(candidateId).select('name email profile').lean();
+  const absPath = svc.resolveCvFilePath(user, uploadDir);
+  try {
+    if (!absPath) throw new Error('no CV file on disk');
+    return await svc.parseCv(absPath);
+  } catch (parseErr) {
+    console.warn('[cvTailoring] parser unavailable, using stored profile:', parseErr.message);
+    return svc.buildCvJsonFromProfile(user);
+  }
+}
+
 // POST /api/cv/tailor  → reformulate (fast, JSON + changes, no PDF)
 router.post('/tailor', verifyToken, requireCandidate, async (req, res) => {
   try {
@@ -18,21 +30,11 @@ router.post('/tailor', verifyToken, requireCandidate, async (req, res) => {
       return res.status(400).json({ message: 'jobId or jobText is required' });
     }
 
-    const user = await UserModel.findById(req.user._id).select('name email profile').lean();
-    const absPath = svc.resolveCvFilePath(user, uploadDir);
-
     // Prefer re-parsing the uploaded CV PDF (richest source). If the parser
     // service (5002) is unavailable — e.g. PaddleOCR cannot be installed on the
     // host's Python — or there is no CV file on disk, fall back to the
     // candidate's stored structured profile so tailoring still works.
-    let cvJson;
-    try {
-      if (!absPath) throw new Error('no CV file on disk');
-      cvJson = await svc.parseCv(absPath);
-    } catch (parseErr) {
-      console.warn('[cvTailoring] parser unavailable, using stored profile:', parseErr.message);
-      cvJson = svc.buildCvJsonFromProfile(user);
-    }
+    const cvJson = await loadCandidateCv(req.user._id);
 
     if (!cvJson || !cvJson.profile || !(cvJson.profile.skills || []).length) {
       return res.status(400).json({ message: 'No CV data to tailor. Upload a CV or complete your profile first.' });
@@ -43,6 +45,70 @@ router.post('/tailor', verifyToken, requireCandidate, async (req, res) => {
     return res.json({ ...result, cv_json: cvJson });
   } catch (err) {
     return forward(err, res, 'tailor');
+  }
+});
+
+// POST /api/cv/copilot/analyze → deterministic fit score + local tracking
+router.post('/copilot/analyze', verifyToken, requireCandidate, async (req, res) => {
+  try {
+    const { jobText, jobTitle, company, sourceUrl } = req.body;
+    if (!jobText || jobText.trim().length < 20) {
+      return res.status(400).json({ message: 'A job description of at least 20 characters is required' });
+    }
+    const cvJson = await loadCandidateCv(req.user._id);
+    const result = await svc.analyzeJob({
+      candidateId: String(req.user._id),
+      cvJson,
+      jobText,
+      jobTitle,
+      company,
+      sourceUrl,
+    });
+    return res.json({ ...result, cv_json: cvJson });
+  } catch (err) {
+    return forward(err, res, 'copilot-analyze');
+  }
+});
+
+// POST /api/cv/copilot/cover-letter → factual FR/EN letter from the stored CV
+router.post('/copilot/cover-letter', verifyToken, requireCandidate, async (req, res) => {
+  try {
+    const { jobText, jobTitle, company, language } = req.body;
+    if (!jobText || jobText.trim().length < 20) {
+      return res.status(400).json({ message: 'A job description of at least 20 characters is required' });
+    }
+    const cvJson = await loadCandidateCv(req.user._id);
+    return res.json(await svc.generateCoverLetter({
+      cvJson,
+      jobText,
+      jobTitle,
+      company,
+      language,
+    }));
+  } catch (err) {
+    return forward(err, res, 'copilot-cover-letter');
+  }
+});
+
+router.get('/copilot/applications', verifyToken, requireCandidate, async (req, res) => {
+  try {
+    return res.json(await svc.listCopilotApplications(String(req.user._id)));
+  } catch (err) {
+    return forward(err, res, 'copilot-applications');
+  }
+});
+
+router.patch('/copilot/applications/:applicationId', verifyToken, requireCandidate, async (req, res) => {
+  try {
+    const { status, notes } = req.body;
+    return res.json(await svc.updateCopilotApplication({
+      candidateId: String(req.user._id),
+      applicationId: req.params.applicationId,
+      status,
+      notes,
+    }));
+  } catch (err) {
+    return forward(err, res, 'copilot-application-update');
   }
 });
 

@@ -25,6 +25,26 @@ import httpx
 
 Message = dict[str, str]
 
+try:
+    import anthropic as _anthropic
+except ImportError:  # optional until LLM_PROVIDER=anthropic
+    _anthropic = None  # type: ignore[assignment]
+
+# Claude Fable 5 / Opus 4.7+ / Sonnet 5 reject temperature/top_p/top_k (400).
+# Sonnet 4.6 and Haiku 4.5 still accept sampling params without adaptive thinking.
+_ANTHROPIC_NO_SAMPLING_PREFIXES = (
+    "claude-fable-5",
+    "claude-mythos-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-sonnet-5",
+)
+
+
+def _anthropic_supports_temperature(model: str) -> bool:
+    mid = (model or "").strip().lower()
+    return not any(mid == p or mid.startswith(p) for p in _ANTHROPIC_NO_SAMPLING_PREFIXES)
+
 
 class LLMError(RuntimeError):
     pass
@@ -154,11 +174,10 @@ class OllamaClient(LLMClient):
 
 class AnthropicClient(LLMClient):
     def __init__(self, api_key: str, model: str) -> None:
-        try:
-            import anthropic
-        except ImportError as exc:
-            raise LLMError("anthropic package not installed") from exc
-        self._client = anthropic.Anthropic(api_key=api_key)
+        if _anthropic is None:
+            raise LLMError("anthropic package not installed")
+        # Prefer ANTHROPIC_API_KEY; bare Anthropic() also picks up ant auth profiles.
+        self._client = _anthropic.Anthropic(api_key=api_key) if api_key else _anthropic.Anthropic()
         self.model = model
 
     def complete_json(self, system, messages, temperature=0.6, max_tokens=800):
@@ -166,18 +185,36 @@ class AnthropicClient(LLMClient):
             system
             + "\n\nRespond with ONLY a single JSON object. No prose, no markdown fences."
         )
+        create_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "system": reinforced,
+            "messages": messages,
+        }
+        if _anthropic_supports_temperature(self.model):
+            create_kwargs["temperature"] = temperature
+
         try:
-            resp = self._client.messages.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=reinforced,
-                messages=messages,
-            )
+            resp = self._client.messages.create(**create_kwargs)
         except Exception as exc:
+            if _anthropic is not None and isinstance(
+                exc,
+                (
+                    _anthropic.RateLimitError,
+                    _anthropic.APIConnectionError,
+                    _anthropic.APIStatusError,
+                ),
+            ):
+                raise LLMError(f"Anthropic request failed: {exc}") from exc
             raise LLMError(f"Anthropic request failed: {exc}") from exc
 
-        text = "".join(block.text for block in resp.content if getattr(block, "type", "") == "text")
+        if getattr(resp, "stop_reason", None) == "refusal":
+            details = getattr(resp, "stop_details", None)
+            raise LLMError(f"Anthropic refused the request: {details!r}")
+
+        text = "".join(
+            block.text for block in resp.content if getattr(block, "type", "") == "text"
+        )
         return _extract_json(text)
 
 

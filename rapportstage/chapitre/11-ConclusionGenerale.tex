@@ -1,7 +1,7 @@
 \chapter*{CONCLUSION ET PERSPECTIVES}
 \markboth{\MakeUppercase{CONCLUSION GÉNÉRALE}}{}
 \addcontentsline{toc}{chapter}{CONCLUSION GÉNÉRALE}
-\adjustmtc
+\adjustmtc%
 \thispagestyle{MyStyle}
 
 Ce projet de fin d'études est parti d'un constat posé en introduction~: le processus de
@@ -19,7 +19,6 @@ conceptuel, nous avons conçu et développé \textbf{NextHire}, une plateforme c
 autour d'un agent conversationnel IA, d'un pipeline de détection d'intégrité à trois niveaux et
 d'une application web React accessible depuis n'importe quel navigateur.
 
-\bigskip
 \noindent\textbf{Résultats obtenus.}
 Les objectifs fixés au début du projet ont été atteints. La plateforme couvre l'ensemble
 du cycle d'un entretien IA~: elle analyse le CV du candidat, génère des questions
@@ -35,7 +34,6 @@ de la réponse et la génération de la question suivante en un unique appel LLM
 un délai inter-tour compatible avec une conversation naturelle en déploiement avec GPU. La couverture de \texttt{report\_service.py}, le module métier central du service
 d'analyse, atteint 91\,\% ; la couverture globale du package est de 45\,\%.
 
-\bigskip
 \noindent\textbf{Difficultés rencontrées.}
 La réalisation du projet a soulevé plusieurs difficultés, principalement liées à la
 nature temps réel du système et à sa complexité distribuée~:
@@ -63,7 +61,6 @@ nature temps réel du système et à sa complexité distribuée~:
         auditable et suffisamment souple pour absorber les réponses hors-sujet.
 \end{itemize}
 
-\bigskip
 \noindent\textbf{Apports du projet.}
 Sur le plan technique, ce travail a permis de concevoir et de mettre en œuvre une
 architecture micro-services complète articulée autour d'un état partagé Redis, d'une machine à états Python native (\texttt{InterviewEngine}) pour le moteur d'entretien,
@@ -81,7 +78,6 @@ Python FastAPI), la vision par ordinateur appliquée (InsightFace, YOLOv8, Media
 ainsi que la conduite d'un projet complet de l'analyse du besoin jusqu'au déploiement,
 au sein d'un environnement d'entreprise.
 
-\bigskip
 \noindent\textbf{Perspectives.}
 Plusieurs pistes d'amélioration prolongent naturellement ce travail. Le déploiement sur
 infrastructure GPU réduirait fortement la latence de transcription, rendant
@@ -94,7 +90,8 @@ un filtrage collaboratif fondé sur les historiques d'embauche réels afin d'am�
 pertinence des évaluations. Enfin, une extension multilingue couvrant d'autres dialectes
 du Maghreb élargirait la portée de la plateforme au-delà du contexte tunisien.
 
-En définitive, NextHire démontre la viabilité d'un recrutement automatisé par l'intelligence
+\enlargethispage{2\baselineskip}%
+\noindent En définitive, NextHire démontre la viabilité d'un recrutement automatisé par l'intelligence
 artificielle et illustre comment les systèmes agentiques fondés sur les LLM peuvent
 reproduire, à l'échelle, la rigueur et la cohérence d'un entretien professionnel. Il ouvre
 la voie à des outils RH plus autonomes, capables d'accompagner les équipes face à une

@@ -1,0 +1,156 @@
+% !TEX program = pdflatex
+% The Flex — Full-Stack Product Engineer (Remote) · EN
+% Strong match: Python FastAPI, React, APIs, AI/LLM, ownership; junior ≠ years of startup claim
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[english]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=1.25cm]{geometry}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{fontawesome5}
+\usepackage{microtype}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2pt}
+\pagestyle{empty}
+
+\definecolor{primary}{HTML}{1A365D}
+\definecolor{accent}{HTML}{2B6CB0}
+\definecolor{muted}{HTML}{4A5568}
+\definecolor{rulecolor}{HTML}{E2E8F0}
+
+\newcommand{\TargetTitle}{Full-Stack Product Engineer \textbar{} Python · React · AI}
+\newcommand{\TargetKeywords}{Python · FastAPI · React · TypeScript/JS · PostgreSQL · REST APIs · OpenAI/LLMs · AWS · Docker · GitHub/GitLab CI · Stripe · Automation}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=accent,
+  urlcolor=accent,
+  pdfauthor={Hamouda Chekir},
+  pdftitle={CV — Hamouda Chekir — The Flex Full-Stack Product Engineer}
+}
+
+\titleformat{\section}
+  {\color{primary}\large\bfseries}
+  {}
+  {0pt}
+  {}
+  [\vspace{1pt}{\color{accent}\titlerule[1.6pt]}\vspace{5pt}]
+\titlespacing*{\section}{0pt}{10pt}{3pt}
+
+\newcommand{\job}[3]{%
+  \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
+  {\color{accent}\textit{#3}}\\[2pt]
+  \begin{itemize}[leftmargin=0.85em, itemsep=1pt, topsep=0pt, parsep=0pt, partopsep=0pt]
+}
+
+\newcommand{\proj}[3]{%
+  \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
+  {\color{accent}\textit{#3}}\\[1pt]
+  \begin{itemize}[leftmargin=0.85em, itemsep=1pt, topsep=0pt, parsep=0pt, partopsep=0pt]
+}
+
+\newcommand{\edu}[3]{%
+  \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
+  {\color{accent}\textit{#3}}\\[3pt]
+}
+
+\newcommand{\cert}[4]{%
+  \textbf{\color{primary}\small #1}\hfill{\color{muted}\scriptsize #3}\\[-1pt]
+  {\color{accent}\small\textit{#2}}\\[0pt]
+  {\color{muted}\scriptsize #4}\\[4pt]
+}
+
+\newcommand{\contactsep}{\hspace{5pt}{\color{rulecolor}|}\hspace{5pt}}
+
+\begin{document}
+
+{\fontsize{22}{26}\selectfont\bfseries\color{primary}HAMOUDA CHEKIR}\\[2pt]
+{\large\color{accent}\TargetTitle}\\[4pt]
+{\footnotesize\color{muted}%
+  \faIcon{envelope}\hspace{3pt}\href{mailto:hamoudachkir@yahoo.fr}{hamoudachkir@yahoo.fr}%
+  \contactsep
+  \faIcon{phone}\hspace{3pt}+216\,55\,913\,832%
+  \contactsep
+  \faIcon{map-marker-alt}\hspace{3pt}Tunis \textbar{} remote-first%
+}\\[2pt]
+{\footnotesize\color{muted}%
+  \faIcon{linkedin}\hspace{3pt}\href{https://www.linkedin.com/in/hamouda-chekir-5053572b4}{hamouda-chekir}%
+  \contactsep
+  \faIcon{github}\hspace{3pt}\href{https://github.com/hamoudachekir}{hamoudachekir}%
+}\\[6pt]
+
+\section{SUMMARY}
+I build products end-to-end: talk to the problem, ship a working slice, get feedback, then harden it.
+Stack I use daily: \textbf{Python (FastAPI)}, \textbf{React}, REST APIs, PostgreSQL/MongoDB, Docker, CI --- plus hands-on \textbf{LLM / OpenAI-style} features in real apps.
+At Talan I helped take NextHire from design to a running multi-service product (React + Python + automation), including internal tooling that cut manual screening work.
+Junior in years, strong on ownership, written English, and learning whatever the product needs next (Stripe, Twilio, Supabase-style backends included).
+
+\section{EXPERIENCE}
+
+\job{Software Engineer --- Final-Year Project}{Feb 2026 -- Aug 2026}{Talan \textbar{} Tunis}
+  \item Owned features across the stack on NextHire (\textbf{16 microservices}): React SPAs, Python FastAPI/Flask services, Node gateway --- concept to production with CI/CD and Docker.
+  \item Turned operational pain (manual screening, messy CV prep) into product: LLM interview agent, CV parsing/tailoring, scored reports --- automation with measurable workflow impact.
+  \item Built and maintained integrations (external calendars, OCR/NLP services) and kept live paths reliable when real users hit edge cases.
+  \item Worked directly with product/tech stakeholders: clarify the problem, propose a thin solution, ship, iterate.
+\end{itemize}
+
+\job{Full-Stack Developer Intern}{Jun 2025 -- Aug 2025}{SmartConseil --- Dafe Management \textbar{} Tunis}
+  \item Shipped internal operational tools (back office with filters, exports, module management) that reduced friction for operators.
+  \item Delivered independently inside Agile: Git, reviews, tests, GitLab CI/CD --- take a fuzzy need and return a usable release.
+\end{itemize}
+
+\job{Web Developer Intern}{Jun 2024 -- Aug 2024}{Big Deal (Club Privilèges) \textbar{} Tunis}
+  \item Built a gift-code workflow end to end (Laravel/Filament) --- small product feature from idea to go-live.
+\end{itemize}
+
+\job{Web Developer Intern}{Feb 2023 -- May 2023}{HOTIX \textbar{} Tunis}
+  \item Launched e-commerce storefront features in .NET under Scrum (marketplace-style UX, testing, production).
+\end{itemize}
+
+\section{SELECTED PROJECTS}
+{\footnotesize
+\setlength{\parskip}{1pt}
+\proj{TalentMatch}{2025}{Python/FastAPI · React · AI · payments-adjacent APIs}
+  \item Full-stack product: FastAPI + React, AI-assisted listing/pricing flows, third-party APIs --- ownership from UI to backend.
+\end{itemize}
+\proj{TuniVert}{2025}{Laravel · JS · Stripe / PayPal / Paymee}
+  \item Integrated payment providers and an admin dashboard --- practice connecting external systems into a real product.
+\end{itemize}
+\proj{Clinical / RAG experiments}{2025}{Python · LLM · vector search}
+  \item Explored LLM pipelines and intelligent interfaces --- transferable to AI workflows on Base360-style platforms.
+\end{itemize}
+}
+
+\section{EDUCATION}
+\edu{Engineering Degree --- TWIN (Web, Internet \& Network Technologies)}{2023 -- 2026}{ESPRIT \textbar{} Tunis}
+\edu{Bachelor's in Business Computing --- E-Business}{2020 -- 2023}{ESEN \textbar{} Manouba}
+
+\section{SKILLS}
+{\small
+\textbf{\color{primary}Must-have match :} full-stack web apps, APIs, databases, product mindset, independent delivery, problem-solving, written English\\[2pt]
+\textbf{\color{primary}Stack :} Python, FastAPI, Flask, React, JavaScript (TypeScript growing), PostgreSQL, MongoDB, REST, Docker, Git, GitLab CI / GitHub Actions mindset\\[2pt]
+\textbf{\color{primary}AI \& integrations :} OpenAI-style LLMs, agents, RAG experiments; Stripe/PayPal-style payments; calendar and third-party APIs\\[2pt]
+\textbf{\color{primary}Cloud :} AWS Cloud Foundations --- ready to deepen on The Flex / Base360 stack (Supabase, Twilio, etc.)\\[2pt]
+\textbf{\color{primary}Keywords :} \TargetKeywords
+}
+
+\vspace{2pt}
+\begin{minipage}[t]{0.65\textwidth}
+\section{CERTIFICATIONS}
+\cert{AWS Academy Graduate --- Cloud Foundations}{AWS Academy}{May 2025}{Cloud base for scalable SaaS}
+\end{minipage}%
+\hfill
+\begin{minipage}[t]{0.32\textwidth}
+\section{LANGUAGES}
+{\small\textbf{Arabic} --- Native}\\[2pt]
+{\small\textbf{French} --- Fluent}\\[2pt]
+{\small\textbf{English} --- Professional / written strong}
+\end{minipage}
+
+\end{document}

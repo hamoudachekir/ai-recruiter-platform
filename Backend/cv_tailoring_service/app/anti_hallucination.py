@@ -1,8 +1,16 @@
 import re
-import spacy
+
 from app.schema import Verification
 
-_nlp = spacy.load("en_core_web_sm", disable=["lemmatizer"])
+try:
+    import spacy
+except ImportError:
+    spacy = None
+
+try:
+    _nlp = spacy.load("en_core_web_sm", disable=["lemmatizer"]) if spacy else None
+except OSError:
+    _nlp = None
 
 _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
 _NUM_RE = re.compile(r"\b\d+(?:[.,]\d+)?%?\b")
@@ -11,6 +19,9 @@ _DEGREE_RE = re.compile(
     re.IGNORECASE,
 )
 _STOP_ENT = {"", "cv", "resume"}
+_PROPER_CONTEXT_RE = re.compile(
+    r"\b(?:at|chez|for|pour|with|avec)\s+([A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3})"
+)
 
 
 def _norm(tok: str) -> str:
@@ -31,12 +42,21 @@ def factual_entities(text: str) -> set[str]:
     if not text:
         return set()
     ents: set[str] = set()
-    doc = _nlp(text)
-    for ent in doc.ents:
-        # Only genuine proper-noun organisations/places. Spelled-out numbers and
-        # dates are handled language-agnostically by the regexes below.
-        if ent.label_ in {"ORG", "GPE", "FAC", "PRODUCT"} and _is_proper_noun(ent.text):
-            n = _norm(ent.text)
+    if _nlp is not None:
+        doc = _nlp(text)
+        for ent in doc.ents:
+            # Only genuine proper-noun organisations/places. Spelled-out numbers and
+            # dates are handled language-agnostically by the regexes below.
+            if ent.label_ in {"ORG", "GPE", "FAC", "PRODUCT"} and _is_proper_noun(ent.text):
+                n = _norm(ent.text)
+                if len(n) >= 3 and n not in _STOP_ENT:
+                    ents.add(n)
+    else:
+        # Keep the guard useful in lightweight installations where spaCy or its
+        # English model is unavailable. Context words avoid treating every
+        # sentence-initial capitalised word as a company.
+        for match in _PROPER_CONTEXT_RE.finditer(text):
+            n = _norm(match.group(1))
             if len(n) >= 3 and n not in _STOP_ENT:
                 ents.add(n)
     for m in _YEAR_RE.finditer(text):

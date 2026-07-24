@@ -13,3 +13,6 @@ $pdf_mode = 1;
 # "latex-workshop.latex.outDir": "%DIR%/build".
 $aux_dir = 'build';
 $out_dir = 'build';
+
+# Drop a trailing blank page sometimes left after includepdf + lastpage.
+$success_cmd = 'python scripts/trim_trailing_blank.py build/main.pdf';
