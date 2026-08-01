@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import axios from 'axios';
 import { useNavigate } from "react-router-dom";
+import { API_BASE_URL } from "../config/api";
 
 function Signup() {
   // Utiliser un seul état pour le formulaire
@@ -21,7 +22,7 @@ function Signup() {
   const handleSubmit = (e) => {
     e.preventDefault();
     setError("");  // Réinitialiser l'erreur avant chaque soumission
-    axios.post('http://localhost:3001/Frontend/login', formData)
+    axios.post(`${API_BASE_URL}/Frontend/login`, formData)
       .then(result => {
         console.log(result);
         if (result.data === "Success") {

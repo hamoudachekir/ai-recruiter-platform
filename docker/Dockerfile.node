@@ -1,0 +1,41 @@
+FROM node:20-bookworm-slim
+
+ENV NODE_ENV=production \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    VOICE_ENGINE_PYTHON=python3 \
+    PYTHONPATH=/app/Backend:/app/Backend/server
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ffmpeg \
+    build-essential \
+    python3-dev \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY Backend/voice_engine/requirements.txt /tmp/voice-engine-requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/voice-engine-requirements.txt
+
+COPY Backend/server/package.json Backend/server/package-lock.json* ./Backend/server/
+WORKDIR /app/Backend/server
+RUN npm ci --omit=dev
+
+WORKDIR /app
+COPY Backend/server ./Backend/server
+COPY Backend/voice_engine ./Backend/voice_engine
+
+RUN mkdir -p Backend/server/uploads Backend/server/voice-recordings Backend/server/uploads/tailored-cvs
+
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=5 \
+    CMD node -e "require('net').createConnection(3001,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"
+
+WORKDIR /app/Backend/server
+CMD ["node", "index.js"]

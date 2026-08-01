@@ -8,10 +8,12 @@ const { v4: uuidv4 } = require('uuid');
 const SERVER_DIR = path.resolve(__dirname, '..');
 const BACKEND_DIR = path.resolve(SERVER_DIR, '..');
 const REPO_DIR = path.resolve(BACKEND_DIR, '..');
-const LOCAL_VENV_PYTHON = path.join(REPO_DIR, '.venv', 'Scripts', 'python.exe');
+const LOCAL_VENV_PYTHON = process.platform === 'win32'
+  ? path.join(REPO_DIR, '.venv', 'Scripts', 'python.exe')
+  : path.join(REPO_DIR, '.venv', 'bin', 'python');
 const DEFAULT_PYTHON = process.env.VOICE_ENGINE_PYTHON
   || process.env.PYTHON
-  || (fs.existsSync(LOCAL_VENV_PYTHON) ? LOCAL_VENV_PYTHON : 'python');
+  || (fs.existsSync(LOCAL_VENV_PYTHON) ? LOCAL_VENV_PYTHON : (process.platform === 'win32' ? 'python' : 'python3'));
 
 const toBuffer = (chunk) => {
   if (Buffer.isBuffer(chunk)) return Buffer.from(chunk);

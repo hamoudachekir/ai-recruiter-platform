@@ -7,7 +7,8 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 // Candidate view uses a TalkingHead-compatible avatar (Ready Player Me /
 // Oculus viseme morphs) sourced from github.com/met4citizen/TalkingHead.
 // The morph-target strategy below auto-detects viseme_aa / viseme_O / etc.
-const AVATAR_URL = import.meta.env.VITE_INTERVIEW_AVATAR_URL || '/avatars/mpfb.glb';
+const AVATAR_URL = import.meta.env.VITE_INTERVIEW_AVATAR_URL || '/avatars/interview-female.glb';
+const AVATAR_CACHE_BUST = `${AVATAR_URL}${AVATAR_URL.includes('?') ? '&' : '?'}v=idle-pose-2`;
 
 /* ── Lip-sync strategy ──────────────────────────────────────────────────────
  *
@@ -20,7 +21,7 @@ const AVATAR_URL = import.meta.env.VITE_INTERVIEW_AVATAR_URL || '/avatars/mpfb.g
  *  and drives the mouth from the Edge-TTS audio amplitude every frame.
  * ────────────────────────────────────────────────────────────────────────── */
 
-/* Morph-target name patterns (ARKit, RPM, Reallusion, generic) */
+/* Morph-target name patterns (ARKit, RPM, Avaturn, Reallusion, generic) */
 const MORPH_PATTERNS = {
   mouthOpen:  [/^mouthOpen$/i,  /^jawOpen$/i,   /^Mouth_Open$/i,  /mouth.*open/i,  /jaw.*open/i,  /viseme_open/i],
   mouthWide:  [/^viseme_aa$/i,  /^viseme_E$/i,  /^ae_aa$/i,       /mouth.*wide/i,  /mouth.*stretch/i, /viseme_aa/i],
@@ -28,8 +29,30 @@ const MORPH_PATTERNS = {
   mouthFv:    [/^viseme_FF$/i,  /^fv$/i,        /viseme_ff/i,     /mouth.*fv/i],
   blinkL:     [/^eyeBlinkLeft$/i,  /^Eye_Blink_L$/i, /blink.*left/i,  /leye.*close/i, /eye_blink_l/i],
   blinkR:     [/^eyeBlinkRight$/i, /^Eye_Blink_R$/i, /blink.*right/i, /reye.*close/i, /eye_blink_r/i],
+  smile:      [/^mouthSmile$/i, /^Smile$/i],
   smileL:     [/^mouthSmileLeft$/i,  /^Mouth_Smile_L$/i, /lsmile/i, /smile.*left/i],
   smileR:     [/^mouthSmileRight$/i, /^Mouth_Smile_R$/i, /rsmile/i, /smile.*right/i],
+  cheekL:     [/^cheekSquintLeft$/i, /cheek.*squint.*left/i],
+  cheekR:     [/^cheekSquintRight$/i, /cheek.*squint.*right/i],
+  browUp:     [/^browInnerUp$/i, /^browOuterUpLeft$/i, /brow.*inner.*up/i],
+};
+
+/* Friendly interviewer resting expression (0–1 morph weights) */
+const HAPPY_IDLE = {
+  smile: 0.38,
+  smileL: 0.28,
+  smileR: 0.28,
+  cheekL: 0.12,
+  cheekR: 0.12,
+  browUp: 0.08,
+};
+const HAPPY_SPEAK = {
+  smile: 0.22,
+  smileL: 0.16,
+  smileR: 0.16,
+  cheekL: 0.08,
+  cheekR: 0.08,
+  browUp: 0.06,
 };
 
 /* Jaw bone names across Reallusion CC, Mixamo, custom rigs */
@@ -56,6 +79,10 @@ export default function InterviewAvatar() {
     nextBlinkAt: 0,
     blinkPhase: 0,
     isSpeaking: false,
+    mixer: null,
+    bandLow: 0,
+    bandMid: 0,
+    bandHigh: 0,
 
     /* Strategy 1 — morphs */
     meshes: [],
@@ -103,8 +130,8 @@ export default function InterviewAvatar() {
       try { srcNodeRef.current?.disconnect(); } catch {}
 
       const analyser = actx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.55;
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.82;
 
       const src = actx.createMediaElementSource(audioEl);
       src.connect(analyser);
@@ -121,10 +148,24 @@ export default function InterviewAvatar() {
   const readAmplitude = () => {
     if (!analyserRef.current || !dataRef.current || !stateRef.current.isSpeaking) return 0;
     analyserRef.current.getByteFrequencyData(dataRef.current);
-    // Speech frequency bins 2-25 ≈ 250-3500 Hz
-    let sum = 0;
-    for (let i = 2; i <= 25; i++) sum += dataRef.current[i];
-    return (sum / 24) / 255;
+    const data = dataRef.current;
+    // Weighted speech bands: lows (jaw), mids (vowels), a bit of highs (sibilants)
+    let low = 0;
+    let mid = 0;
+    let high = 0;
+    for (let i = 2; i <= 8; i++) low += data[i];
+    for (let i = 9; i <= 28; i++) mid += data[i];
+    for (let i = 29; i <= 48; i++) high += data[i];
+    low /= 7 * 255;
+    mid /= 20 * 255;
+    high /= 20 * 255;
+    // Store band hints for smoother viseme mix
+    stateRef.current.bandLow = low;
+    stateRef.current.bandMid = mid;
+    stateRef.current.bandHigh = high;
+    const amp = Math.min(1, low * 0.35 + mid * 0.55 + high * 0.25);
+    // Soft noise gate — ignore tiny hiss
+    return amp < 0.04 ? 0 : (amp - 0.04) / 0.96;
   };
 
   /* ── Morph helpers ─────────────────────────────────────────── */
@@ -203,10 +244,73 @@ export default function InterviewAvatar() {
       loader.setMeshoptDecoder(MeshoptDecoder);
 
       loader.load(
-        AVATAR_URL,
+        AVATAR_CACHE_BUST,
         (gltf) => {
           const root = gltf.scene;
           scene.add(root);
+
+          /* Apply Blender idle pose from exported GLB animation (arms at sides).
+           * Prefer this over manual bone eulers — Three.js axes differ from Blender. */
+          if (gltf.animations?.length) {
+            const mixer = new THREE.AnimationMixer(root);
+            const clip =
+              gltf.animations.find((c) => /idle/i.test(c.name)) || gltf.animations[0];
+            const action = mixer.clipAction(clip);
+            action.reset();
+            action.play();
+            action.paused = true;
+            action.time = 0;
+            mixer.update(0);
+            root.updateMatrixWorld(true);
+            stateRef.current.mixer = mixer;
+            console.log(`[Avatar] applied Blender pose clip "${clip.name}"`);
+          }
+
+          /* Fix Avaturn face overlays + dull shiny tongue highlights */
+          root.traverse((obj) => {
+            if (!obj.isMesh) return;
+            const n = (obj.name || '').toLowerCase();
+            const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+            mats.forEach((mat) => {
+              if (!mat) return;
+              if (n.includes('eyeao') || n.includes('eye_ao') || n.includes('ao_mesh')) {
+                obj.visible = false;
+                return;
+              }
+              if (n.includes('eyelash') || n.includes('hair')) {
+                mat.transparent = true;
+                mat.alphaTest = Math.max(mat.alphaTest || 0, 0.35);
+                mat.depthWrite = false;
+                mat.side = THREE.DoubleSide;
+                mat.needsUpdate = true;
+              }
+              if (mat.map && (mat.opacity ?? 1) < 0.99) {
+                mat.transparent = true;
+                mat.depthWrite = false;
+                mat.needsUpdate = true;
+              }
+              /* Tongue: kill specular / emissive lighting so it doesn't glow */
+              if (n.includes('tongue')) {
+                if ('metalness' in mat) mat.metalness = 0;
+                if ('roughness' in mat) mat.roughness = 1;
+                if ('emissive' in mat) mat.emissive?.set?.(0x000000);
+                if ('emissiveIntensity' in mat) mat.emissiveIntensity = 0;
+                if ('envMapIntensity' in mat) mat.envMapIntensity = 0;
+                if ('specularIntensity' in mat) mat.specularIntensity = 0;
+                if ('sheen' in mat) mat.sheen = 0;
+                if ('clearcoat' in mat) mat.clearcoat = 0;
+                mat.needsUpdate = true;
+              }
+              /* Teeth: slightly less glossy so mouth reads natural */
+              if (n.includes('teeth')) {
+                if ('metalness' in mat) mat.metalness = 0;
+                if ('roughness' in mat) mat.roughness = Math.max(mat.roughness ?? 0.5, 0.72);
+                if ('envMapIntensity' in mat) mat.envMapIntensity = 0.15;
+                mat.needsUpdate = true;
+              }
+            });
+            if (n.includes('eyeao') || n === 'eyeao_mesh') obj.visible = false;
+          });
 
           /* ── 1. Collect all meshes, bones ───────────────────── */
           const meshes   = [];
@@ -397,22 +501,21 @@ export default function InterviewAvatar() {
           const bodySize = bodyBox.getSize(new THREE.Vector3());
           const bodyH    = bodySize.y > 0 ? bodySize.y : 1.7;
 
-          /* Head region = upper ~26 % of the full body height */
-          const headRegionH  = bodyH * 0.26;
-          const headCenterY  = bodyBox.max.y - bodyH * 0.12; // eye/nose level
+          /* Face portrait crop — arms stay out of the hero frame */
+          const headRegionH  = bodyH * 0.28;
+          const headCenterY  = bodyBox.max.y - bodyH * 0.12;
           const cx = (bodyBox.min.x + bodyBox.max.x) / 2;
           const cz = (bodyBox.min.z + bodyBox.max.z) / 2;
 
-          /* Portrait distance so head fills ~85 % of the vertical FOV */
           const fovRad = camera.fov * (Math.PI / 180);
-          const dist   = (headRegionH * 0.85) / (2 * Math.tan(fovRad / 2));
+          const dist   = (headRegionH * 0.95) / (2 * Math.tan(fovRad / 2));
 
           camera.near = dist * 0.05;
           camera.far  = dist * 60;
           camera.updateProjectionMatrix();
 
-          camera.position.set(cx, headCenterY, cz + dist);
-          camera.lookAt(cx, headCenterY - headRegionH * 0.04, cz);
+          camera.position.set(cx, headCenterY + headRegionH * 0.02, cz + dist * 1.05);
+          camera.lookAt(cx, headCenterY - headRegionH * 0.05, cz);
           console.log(`[Avatar] camera: bodyH=${bodyH.toFixed(3)}, headH=${headRegionH.toFixed(3)}, dist=${dist.toFixed(3)}`);
 
           stateRef.current.nextBlinkAt = performance.now() + 2000 + Math.random() * 2000;
@@ -437,28 +540,43 @@ export default function InterviewAvatar() {
       const t   = now / 1000;
       const rig = rigRef.current || {};
 
-      /* Smooth amplitude — fast attack, slow release */
+      /* Smooth amplitude — soft attack + soft release for natural lips */
       const raw = readAmplitude();
-      const kAmp = raw > ampRef.current ? 0.5 : 0.12;
+      const kAmp = raw > ampRef.current ? 0.22 : 0.085;
       ampRef.current += (raw - ampRef.current) * kAmp;
-      const amp  = ampRef.current;
-      const wave = (Math.sin(t * 8) + 1) * 0.5; // 0-1 at 8 Hz
+      const amp = ampRef.current;
+      const low = s.bandLow || 0;
+      const mid = s.bandMid || 0;
+      const high = s.bandHigh || 0;
+      /* Slow vowel shape oscillator — avoids robotic 8 Hz chatter */
+      const wave = (Math.sin(t * 3.2) + 1) * 0.5;
 
       /* ── Strategy 1: morph targets ───────────────────────── */
       if (s.strategy === 'morph' && s.meshes.length) {
+        const happy = s.isSpeaking ? HAPPY_SPEAK : HAPPY_IDLE;
         if (s.isSpeaking) {
-          if (rig.mouthOpen)  lerpMorph(rig.mouthOpen,  amp * 0.92,            0.40);
-          if (rig.mouthWide)  lerpMorph(rig.mouthWide,  amp * wave * 0.65,     0.30);
-          if (rig.mouthRound) lerpMorph(rig.mouthRound, amp * (1-wave) * 0.50, 0.30);
-          if (rig.mouthFv)    lerpMorph(rig.mouthFv,    amp * 0.30,            0.25);
+          /* Softer, band-aware viseme mix (more realistic than hard snaps) */
+          const openT  = Math.min(1, amp * 0.78 + low * 0.22);
+          const wideT  = Math.min(1, amp * (0.28 + mid * 0.45) * (0.55 + wave * 0.45));
+          const roundT = Math.min(1, amp * (0.22 + low * 0.35) * (0.55 + (1 - wave) * 0.45));
+          const fvT    = Math.min(1, amp * high * 0.55);
+          if (rig.mouthOpen)  lerpMorph(rig.mouthOpen,  openT,  0.18);
+          if (rig.mouthWide)  lerpMorph(rig.mouthWide,  wideT,  0.14);
+          if (rig.mouthRound) lerpMorph(rig.mouthRound, roundT, 0.14);
+          if (rig.mouthFv)    lerpMorph(rig.mouthFv,    fvT,    0.12);
         } else {
-          if (rig.mouthOpen)  lerpMorph(rig.mouthOpen,  0, 0.10);
-          if (rig.mouthWide)  lerpMorph(rig.mouthWide,  0, 0.08);
-          if (rig.mouthRound) lerpMorph(rig.mouthRound, 0, 0.08);
-          if (rig.mouthFv)    lerpMorph(rig.mouthFv,    0, 0.08);
-          if (rig.smileL)     lerpMorph(rig.smileL, 0.12, 0.04);
-          if (rig.smileR)     lerpMorph(rig.smileR, 0.12, 0.04);
+          if (rig.mouthOpen)  lerpMorph(rig.mouthOpen,  0, 0.08);
+          if (rig.mouthWide)  lerpMorph(rig.mouthWide,  0, 0.07);
+          if (rig.mouthRound) lerpMorph(rig.mouthRound, 0, 0.07);
+          if (rig.mouthFv)    lerpMorph(rig.mouthFv,    0, 0.07);
         }
+        /* Keep a warm smile even while talking (Avaturn uses mouthSmile) */
+        if (rig.smile)  lerpMorph(rig.smile,  happy.smile,  0.05);
+        if (rig.smileL) lerpMorph(rig.smileL, happy.smileL, 0.05);
+        if (rig.smileR) lerpMorph(rig.smileR, happy.smileR, 0.05);
+        if (rig.cheekL) lerpMorph(rig.cheekL, happy.cheekL, 0.04);
+        if (rig.cheekR) lerpMorph(rig.cheekR, happy.cheekR, 0.04);
+        if (rig.browUp) lerpMorph(rig.browUp, happy.browUp, 0.03);
       }
 
       /* ── Strategy 2: jaw bone ────────────────────────────── */
@@ -526,8 +644,10 @@ export default function InterviewAvatar() {
         if (rig.blinkR) setMorph(rig.blinkR, blinkV);
       }
 
-      /* Subtle idle head sway */
-      s.scene.rotation.y = Math.sin(t * 0.35) * 0.025;
+      /* Idle sway + light head bob while the agent speaks */
+      const speakBob = s.isSpeaking ? Math.sin(t * 5.5) * 0.012 * Math.min(1, amp * 2.2) : 0;
+      s.scene.rotation.y = Math.sin(t * 0.35) * 0.028 + (s.isSpeaking ? Math.sin(t * 2.1) * 0.01 : 0);
+      s.scene.rotation.x = speakBob;
 
       s.renderer.render(s.scene, s.camera);
     };

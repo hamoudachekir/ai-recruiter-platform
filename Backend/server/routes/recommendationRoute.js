@@ -4,7 +4,10 @@ const express = require('express');
 const router = express.Router();
 const { UserModel } = require('../models/user');
 
-const RECOMMENDATION_SERVICE_URL = 'http://127.0.0.1:5001/recommend';
+const {
+  RECOMMENDATION_SERVICE_URL,
+  REFRESH_RECOMMENDATION_INDEX_URL,
+} = require('../config/serviceUrls');
 const RECOMMENDATION_TIMEOUT_MS = Number(process.env.RECOMMENDATION_TIMEOUT_MS || 15000);
 const RECOMMENDATION_DOWN_COOLDOWN_MS = Number(process.env.RECOMMENDATION_DOWN_COOLDOWN_MS || 15000);
 const RECOMMENDATION_ERROR_LOG_THROTTLE_MS = Number(process.env.RECOMMENDATION_ERROR_LOG_THROTTLE_MS || 10000);
@@ -123,7 +126,7 @@ router.get('/for-user', async(req, res) => {
 // Force refresh the AI job index
 router.post('/refresh-index', async(req, res) => {
     try {
-        const response = await axios.post('http://127.0.0.1:5001/refresh-index', {}, {
+        const response = await axios.post(REFRESH_RECOMMENDATION_INDEX_URL, {}, {
             timeout: 30000,
             headers: { 'Content-Type': 'application/json' }
         });

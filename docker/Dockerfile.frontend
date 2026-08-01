@@ -1,0 +1,29 @@
+FROM node:20-bookworm-slim AS build
+
+WORKDIR /app
+
+ARG VITE_API_BASE_URL=http://localhost:3001
+ARG VITE_RXRESUME_URL=http://localhost:3000
+ARG VITE_SPEECH_STACK_URL=http://localhost:8012
+ARG VITE_FACE_VERIFY_TIMEOUT_MS=5000
+
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL \
+    VITE_RXRESUME_URL=$VITE_RXRESUME_URL \
+    VITE_SPEECH_STACK_URL=$VITE_SPEECH_STACK_URL \
+    VITE_FACE_VERIFY_TIMEOUT_MS=$VITE_FACE_VERIFY_TIMEOUT_MS
+
+COPY Frontend/package.json Frontend/package-lock.json* ./
+RUN npm ci
+
+COPY Frontend/ ./
+RUN npm run build
+
+FROM nginx:1.27-alpine
+
+COPY docker/nginx/frontend.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1

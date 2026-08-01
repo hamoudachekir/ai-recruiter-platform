@@ -1,0 +1,141 @@
+% !TEX program = pdflatex
+% Questel — Développeur Back-End Java / DaaS (Tunis, hybride) · FR
+% HONNÊTE : pas de Spring Boot, Spark, Elasticsearch, 5 ans Java si non acquis
+% Angle réel : back-end Python/APIs, SQL, Docker, GitLab CI, Agile — stack partiellement commune
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[french]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=1.15cm]{geometry}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{fontawesome5}
+\usepackage{microtype}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1pt}
+\pagestyle{empty}
+\setlist[itemize]{leftmargin=0.85em, itemsep=1pt, topsep=0pt, parsep=0pt, partopsep=0pt}
+
+\definecolor{primary}{HTML}{1A365D}
+\definecolor{accent}{HTML}{2B6CB0}
+\definecolor{muted}{HTML}{4A5568}
+\definecolor{rulecolor}{HTML}{E2E8F0}
+
+\newcommand{\TargetTitle}{Développeur Back-End junior \textbar{} APIs · Données · Python}
+\newcommand{\TargetKeywords}{Python · API REST · SQL · MySQL · PostgreSQL · Docker · Git · GitLab CI · Scrum}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=accent,
+  urlcolor=accent,
+  pdfauthor={Hamouda Chekir},
+  pdftitle={CV — Hamouda Chekir — Questel Back-End DaaS}
+}
+
+\titleformat{\section}
+  {\color{primary}\normalsize\bfseries}
+  {}
+  {0pt}
+  {}
+  [\vspace{0.5pt}{\color{accent}\titlerule[1.4pt]}\vspace{3pt}]
+\titlespacing*{\section}{0pt}{8pt}{2pt}
+
+\newcommand{\job}[3]{%
+  \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
+  {\color{accent}\textit{#3}}\\[1pt]
+  \begin{itemize}
+}
+
+\newcommand{\proj}[3]{%
+  \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
+  {\color{accent}\textit{#3}}\\[0.5pt]
+  \begin{itemize}
+}
+
+\newcommand{\edu}[3]{%
+  \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
+  {\color{accent}\textit{#3}}\\[2pt]
+}
+
+\newcommand{\cert}[3]{%
+  \textbf{\color{primary}\small #1}\hfill{\color{muted}\scriptsize #3}\\[-1pt]
+  {\color{accent}\small\textit{#2}}\\[3pt]
+}
+
+\newcommand{\contactsep}{\hspace{4pt}{\color{rulecolor}|}\hspace{4pt}}
+
+\begin{document}
+
+{\fontsize{20}{24}\selectfont\bfseries\color{primary}HAMOUDA CHEKIR}\\[1pt]
+{\normalsize\color{accent}\TargetTitle}\\[3pt]
+{\footnotesize\color{muted}%
+  \faIcon{envelope}\hspace{2pt}\href{mailto:hamoudachkir@yahoo.fr}{hamoudachkir@yahoo.fr}%
+  \contactsep
+  \faIcon{phone}\hspace{2pt}+216\,55\,913\,832%
+  \contactsep
+  \faIcon{map-marker-alt}\hspace{2pt}Tunis, Tunisie%
+  \contactsep
+  \faIcon{linkedin}\hspace{2pt}\href{https://www.linkedin.com/in/hamouda-chekir-5053572b4}{LinkedIn}%
+  \contactsep
+  \faIcon{github}\hspace{2pt}\href{https://github.com/hamoudachekir}{GitHub}%
+}\\[4pt]
+
+\section{PROFIL}
+Ingénieur ESPRIT (TWIN) orienté \textbf{back-end} : APIs, services et données relationnelles, en Agile.
+Chez Talan, j'ai livré des services Python (FastAPI) et une passerelle Node sur NextHire (\textbf{16 microservices}, Docker, MongoDB), avec tests, revues et livraison continue.
+Je cherche à renforcer un socle Java / data à volume chez Questel — sans prétendre à 5 ans de Java/Spark.
+
+\section{EXPÉRIENCE}
+
+\job{Ingénieur Logiciel — Projet de Fin d'Études}{Févr. 2026 -- Août 2026}{Talan \textbar{} Tunis}
+  \item Conçu et livré des services back-end (Python FastAPI/Flask + passerelle Node) exposant des \textbf{API REST} pour le parcours recrutement (parsing, scoring, planification).
+  \item Structuré le stockage et les échanges de données entre microservices (MongoDB partagé, frontières dockerisées) pour un produit multi-équipes.
+  \item Participé à la qualité livrable : revues de code, itérations Agile, packaging Docker pour faciliter le déploiement.
+\end{itemize}
+
+\job{Stagiaire Développeur Full-Stack}{Juin 2025 -- Août 2025}{SmartConseil — Dafe Management \textbar{} Tunis}
+  \item Développé des écrans et traitements métier Laravel sur \textbf{PostgreSQL} et MongoDB (CRUD, filtres, exports PDF/Excel).
+  \item Travaillé en Scrum avec GitLab CI/CD, tests unitaires, SonarQube et Docker.
+\end{itemize}
+
+\job{Stagiaire Développeur Web}{Juin 2024 -- Août 2024}{Big Deal (Club Privilèges) \textbar{} Tunis}
+  \item Livré un module de codes cadeaux (génération, affectation, suivi) sous Laravel/Filament, validé via Git et Postman avant mise en production.
+\end{itemize}
+
+\section{PROJET SÉLECTIONNÉ}
+{\footnotesize
+\proj{TalentMatch — API Back-End}{2025}{Python · FastAPI · React · données structurées}
+  \item Conçu une API FastAPI pour orchestrer des flux métier (vérifications, estimations, génération de fiches) avec persistance et clients React.
+\end{itemize}
+}
+
+\section{FORMATION}
+\edu{Cycle Ingénieur — Spécialité TWIN (Technologies du Web, de l'Internet et des Réseaux)}{2023 -- 2026}{ESPRIT \textbar{} Tunis}
+\edu{Licence en Informatique de Gestion — E-Business}{2020 -- 2023}{ESEN \textbar{} Manouba}
+
+\section{COMPÉTENCES}
+{\small
+\textbf{\color{primary}Maîtrisées :} Python, API REST, SQL (MySQL, PostgreSQL), MongoDB, Docker, Git, GitLab CI, Scrum\\[2pt]
+\textbf{\color{primary}Bases académiques :} Java\\[2pt]
+\textbf{\color{primary}Mots-clés offre (réels) :} \TargetKeywords
+}
+
+\vspace{2pt}
+\begin{minipage}[t]{0.62\textwidth}
+\section{CERTIFICATIONS}
+\cert{AWS Academy Graduate — Cloud Foundations}{AWS Academy}{Mai 2025}
+\end{minipage}%
+\hfill
+\begin{minipage}[t]{0.34\textwidth}
+\section{LANGUES}
+{\small\textbf{Arabe} — Langue maternelle}\\[1pt]
+{\small\textbf{Français} — Courant}\\[1pt]
+{\small\textbf{Anglais} — Avancé}
+\end{minipage}
+
+\end{document}

@@ -1,0 +1,55 @@
+% !TEX program = pdflatex
+% Lettre de motivation — Amaris Consulting · Data Engineer · Tunis
+\documentclass[11pt,a4paper]{letter}
+
+\usepackage[french]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  urlcolor=blue,
+  pdfauthor={Hamouda Chekir},
+  pdftitle={Lettre de motivation — Hamouda Chekir — Amaris Data Engineer}
+}
+
+\address{%
+  Hamouda Chekir\\
+  Tunis, Tunisie\\
+  +216 55 913 832\\
+  \href{mailto:hamoudachkir@yahoo.fr}{hamoudachkir@yahoo.fr}%
+}
+
+\date{\today}
+\signature{Hamouda Chekir}
+
+\begin{document}
+
+\begin{letter}{%
+  Amaris Consulting\\
+  Service Recrutement\\
+  Tunis, Tunisie\\
+  Poste : Data Engineer — Data Ingestion Factory%
+}
+
+\opening{Madame, Monsieur,}
+
+Actuellement en fin de cycle d'ingénieur à l'ESPRIT (spécialité TWIN), je candidate au poste de \textbf{Data Engineer} au sein de votre Data Ingestion Factory à Tunis. Votre mission — industrialiser des pipelines d'ingestion robustes (Python, APIs, bases, CI/CD, run production) en collaboration internationale — correspond à la direction dans laquelle je veux construire ma carrière.
+
+Je le dis clairement : je n'ai pas encore les \textbf{4 à 6 ans} d'expérience data engineering demandés, ni une pratique production de \textbf{PySpark, Kafka/Confluent ou Databricks}. En revanche, j'ai déjà livré des flux Python d'ingestion et de transformation dans un contexte proche du build-to-run, et je suis prêt à monter vite sur la stack Data Factory sous encadrement.
+
+Chez \textbf{Talan}, sur NextHire (\textbf{16 microservices}), j'ai conçu et maintenu des services Python (FastAPI/Flask) qui ingèrent et traitent des données (parsing CV, OCR, scoring), les persistent en \textbf{MongoDB}, et les exposent via des \textbf{APIs REST}. J'ai industrialisé le delivery avec \textbf{Docker et GitLab CI/CD}, participé aux code reviews et aux cérémonies Agile, et assuré le troubleshooting de parcours critiques en conditions réelles. J'ai aussi travaillé des connecteurs et traitements Python vers des APIs/SaaS externes (projets TalentMatch, reporting Health Record), avec une exigence de code lisible et maintenable.
+
+Français et anglais courants, à l'aise pour documenter en anglais (Confluence) et collaborer avec des équipes distribuées (ex. TotalEnergies côté client). Certifié AWS Cloud Foundations, je souhaite approfondir cloud, observabilité et bonnes pratiques FinOps au quotidien.
+
+Amaris m'attire pour son modèle international, son Académie et la possibilité de croître d'un premier niveau de responsabilité vers davantage d'autonomie sur des plateformes data à grande échelle. Je serais ravi d'échanger lors d'un premier contact téléphonique pour clarifier l'adéquation junior / poste et la trajectoire de montée en compétence.
+
+\closing{Je vous prie d'agréer, Madame, Monsieur, l'expression de mes salutations distinguées.}
+
+\end{letter}
+\end{document}

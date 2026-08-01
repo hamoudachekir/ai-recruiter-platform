@@ -15,6 +15,7 @@ const aiGenerationRateLimiter = require('../middleware/aiGenerationRateLimit');
 const { generateJson } = require('../services/aiContentService');
 const { buildJobDescriptionPrompt } = require('../prompts/jobDescription');
 const { buildQuestionSuggestionPrompt } = require('../prompts/questionSuggestion');
+const { REFRESH_RECOMMENDATION_INDEX_URL } = require('../config/serviceUrls');
 
 const { INTERVIEW_STYLES } = JobModel;
 
@@ -91,7 +92,7 @@ const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
 const refreshRecommendationIndex = async () => {
   try {
     await axios.post(
-      'http://127.0.0.1:5001/refresh-index',
+      REFRESH_RECOMMENDATION_INDEX_URL,
       {},
       { timeout: 15000, headers: { 'Content-Type': 'application/json' } }
     );

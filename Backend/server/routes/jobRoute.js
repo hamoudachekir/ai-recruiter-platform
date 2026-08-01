@@ -3,10 +3,11 @@ const router = express.Router();
 const User = require('../models/user');
 const JobModel = require('../models/job');
 const axios = require('axios');
+const { REFRESH_RECOMMENDATION_INDEX_URL } = require('../config/serviceUrls');
 
 const refreshRecommendationIndex = async () => {
   try {
-    await axios.post('http://127.0.0.1:5001/refresh-index', {}, {
+    await axios.post(REFRESH_RECOMMENDATION_INDEX_URL, {}, {
       timeout: 15000,
       headers: { 'Content-Type': 'application/json' }
     });

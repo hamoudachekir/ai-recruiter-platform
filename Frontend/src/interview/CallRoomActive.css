@@ -932,7 +932,7 @@
 /* ── AI state badge ─────────────────────────────────────────── */
 .cr-tile__status {
   position: absolute;
-  bottom: 100px;
+  bottom: 18px;
   left: 14px;
   font-size: 12px;
   font-weight: 600;
@@ -944,6 +944,7 @@
   -webkit-backdrop-filter: blur(12px);
   letter-spacing: 0.3px;
   border: 1px solid rgba(255,255,255,0.1);
+  max-width: calc(100% - 280px); /* keep clear of bottom-right PiP */
 }
 .cr-tile__status.speaking {
   background: rgba(16,185,129,0.88);
@@ -970,14 +971,14 @@
   font-size: 14px;
 }
 
-/* ── Picture-in-Picture cam overlay (Google Meet style) ─────── */
-/* Default large size for desktop - bigger and clearer candidate view */
+/* ── Picture-in-Picture cam overlay — bottom-right so avatar face stays clear */
 .cr-pip {
   position: absolute;
-  top: 16px;
+  top: auto;
+  bottom: 18px;
   right: 16px;
-  width: clamp(260px, 22vw, 360px);
-  height: clamp(170px, 15vw, 240px);
+  width: clamp(160px, 16vw, 240px);
+  height: clamp(110px, 11vw, 160px);
   border-radius: 14px;
   overflow: hidden;
   z-index: 20;
@@ -992,58 +993,60 @@
   box-shadow: 0 10px 40px rgba(0,0,0,0.65), 0 0 0 2px rgba(99,102,241,0.25);
 }
 
-/* Size modifier classes */
+/* Size modifier classes — keep PiP compact so it never covers the face */
 .cr-pip--large {
-  width: clamp(280px, 24vw, 380px);
-  height: clamp(185px, 16vw, 255px);
+  width: clamp(168px, 17vw, 250px);
+  height: clamp(114px, 12vw, 168px);
 }
 
 .cr-pip--medium {
-  width: clamp(200px, 18vw, 280px);
-  height: clamp(135px, 12vw, 190px);
+  width: clamp(140px, 14vw, 200px);
+  height: clamp(96px, 10vw, 136px);
 }
 
 .cr-pip--small {
-  width: clamp(140px, 12vw, 200px);
-  height: clamp(95px, 8vw, 135px);
+  width: clamp(120px, 12vw, 168px);
+  height: clamp(82px, 8vw, 112px);
 }
 
 /* Responsive breakpoints */
-/* Tablet: medium size */
 @media (max-width: 1200px) {
-  .cr-pip:not(.cr-pip--large):not(.cr-pip--small) {
-    width: clamp(200px, 28vw, 280px);
-    height: clamp(135px, 19vw, 190px);
+  .cr-pip:not(.cr-pip--small) {
+    width: clamp(150px, 20vw, 220px);
+    height: clamp(100px, 14vw, 148px);
+    bottom: 16px;
+    right: 14px;
   }
 }
 
-/* Small tablet: smaller size */
 @media (max-width: 900px) {
-  .cr-pip:not(.cr-pip--large) {
-    width: clamp(160px, 30vw, 240px);
-    height: clamp(110px, 20vw, 160px);
+  .cr-pip {
+    width: clamp(130px, 24vw, 190px);
+    height: clamp(90px, 16vw, 128px);
+    bottom: 14px;
+    right: 12px;
   }
 }
 
-/* Mobile: smallest size or reposition if needed */
 @media (max-width: 640px) {
   .cr-pip {
-    width: clamp(140px, 35vw, 200px);
-    height: clamp(95px, 24vw, 135px);
-    top: 12px;
-    right: 12px;
+    width: clamp(110px, 30vw, 160px);
+    height: clamp(76px, 20vw, 108px);
+    top: auto;
+    bottom: 12px;
+    right: 10px;
     border-radius: 10px;
     border-width: 1.5px;
   }
 }
 
-/* Very small mobile */
 @media (max-width: 480px) {
   .cr-pip {
-    width: 120px;
-    height: 80px;
-    top: 10px;
-    right: 10px;
+    width: 108px;
+    height: 72px;
+    top: auto;
+    bottom: 10px;
+    right: 8px;
     border-radius: 8px;
   }
   .cr-pip__label {

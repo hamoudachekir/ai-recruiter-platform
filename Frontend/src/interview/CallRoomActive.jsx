@@ -3171,7 +3171,7 @@ const CallRoomActive = () => {
 
               {/* Picture-in-Picture: candidate cam overlaid on avatar */}
               {!isRH && (
-                <div className="cr-pip cr-pip--large">
+                <div className="cr-pip cr-pip--medium">
                   <div className="cr-pip__label">You</div>
                   <video
                     ref={webcamVideoRef}

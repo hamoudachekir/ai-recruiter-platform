@@ -1,0 +1,72 @@
+# Personal / non-application content
+cv/
+cv-nefzi/
+rapportstage/
+scratch/
+tmp/
+_logs/
+.tmp-test-logs/
+.superpowers/
+.claude/
+.cursor/
+agent-transcripts/
+
+# Local dev environments
+.venv/
+venv/
+env/
+node_modules/
+Frontend/node_modules/
+Frontend/login/node_modules/
+Backend/server/node_modules/
+
+# Python / JS build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.launch-logs/
+dist/
+build/
+.cache/
+test-results/
+Frontend/dist/
+Frontend/login/dist/
+*.aux
+*.synctex.gz
+*.log
+*.pdf
+
+# Secrets (mount via env at runtime)
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+# Runtime data — use Docker volumes instead
+uploads/
+uploadsPics/
+Backend/server/uploads/
+Backend/server/voice-recordings/
+Backend/server/AI/uploads/
+Backend/uploads/
+
+# Media / test artifacts
+*.wav
+*.mp3
+*.mp4
+*.webm
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Windows-only bundles
+Backend/third_party/nvidia_cuda12/

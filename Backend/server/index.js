@@ -70,6 +70,7 @@ const {
   enrollUserFaceProfile,
   getFaceEnrollmentMessage,
 } = require("./services/faceVerifyService");
+const serviceUrls = require("./config/serviceUrls");
 // Create Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
@@ -2065,7 +2066,7 @@ const generateCandidateQuizForJobCandidate = async ({
 
   try {
     const aiResponse = await axios.post(
-      "http://localhost:5003/generate-quiz",
+      serviceUrls.QUIZ_GENERATE_URL,
       aiPayload,
       {
         timeout: 60000,
@@ -3495,7 +3496,7 @@ app.post(
 
           try {
             const pythonResponse = await axios.post(
-              "http://127.0.0.1:5002/upload",
+              serviceUrls.CV_PARSER_UPLOAD_URL,
               form,
               {
                 headers: {
@@ -3985,7 +3986,7 @@ app.post(
       const form = new FormData();
       form.append("resume", fs.createReadStream(newPath));
       const pythonResponse = await axios.post(
-        "http://localhost:5002/upload",
+        serviceUrls.CV_PARSER_UPLOAD_URL,
         form,
         {
           headers: {
@@ -4384,7 +4385,7 @@ app.post(
 const refreshRecommendationIndexSafe = async () => {
   try {
     await axios.post(
-      "http://127.0.0.1:5001/refresh-index",
+      serviceUrls.REFRESH_RECOMMENDATION_INDEX_URL,
       {},
       {
         timeout: 15000,
@@ -5706,7 +5707,7 @@ app.post("/Frontend/generate-quiz-from-profile", async (req, res) => {
     };
 
     const aiResponse = await axios.post(
-      "http://localhost:5003/generate-quiz",
+      serviceUrls.QUIZ_GENERATE_URL,
       aiPayload,
       {
         timeout: 60000,
@@ -5842,7 +5843,7 @@ app.post("/Frontend/adaptive-quiz-page", async (req, res) => {
 
     try {
       const aiAdaptiveResponse = await axios.post(
-        "http://localhost:5003/adaptive-next-page",
+        serviceUrls.QUIZ_ADAPTIVE_NEXT_PAGE_URL,
         {
           questions,
           page: Math.max(1, Number(page) || 1),
@@ -6924,7 +6925,7 @@ app.post("/Frontend/predict-score", async (req, res) => {
 
     // Call Flask ML service
     const mlResponse = await axios.post(
-      "http://localhost:7000/predict",
+      serviceUrls.INTERVIEW_SCORE_PREDICT_URL,
       features,
     );
     const predictedScore = mlResponse.data.interview_score;
@@ -7034,7 +7035,7 @@ app.post("/predict-from-skills", async (req, res) => {
     };
 
     const response = await axios.post(
-      "http://localhost:5000/predict-from-skills",
+      serviceUrls.HIRING_MODEL_PREDICT_URL,
       requestData,
       {
         timeout: 15000,

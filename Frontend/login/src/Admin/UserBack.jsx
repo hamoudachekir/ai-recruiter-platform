@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import { API_BASE_URL } from "../config/api";
 
 const UserBack = () => {
   const [users, setUsers] = useState([]);
@@ -8,7 +9,7 @@ const UserBack = () => {
 
   useEffect(() => {
     axios
-      .get("http://localhost:3001/backend/getUsers")
+      .get(`${API_BASE_URL}/backend/getUsers`)
       .then((response) => {
         setUsers(response.data);
         setLoading(false);
@@ -22,7 +23,7 @@ const UserBack = () => {
 
   const handleDelete = (userId) => {
     axios
-      .delete(`http://localhost:3001/backend/deleteUser/${userId}`)
+      .delete(`${API_BASE_URL}/backend/deleteUser/${userId}`)
       .then(() => {
         setUsers(users.filter((user) => user._id !== userId)); // Supprimer l'utilisateur du tableau local
       })
