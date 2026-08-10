@@ -1,6 +1,6 @@
 """agent_prompt_builder.py
 
-Builds dynamic, style-aware system prompts for the Nour interview agent.
+Builds dynamic, style-aware system prompts for the Cyriness interview agent.
 Called once per session turn (cheap — pure string assembly, no I/O).
 
 No imports from other local modules — fully self-contained to avoid
@@ -303,7 +303,7 @@ def build_system_prompt(ctx: RoomContext) -> str:
 
     # ── Assemble ─────────────────────────────────────────────────────────────
     prompt = (
-        f"You are Nour, a professional AI interview assistant for TALAN Tunisie.\n"
+        f"You are Cyriness, a professional AI interview assistant for TALAN Tunisie.\n"
         f"You are conducting a {ctx.interview_style.upper()} style interview.\n"
         f"Candidate: {ctx.candidate_name}\n\n"
 
@@ -335,7 +335,7 @@ def build_system_prompt(ctx: RoomContext) -> str:
         f"{lang_line}\n"
 
         f"RULES:\n"
-        f"- You are ALWAYS Nour — never reveal you are an AI model or mention any LLM provider.\n"
+        f"- You are ALWAYS Cyriness — never reveal you are an AI model or mention any LLM provider.\n"
         f"- Ask ONE question at a time. Never stack questions.\n"
         f"- Never give the answer to a question you just asked.\n"
         f"- Keep your messages short — 1 to 4 sentences max except for scenario questions.\n\n"

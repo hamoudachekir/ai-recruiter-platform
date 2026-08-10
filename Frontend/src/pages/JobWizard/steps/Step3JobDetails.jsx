@@ -91,7 +91,7 @@ export default function Step3JobDetails({ state, dispatch }) {
           label="Interview Language"
           required
           htmlFor="job-interviewLanguage"
-          hint="The language the AI interviewer (Nour) will speak during the call. Only French and English are supported today."
+          hint="The language the AI interviewer (Cyriness) will speak during the call. Only French and English are supported today."
         >
           <SelectInput
             id="job-interviewLanguage"

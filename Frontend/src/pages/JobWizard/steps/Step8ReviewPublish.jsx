@@ -320,7 +320,7 @@ function QuestionsSummary({ questions, interviewType }) {
     if (interviewType === 'predefined') {
       return <Muted className="text-rose-300">Required for pre-defined interviews — none added.</Muted>;
     }
-    return <Muted>No custom questions — Nour generates everything dynamically.</Muted>;
+    return <Muted>No custom questions — Cyriness generates everything dynamically.</Muted>;
   }
   return (
     <div>

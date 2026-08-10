@@ -117,7 +117,7 @@ export default function Step6Questions({ state, dispatch }) {
         subtitle={
           interviewType === 'predefined'
             ? 'Every candidate answers the same questions in the same order. Add at least one to publish.'
-            : 'Add up to 10 anchor questions. Nour will dynamically generate the rest from the resume and job description.'
+            : 'Add up to 10 anchor questions. Cyriness will dynamically generate the rest from the resume and job description.'
         }
       />
 
@@ -264,7 +264,7 @@ function EmptyState({ interviewType, onAdd }) {
       <p className={cn('text-sm', isRequired ? 'text-amber-200' : 'text-slate-400')}>
         {isRequired
           ? 'You need at least one question to publish a pre-defined interview.'
-          : 'No questions added yet. Hybrid interviews work fine with zero — Nour fills the gaps adaptively.'}
+          : 'No questions added yet. Hybrid interviews work fine with zero — Cyriness fills the gaps adaptively.'}
       </p>
       <button
         type="button"

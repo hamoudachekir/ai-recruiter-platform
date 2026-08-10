@@ -18,7 +18,7 @@ if (-not (Test-Path $venvPython)) {
 # works regardless of whether the launching shell had it. Child processes
 # (Start-Process / cmd start) inherit this environment variable.
 if (-not $env:PYTHONHOME -or -not (Test-Path (Join-Path $env:PYTHONHOME 'Lib\os.py'))) {
-    $env:PYTHONHOME = 'C:\Users\wh\AppData\Local\Programs\Python\Python314'
+    $env:PYTHONHOME = 'C:\Users\omars\AppData\Local\Programs\Python\Python311'
 }
 $env:PYTHONUTF8 = '1'
 Write-Host "[OK] PYTHONHOME=$($env:PYTHONHOME)"

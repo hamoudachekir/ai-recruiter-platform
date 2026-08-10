@@ -1,6 +1,6 @@
 """interview_service.py
 
-Manages Nour interview sessions end-to-end:
+Manages Cyriness interview sessions end-to-end:
   - start_session  : build prompt, open session in Redis (or in-memory fallback)
   - send_message   : call LLM, update IRT theta, track stress
   - end_session    : compute final report, write to MongoDB
@@ -224,7 +224,7 @@ async def start_session(
     style          = room_data.get("interview_style", "friendly")
 
     opening_msg = (
-        f"Hello {candidate_name}, I'm Nour, your AI interview assistant for TALAN Tunisie. "
+        f"Hello {candidate_name}, I'm Cyriness, your AI interview assistant for TALAN Tunisie. "
         f"Today we are discussing the {job_title} position. "
     )
     if session_type == "intro":

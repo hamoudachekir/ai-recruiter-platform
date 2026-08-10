@@ -10,7 +10,7 @@ set "PYTHONUTF8=1"
 REM The .venv's python.exe lives at C:\Python314 but its standard library and
 REM site-packages are at the proper install below. PYTHONHOME bridges them.
 REM Set it here so the services work even from a terminal that didn't inherit it.
-set "PYTHONHOME=C:\Users\wh\AppData\Local\Programs\Python\Python314"
+set "PYTHONHOME=C:\Users\omars\AppData\Local\Programs\Python\Python311"
 
 set "VENV_PY=..\..\..\.venv\Scripts\python.exe"
 if not exist "%VENV_PY%" (

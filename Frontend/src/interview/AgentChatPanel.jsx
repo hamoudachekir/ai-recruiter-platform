@@ -19,7 +19,40 @@ const stripSentimentPrefix = (s) =>
  *   roomDbId  — CallRoom._id (Mongo id, used as interview_id by the Python agent)
  *   isRH      — true to show Start/Switch/End controls + scoring readout
  */
-const PHASE_LABEL = { intro: 'HR Intro', technical: 'Technical' };
+const PHASE_LABEL = {
+  intro: '1 · HR Intro',
+  introduction: '1 · HR Intro',
+  experience: '2 · Experience',
+  technical: '3 · Technical',
+  behavioral: '4 · Behavioral',
+  closing: '5 · Your Questions',
+};
+
+const resolveInterviewPhase = (payload = {}) => {
+  const candidates = [
+    payload.interviewPhase,
+    payload.currentPhase,
+    payload.interview_phase,
+    payload.current_phase,
+    payload.agent_message?.interview_phase,
+  ];
+  for (const value of candidates) {
+    const key = String(value || '').trim().toLowerCase();
+    if (PHASE_LABEL[key]) return key;
+  }
+  const legacy = String(payload.phase || '').trim().toLowerCase();
+  if (legacy === 'technical') return 'technical';
+  if (legacy === 'intro') return null;
+  return null;
+};
+
+const resolvePhaseLabel = (legacyPhase, interviewPhase) => {
+  const fine = String(interviewPhase || '').trim().toLowerCase();
+  if (fine && PHASE_LABEL[fine]) return PHASE_LABEL[fine];
+  const legacy = String(legacyPhase || '').trim().toLowerCase();
+  return PHASE_LABEL[legacy] || legacyPhase || '1 · HR Intro';
+};
+
 const STYLE_OPTIONS = [
   { value: 'friendly', label: 'Friendly' },
   { value: 'strict', label: 'Strict' },
@@ -39,6 +72,8 @@ export default function AgentChatPanel({
   turnStatusLabel = '',
   submitDisabled = false,
   inputDisabled = false,
+  answerInputMode = 'speak',
+  onAnswerInputModeChange,
   onTypingChange,
   onCandidateAnswerSubmit,
   onSubmitVoiceDraft,
@@ -55,6 +90,7 @@ export default function AgentChatPanel({
   const [messages, setMessages] = useState([]); // { role: 'agent'|'candidate', text, meta?, ts }
   const [sessionActive, setSessionActive] = useState(false);
   const [phase, setPhase] = useState('intro');
+  const [interviewPhase, setInterviewPhase] = useState('introduction');
   const [scoring, setScoring] = useState(null); // { score, confidence, theta, stress_level, agent_mode, reasoning }
   const [lastSkill, setLastSkill] = useState('');
   const [lastDifficulty, setLastDifficulty] = useState(null);
@@ -74,6 +110,12 @@ export default function AgentChatPanel({
   // Keys of agent messages already added — checked synchronously to survive
   // React's batching where two near-simultaneous events both see stale `prev`.
   const seenAgentMsgKeysRef = useRef(new Set());
+  const isTypeMode = answerInputMode === 'type';
+  const phaseBadge = resolvePhaseLabel(phase, interviewPhase);
+  const phaseBadgeClass = String(interviewPhase || phase || 'intro')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z_]/g, '') || 'intro';
 
   useEffect(() => {
     sessionActiveRef.current = sessionActive;
@@ -89,7 +131,10 @@ export default function AgentChatPanel({
     const onMessage = (payload) => {
       if (payload.roomId && roomId && payload.roomId !== roomId) return;
 
-      const incomingText = String(payload.text || '').trim();
+      const incomingText = String(payload.text || '')
+        .replace(/\bNour\b/gi, 'Cyriness')
+        .replace(/\bCyrine\b/gi, 'Cyriness')
+        .trim();
       // Build a stable key: turnIndex (if present) + first 120 chars of text.
       // Check synchronously via ref — immune to React batching race where two
       // near-simultaneous events both see the same stale `prev` snapshot.
@@ -105,6 +150,10 @@ export default function AgentChatPanel({
       setSessionActive(true);
       setBusy(false);
       setPhase(payload.phase || 'intro');
+      const nextInterviewPhase = resolveInterviewPhase(payload);
+      if (nextInterviewPhase) {
+        setInterviewPhase(nextInterviewPhase);
+      }
       if (payload.interviewStyle) setInterviewStyle(payload.interviewStyle);
       if (payload.difficulty != null) setLastDifficulty(payload.difficulty);
       if (payload.skillFocus) setLastSkill(payload.skillFocus);
@@ -281,11 +330,20 @@ export default function AgentChatPanel({
   }, [candidateDraftText]);
 
   useEffect(() => {
-    const text = String(initialAgentMessage || '').trim();
+    const text = String(initialAgentMessage || '')
+      .replace(/\bNour\b/gi, 'Cyriness')
+      .replace(/\bCyrine\b/gi, 'Cyriness')
+      .trim();
     if (!text) return;
 
     setSessionActive(true);
-    if (initialAgentPhase) setPhase(initialAgentPhase);
+    if (initialAgentPhase) {
+      const key = String(initialAgentPhase || '').trim().toLowerCase();
+      if (PHASE_LABEL[key] && key !== 'intro') {
+        setInterviewPhase(key === 'technical' ? 'technical' : key);
+      }
+      setPhase(key === 'technical' ? 'technical' : key === 'intro' || key === 'introduction' ? 'intro' : key);
+    }
     if (initialAgentDifficulty != null) setLastDifficulty(initialAgentDifficulty);
     if (initialAgentSkill) setLastSkill(initialAgentSkill);
 
@@ -418,9 +476,9 @@ export default function AgentChatPanel({
       <div className="agent-panel__header">
         <div className="agent-panel__title">
           <span className="agent-panel__bot">🤖</span>
-          <span>AI Interviewer</span>
-          <span className={`agent-panel__phase agent-panel__phase--${phase}`}>
-            {PHASE_LABEL[phase] || phase}
+          <span>Cyriness</span>
+          <span className={`agent-panel__phase agent-panel__phase--${phaseBadgeClass}`}>
+            {phaseBadge}
           </span>
         </div>
         {isRH && (
@@ -584,13 +642,16 @@ export default function AgentChatPanel({
           <div className="agent-panel__empty">
             {isRH
               ? 'Interview intro starts automatically when the room is ready.'
-              : 'Waiting for the interviewer to start the session. You can type below once your mic and camera are ready.'}
+              : 'Waiting for Cyriness to start. Use Speak or Type below once the room is ready.'}
           </div>
         ) : (
           messages.map((m, idx) => (
             // Sentiment/emotion labels are intentionally not rendered for
             // candidate turns: emotion is not used in the recruitment decision.
             <div key={idx} className={`agent-msg agent-msg--${m.role}`}>
+              {m.role === 'agent' && (
+                <span className="agent-msg__speaker">Cyriness</span>
+              )}
               {m.role === 'agent' && m.meta?.difficulty != null && (
                 <span className="agent-msg__badge" title={m.meta.skillFocus || ''}>
                   D{m.meta.difficulty}
@@ -611,7 +672,7 @@ export default function AgentChatPanel({
             </span>
           </div>
         )}
-        {(draftBubble || turnState === 'candidate_answering') && (
+        {(draftBubble || turnState === 'candidate_answering') && !isTypeMode && (
           <div className="agent-msg agent-msg--candidate agent-msg--draft">
             <span className="agent-msg__text" style={{ opacity: 0.7, fontStyle: 'italic' }}>
               {draftBubble || 'Listening'}
@@ -623,45 +684,73 @@ export default function AgentChatPanel({
 
       {!isRH && (
         <div className="agent-panel__composer">
+          <div className="agent-composer__mode" role="group" aria-label="Answer mode">
+            <button
+              type="button"
+              className={`agent-composer__mode-btn ${!isTypeMode ? 'agent-composer__mode-btn--active' : ''}`}
+              onClick={() => onAnswerInputModeChange?.('speak')}
+              disabled={inputDisabled}
+            >
+              Speak
+            </button>
+            <button
+              type="button"
+              className={`agent-composer__mode-btn ${isTypeMode ? 'agent-composer__mode-btn--active' : ''}`}
+              onClick={() => onAnswerInputModeChange?.('type')}
+              disabled={inputDisabled}
+            >
+              Type
+            </button>
+          </div>
           {turnStatusLabel && (
             <div className={`agent-composer__status agent-composer__status--${turnState}`}>
               {turnStatusLabel}
             </div>
           )}
-          <textarea
-            className="agent-composer__input"
-            placeholder="Type your answer… (Enter to send, Shift+Enter for newline)"
-            rows={2}
-            value={input}
-            onChange={(e) => {
-              const nextValue = e.target.value;
-              setInput(nextValue);
-              if (containsProfanity(nextValue)) {
-                setError('Please avoid inappropriate language in your answer.');
-              } else if (error) {
-                setError('');
-              }
-              onTypingChange?.(!!nextValue.trim());
-            }}
-            onKeyDown={onKeyDown}
-            disabled={inputDisabled}
-          />
-          {canSubmitVoiceDraft && (
-            <button
-              className="agent-btn"
-              onClick={onSubmitVoiceDraft}
-              disabled={busy || submitDisabled}
-            >
-              Submit voice answer
-            </button>
+          {isTypeMode ? (
+            <>
+              <textarea
+                className="agent-composer__input"
+                placeholder="Type your answer… (Enter to send, Shift+Enter for newline)"
+                rows={2}
+                value={input}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  setInput(nextValue);
+                  if (containsProfanity(nextValue)) {
+                    setError('Please avoid inappropriate language in your answer.');
+                  } else if (error) {
+                    setError('');
+                  }
+                  onTypingChange?.(!!nextValue.trim());
+                }}
+                onKeyDown={onKeyDown}
+                disabled={inputDisabled}
+              />
+              <button
+                className="agent-btn agent-btn--primary"
+                onClick={sendAnswer}
+                disabled={submitDisabled || !input.trim()}
+              >
+                Send
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="agent-composer__speak-hint">
+                Answer out loud — your words appear below as you speak.
+              </div>
+              {canSubmitVoiceDraft && (
+                <button
+                  className="agent-btn agent-btn--primary"
+                  onClick={onSubmitVoiceDraft}
+                  disabled={submitDisabled}
+                >
+                  Submit voice answer
+                </button>
+              )}
+            </>
           )}
-          <button
-            className="agent-btn agent-btn--primary"
-            onClick={sendAnswer}
-            disabled={busy || submitDisabled || !input.trim()}
-          >
-            Send
-          </button>
         </div>
       )}
     </div>

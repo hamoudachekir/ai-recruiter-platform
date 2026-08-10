@@ -217,7 +217,7 @@ export default function RealFaceAvatar() {
       <canvas ref={canvasRef} width={360} height={450} className="rfa-canvas" />
       <div className="rfa-label">
         <span className="rfa-dot" />
-        AI Interviewer
+        Cyriness
       </div>
     </div>
   );

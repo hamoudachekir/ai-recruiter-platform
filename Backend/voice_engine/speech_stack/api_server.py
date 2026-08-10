@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import os
@@ -29,10 +30,22 @@ except ImportError:
     from speech_stack import SpeechStack
 
 # Load environment variables from repo root (.env) and optional local overrides.
+# Launcher scripts probe CUDA and set FW_DEVICE / FW_COMPUTE_TYPE in the
+# process env *before* import. Preserve those so a pinned local .env cannot
+# force a broken GPU path and hang the whole uvicorn event loop.
 _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(_CURRENT_DIR)))
+_LAUNCHER_DEVICE = os.environ.get("FW_DEVICE")
+_LAUNCHER_COMPUTE = os.environ.get("FW_COMPUTE_TYPE")
+_LAUNCHER_MODEL = os.environ.get("FW_MODEL")
 load_dotenv(os.path.join(_REPO_ROOT, ".env"), override=False)
 load_dotenv(os.path.join(_CURRENT_DIR, ".env"), override=True)
+if _LAUNCHER_DEVICE:
+    os.environ["FW_DEVICE"] = _LAUNCHER_DEVICE
+if _LAUNCHER_COMPUTE:
+    os.environ["FW_COMPUTE_TYPE"] = _LAUNCHER_COMPUTE
+if _LAUNCHER_MODEL:
+    os.environ["FW_MODEL"] = _LAUNCHER_MODEL
 
 app = FastAPI(title="Voice Engine Speech Stack API", version="1.0.0")
 
@@ -175,7 +188,7 @@ def startup() -> None:
             # to re-enable if you start sending untrimmed audio.
             vad_filter=_env_bool("FW_VAD_FILTER", False),
             neutral_threshold=float(os.getenv("FW_NEUTRAL_THRESHOLD", "0.65")),
-            enable_sentiment=True,
+            enable_sentiment=_env_bool("FW_ENABLE_SENTIMENT", True),
             # Per-segment sentiment adds one transformer pass per segment on the
             # live-draft hot path. Default off (overall sentiment is still
             # computed); set FW_SEGMENT_SENTIMENT=1 to restore per-segment.
@@ -398,7 +411,10 @@ async def transcribe(
     terms = _parse_custom_terms(custom_terms)
 
     try:
-        return _run_with_temp_audio(
+        # Whisper is sync/CPU-or-GPU heavy. Never run it on the event loop —
+        # a hung CUDA call would freeze /health and every other request.
+        return await asyncio.to_thread(
+            _run_with_temp_audio,
             payload,
             upload.filename,
             lambda temp_path: stack.transcribe(temp_path, custom_terms=terms),
@@ -439,7 +455,8 @@ async def transcribe_sentiment(
     terms = _parse_custom_terms(custom_terms)
 
     try:
-        return _run_with_temp_audio(
+        return await asyncio.to_thread(
+            _run_with_temp_audio,
             payload,
             upload.filename,
             lambda temp_path: stack.transcribe_with_sentiment(

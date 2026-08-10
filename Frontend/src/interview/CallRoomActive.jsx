@@ -109,11 +109,20 @@ const FILLER_TOKENS = new Set([
 ]);
 
 const TURN_STATE_LABELS = {
-  agent_speaking: "AI is speaking...",
-  candidate_listening: "Listening — answer naturally",
-  candidate_answering: "Listening — answer naturally",
+  agent_speaking: "Cyriness is speaking...",
+  candidate_listening: "Listening — speak or switch to Type",
+  candidate_answering: "Listening — speak or switch to Type",
   candidate_submitting: "Processing your answer...",
-  agent_thinking: "AI is thinking...",
+  agent_thinking: "Cyriness is thinking...",
+  error_recoverable: "Response interrupted — retrying...",
+};
+
+const TURN_STATE_LABELS_TYPE = {
+  agent_speaking: "Cyriness is speaking...",
+  candidate_listening: "Type your answer below, then press Send",
+  candidate_answering: "Type your answer below, then press Send",
+  candidate_submitting: "Processing your answer...",
+  agent_thinking: "Cyriness is thinking...",
   error_recoverable: "Response interrupted — retrying...",
 };
 
@@ -408,7 +417,10 @@ const detectRequestedAgentLanguage = (text) => {
     "speak frensh",
     "ask me in french",
     "ask me in frensh",
+    "switch to french",
+    "switch to frensh",
     "continue in french",
+    "continue in frensh",
     "turn this convo in french",
     "turn this convo in frensh",
     "turn this conversation in french",
@@ -417,7 +429,12 @@ const detectRequestedAgentLanguage = (text) => {
     "frensh language",
     "parle francais",
     "parlez francais",
-    "en francais",
+    "en francais s il",
+    "en francais stp",
+    "en francais svp",
+    "reponds en francais",
+    "repondez en francais",
+    "passer en francais",
     "francais stp",
     "francais svp",
   ];
@@ -426,9 +443,13 @@ const detectRequestedAgentLanguage = (text) => {
   const englishSignals = [
     "speak english",
     "ask me in english",
+    "switch to english",
     "continue in english",
     "parle anglais",
+    "parlez anglais",
     "en anglais",
+    "reponds en anglais",
+    "passer en anglais",
   ];
   if (englishSignals.some((phrase) => normalized.includes(phrase))) return "en";
 
@@ -773,6 +794,8 @@ const CallRoomActive = () => {
   const [agentThinking, setAgentThinking] = useState(false);
   const [draftText, setDraftText] = useState(""); // live in-progress STT for chat bubble
   const [turnState, setTurnState] = useState("candidate_listening");
+  const [answerInputMode, setAnswerInputMode] = useState("speak");
+  const answerInputModeRef = useRef("speak");
   const [recoverableAgentError, setRecoverableAgentError] = useState("");
   const [agentRetrying, setAgentRetrying] = useState(false);
   const [lastAgentMessageText, setLastAgentMessageText] = useState("");
@@ -844,7 +867,7 @@ const CallRoomActive = () => {
     ) {
       return { ok: false, reason: "post_tts_dead_zone" };
     }
-    if (isTypingAnswerRef.current) {
+    if (isTypingAnswerRef.current || answerInputModeRef.current === "type") {
       return { ok: false, reason: "typed_answer_in_progress" };
     }
     return { ok: true, reason: "ok" };
@@ -1129,14 +1152,14 @@ const CallRoomActive = () => {
       );
       setInterviewTurnState("candidate_listening", "profanity blocked");
       if (answerSource === "typed") {
-        isTypingAnswerRef.current = false;
+        isTypingAnswerRef.current = answerInputModeRef.current === "type";
       }
       setTimeout(() => setRecoverableAgentError(""), 3500);
       return false;
     }
 
     if (answerSource === "typed") {
-      isTypingAnswerRef.current = false;
+      isTypingAnswerRef.current = answerInputModeRef.current === "type";
       clearVoiceDraft("typed answer submitted");
     }
 
@@ -1341,11 +1364,21 @@ const CallRoomActive = () => {
     text,
     { announceStart = false } = {},
   ) => {
+    // If call recording is not active yet, still clear any pre-armed
+    // "agent speaking" lock from agent:message so STT is not gated forever.
     if (!recordingActiveRef.current || isRHRef.current) {
+      agentSpeakingRef.current = false;
+      isTtsPlayingRef.current = false;
+      setAgentSpeaking(false);
+      emitAgentSpeechState(false);
       return false;
     }
 
     if (!(blob instanceof Blob) || blob.size <= 0) {
+      agentSpeakingRef.current = false;
+      isTtsPlayingRef.current = false;
+      setAgentSpeaking(false);
+      emitAgentSpeechState(false);
       return false;
     }
 
@@ -1912,6 +1945,10 @@ const CallRoomActive = () => {
       skillFocus,
       difficulty,
       phase,
+      interviewPhase,
+      currentPhase,
+      interview_phase,
+      current_phase,
       turnIndex,
       language,
       turnId,
@@ -2036,6 +2073,13 @@ const CallRoomActive = () => {
               currentSkill: skillFocus,
               currentDifficulty: difficulty,
               phase,
+              interviewPhase:
+                interviewPhase ||
+                currentPhase ||
+                interview_phase ||
+                current_phase ||
+                prev.interviewPhase ||
+                null,
             }
           : null,
       );
@@ -2085,6 +2129,20 @@ const CallRoomActive = () => {
           "[handleAgentTts] duplicate TTS dropped voiceKey=",
           voiceKey,
         );
+        // If we armed agentSpeaking on agent:message but never actually started
+        // playback (race / dedupe), unlock STT so the candidate can answer.
+        if (agentSpeakingRef.current && !isTtsPlayingRef.current) {
+          agentSpeakingRef.current = false;
+          setAgentSpeaking(false);
+          emitAgentSpeechState(false);
+          if (recordingActiveRef.current && !agentThinkingRef.current) {
+            setMicEnabled(true);
+            setInterviewTurnState(
+              "candidate_listening",
+              "duplicate tts dropped — unlock mic",
+            );
+          }
+        }
         return;
       }
       lastPlayedTtsVoiceKeyRef.current = voiceKey;
@@ -2891,13 +2949,21 @@ const CallRoomActive = () => {
 
       // Primary path: direct Speech Stack API.
       try {
-        const response = await fetch(
-          `${SPEECH_STACK_URL}/api/transcribe-sentiment`,
-          {
-            method: "POST",
-            body: formData,
-          },
-        );
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+        let response;
+        try {
+          response = await fetch(
+            `${SPEECH_STACK_URL}/api/transcribe-sentiment`,
+            {
+              method: "POST",
+              body: formData,
+              signal: controller.signal,
+            },
+          );
+        } finally {
+          clearTimeout(timeoutId);
+        }
 
         if (!response.ok) {
           const errText = await response.text();
@@ -3148,25 +3214,42 @@ const CallRoomActive = () => {
             {/* AI Interviewer tile — fills left panel, cam is PiP overlay */}
             <div className="cr-tile cr-tile--ai">
               <div className="cr-tile__label">
-                <span className="cr-tile__label-dot" /> AI Interviewer
+                <span className="cr-tile__label-dot" /> Cyriness
               </div>
               {!isRH ? (
                 <InterviewAvatar />
               ) : (
                 <div className="cr-tile__placeholder">RH View</div>
               )}
+              {(lastAgentMessageText || room?.currentQuestion) && (
+                <div
+                  className={`cr-agent-caption ${
+                    turnState === "agent_speaking" ? "cr-agent-caption--speaking" : ""
+                  }`}
+                  aria-live="polite"
+                >
+                  <div className="cr-agent-caption__name">Cyriness</div>
+                  <div className="cr-agent-caption__text">
+                    {lastAgentMessageText || room?.currentQuestion}
+                  </div>
+                </div>
+              )}
               <div
                 className={`cr-tile__status ${agentSpeaking ? "speaking" : agentThinking ? "thinking" : "idle"}`}
               >
                 {turnState === "agent_speaking"
-                  ? "AI is speaking..."
+                  ? "Cyriness is speaking..."
                   : turnState === "agent_thinking"
-                    ? "AI is thinking..."
+                    ? "Cyriness is thinking..."
                     : turnState === "candidate_submitting"
                       ? "Processing your answer..."
                       : turnState === "candidate_answering"
-                        ? "Listening..."
-                        : "Listening"}
+                        ? answerInputMode === "type"
+                          ? "Waiting for typed answer..."
+                          : "Listening..."
+                        : answerInputMode === "type"
+                          ? "Ready for typed answer"
+                          : "Listening"}
               </div>
 
               {/* Picture-in-Picture: candidate cam overlaid on avatar */}
@@ -3360,20 +3443,38 @@ const CallRoomActive = () => {
                   roomId={roomId}
                   roomDbId={roomDbId}
                   isRH={isRH}
-                  candidateDraftText={!isRH ? draftText : null}
+                  candidateDraftText={!isRH && answerInputMode === "speak" ? draftText : null}
                   interviewStarting={interviewStarting}
                   turnState={turnState}
-                  turnStatusLabel={TURN_STATE_LABELS[turnState] || ""}
+                  turnStatusLabel={
+                    (answerInputMode === "type"
+                      ? TURN_STATE_LABELS_TYPE
+                      : TURN_STATE_LABELS)[turnState] || ""
+                  }
                   submitDisabled={
                     !isRH &&
-                    (faceVerifStatus !== "matched" ||
+                    (!roomDbId ||
                       agentRetrying ||
                       turnState === "candidate_submitting")
                   }
-                  inputDisabled={
-                    !isRH && (!roomDbId || faceVerifStatus !== "matched")
-                  }
+                  inputDisabled={!isRH && !roomDbId}
+                  answerInputMode={answerInputMode}
+                  onAnswerInputModeChange={(mode) => {
+                    const next = mode === "type" ? "type" : "speak";
+                    answerInputModeRef.current = next;
+                    setAnswerInputMode(next);
+                    if (next === "type") {
+                      isTypingAnswerRef.current = true;
+                      clearVoiceDraft("switched to type mode");
+                    } else {
+                      isTypingAnswerRef.current = false;
+                    }
+                  }}
                   onTypingChange={(typing) => {
+                    if (answerInputModeRef.current === "type") {
+                      isTypingAnswerRef.current = true;
+                      return;
+                    }
                     isTypingAnswerRef.current = !!typing;
                     if (typing && sttSilenceTimerRef.current) {
                       clearTimeout(sttSilenceTimerRef.current);
@@ -3396,7 +3497,9 @@ const CallRoomActive = () => {
                     })
                   }
                   canSubmitVoiceDraft={
-                    !!draftText && turnState === "candidate_answering"
+                    answerInputMode === "speak" &&
+                    !!draftText &&
+                    turnState === "candidate_answering"
                   }
                   recoverableAgentError={recoverableAgentError}
                   onRetryAgentResponse={retryPendingAgentTurn}
@@ -3407,7 +3510,7 @@ const CallRoomActive = () => {
                     lastAgentTextRef.current ||
                     ""
                   }
-                  initialAgentPhase={room?.phase || ""}
+                  initialAgentPhase={room?.interviewPhase || room?.phase || ""}
                   initialAgentDifficulty={room?.currentDifficulty ?? null}
                   initialAgentSkill={room?.currentSkill || ""}
                   initialAgentTurnIndex={currentQuestionIdRef.current || null}

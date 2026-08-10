@@ -332,33 +332,58 @@ class SpeechStack:
         return corrected.strip(), applied
 
     def _load_whisper_model(self) -> WhisperModel:
-        attempted = [self.compute_type]
-
+        requested_device = self.device
+        device_attempts = [self.device]
         if self.device == "cuda":
-            for candidate in ("int8_float16", "int8", "float32"):
-                if candidate not in attempted:
-                    attempted.append(candidate)
-        else:
-            for candidate in ("int8", "float32"):
-                if candidate not in attempted:
-                    attempted.append(candidate)
+            # RTX / driver mismatches can leave CUDA "visible" but unusable.
+            # Fall back to CPU so the live interview still gets transcripts.
+            device_attempts.append("cpu")
 
         last_exc = None
-        for candidate in attempted:
-            try:
-                model = WhisperModel(
-                    self.model_name,
-                    device=self.device,
-                    compute_type=candidate,
-                    cpu_threads=self.cpu_threads,
-                )
-                self.active_compute_type = candidate
-                return model
-            except Exception as exc:
-                last_exc = exc
+        for device in device_attempts:
+            if device == "cuda":
+                compute_attempts = [self.compute_type]
+                for candidate in ("int8_float16", "int8", "float32"):
+                    if candidate not in compute_attempts:
+                        compute_attempts.append(candidate)
+            else:
+                compute_attempts = ["int8", "float32"]
+                if self.compute_type in compute_attempts:
+                    compute_attempts = [self.compute_type] + [
+                        c for c in compute_attempts if c != self.compute_type
+                    ]
+
+            for candidate in compute_attempts:
+                try:
+                    model = WhisperModel(
+                        self.model_name,
+                        device=device,
+                        compute_type=candidate,
+                        cpu_threads=self.cpu_threads,
+                    )
+                    self.device = device
+                    self.active_compute_type = candidate
+                    if device != requested_device:
+                        LOGGER.warning(
+                            "Whisper %s init failed; fell back to %s "
+                            "(compute_type=%s). Last error: %s",
+                            requested_device,
+                            device,
+                            candidate,
+                            last_exc,
+                        )
+                    return model
+                except Exception as exc:
+                    last_exc = exc
+                    LOGGER.warning(
+                        "Whisper init failed device=%s compute_type=%s: %s",
+                        device,
+                        candidate,
+                        exc,
+                    )
 
         raise RuntimeError(
-            "Unable to initialize Whisper model with any supported compute type."
+            "Unable to initialize Whisper model with any supported device/compute type."
         ) from last_exc
 
     def _load_sentiment_model(self):

@@ -3023,7 +3023,8 @@ mongoose
   .then(() => console.log("✅ MongoDB Connected"))
   .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
-// Passport Configuration
+// Passport Configuration (Google OAuth is optional for local/dev without keys)
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 passport.use(
   new GoogleStrategy(
     {
@@ -3063,6 +3064,9 @@ passport.use(
     },
   ),
 );
+} else {
+  console.warn("⚠️ GOOGLE_CLIENT_ID/SECRET missing — Google OAuth login disabled");
+}
 
 passport.serializeUser((user, done) => {
   done(null, user.id);

@@ -177,14 +177,14 @@ export default function Step2CompanyContext({ state, dispatch }) {
         stepNumber={2}
         totalSteps={TOTAL_STEPS}
         title="Choose Company Context"
-        subtitle="This is how Nour and the technical agent will represent your brand during interviews."
+        subtitle="This is how Cyriness and the technical agent will represent your brand during interviews."
       />
 
       <div className="mt-4 flex items-start gap-3 rounded-xl border border-[#5b86e5]/30 bg-[#5b86e5]/10 px-4 py-3">
         <Info size={18} className="mt-0.5 shrink-0 text-[#36d1dc]" />
         <div className="text-sm text-slate-200 leading-relaxed">
           <p>
-            Select a company context to help <span className="font-medium text-white">Nour</span> understand your
+            Select a company context to help <span className="font-medium text-white">Cyriness</span> understand your
             company&apos;s values and culture. <span className="font-medium text-white">This step is mandatory.</span>
           </p>
           <p className="mt-1 text-slate-300/80">

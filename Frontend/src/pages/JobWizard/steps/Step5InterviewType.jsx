@@ -22,7 +22,7 @@ const TYPES = [
     icon:        Sparkles,
     title:       'AI-Powered Dynamic Interview',
     badge:       'Recommended',
-    description: 'Let Nour and the technical agent conduct fully adaptive interviews driven by the candidate resume and the job description. No predefined questions.',
+    description: 'Let Cyriness and the technical agent conduct fully adaptive interviews driven by the candidate resume and the job description. No predefined questions.',
   },
   {
     value:       'hybrid',

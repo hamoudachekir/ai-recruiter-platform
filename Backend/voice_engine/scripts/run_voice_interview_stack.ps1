@@ -23,7 +23,7 @@ if (-not (Test-Path $venvPython)) {
 # site-packages live there). Without it the speech stack / agent fail with
 # "Could not find platform independent libraries" / "No module named uvicorn".
 if (-not $env:PYTHONHOME -or -not (Test-Path (Join-Path $env:PYTHONHOME 'Lib\os.py'))) {
-    $env:PYTHONHOME = 'C:\Users\wh\AppData\Local\Programs\Python\Python314'
+    $env:PYTHONHOME = 'C:\Users\omars\AppData\Local\Programs\Python\Python311'
 }
 
 # ── Whisper device selection ──────────────────────────────────────────────────
@@ -32,17 +32,21 @@ if (-not $env:PYTHONHOME -or -not (Test-Path (Join-Path $env:PYTHONHOME 'Lib\os.
 # none, run on CPU. Note int8_float16 is GPU-only and fails to initialize on
 # CPU, so the CPU path uses int8.
 $cudaDllDir = Join-Path $backendRoot 'third_party\nvidia_cuda12'
-if (Test-Path (Join-Path $cudaDllDir 'cublas64_12.dll')) {
+$hasCudaDlls = Test-Path (Join-Path $cudaDllDir 'cublas64_12.dll')
+if ($hasCudaDlls) {
     $env:PATH = "$cudaDllDir;$($env:PATH)"
 }
-$cudaCount = & $venvPython -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())" 2>$null
-if (-not $cudaCount) { $cudaCount = '0' }
+$cudaCount = '0'
+if ($hasCudaDlls) {
+    $cudaCount = & $venvPython -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())" 2>$null
+    if (-not $cudaCount) { $cudaCount = '0' }
+}
 if (([int]$cudaCount) -gt 0) {
     $fwDevice = 'cuda'; $fwCompute = 'int8_float16'
     Write-Host "[OK] CUDA GPU detected ($cudaCount device(s)) -> GPU inference"
 } else {
     $fwDevice = 'cpu'; $fwCompute = 'int8'
-    Write-Host "[WARN] No usable CUDA GPU -> CPU inference (device=cpu compute_type=int8)"
+    Write-Host "[WARN] No usable CUDA GPU/runtime -> CPU inference (device=cpu compute_type=int8)"
 }
 
 $speechHealthUrl = "http://$SpeechHost`:$SpeechPort/health"

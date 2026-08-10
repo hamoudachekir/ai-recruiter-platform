@@ -957,9 +957,47 @@
   box-shadow: 0 0 16px rgba(245,158,11,0.5);
 }
 .cr-tile__status.idle {
-  background: rgba(0,0,0,0.5);
-  color: #64748b;
-  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(55, 65, 81, 0.85);
+  color: #e5e7eb;
+}
+
+.cr-agent-caption {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 148px;
+  z-index: 20;
+  max-height: 38%;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(8, 10, 14, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #f3f4f6;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.cr-agent-caption--speaking {
+  border-color: rgba(16, 185, 129, 0.55);
+  box-shadow: 0 0 18px rgba(16, 185, 129, 0.25);
+}
+
+.cr-agent-caption__name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #a7f3d0;
+  margin-bottom: 4px;
+}
+
+.cr-agent-caption__text {
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  font-weight: 500;
 }
 
 .cr-tile__placeholder {

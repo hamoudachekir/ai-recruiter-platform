@@ -1,13 +1,13 @@
-% !TEX program = pdflatex
+% !TEX TS-program = latexmk
 % =============================================================================
-% MASTER CV TEMPLATE — Hamouda Chekir (Français)
+% MASTER CV TEMPLATE - Hamouda Chekir (Français)
 % Formule Google XYZ = Accompli [X], mesuré par [Y], en faisant [Z]
 %
 % PERSONNALISER EN <5 MIN
-% 1. Modifier \TargetTitle et \TargetKeywords ci-dessous
-% 2. Garder 3–4 puces d'expérience alignées sur l'offre
-% 3. Dans Projets, garder 2 projets max les plus proches du poste
-% 4. Compiler : pdflatex hamouda_chekir_cv_master_fr.tex
+% 1. Copier ce fichier → hamouda_chekir_cv_<entreprise>.tex
+% 2. Modifier \TargetTitle et \TargetKeywords
+% 3. Garder 3-4 puces d'expérience + 2 projets alignés sur l'offre
+% 4. Compiler : latexmk -pdf hamouda_chekir_cv_<entreprise>.tex
 % =============================================================================
 \documentclass[10pt,a4paper]{article}
 
@@ -36,49 +36,44 @@
 % ── ADAPTER CES DEUX LIGNES PAR OFFRE ───────────────────────────────────────
 \newcommand{\TargetTitle}{Ingénieur junior en informatique \textbar{} Full-Stack \& IA}
 \newcommand{\TargetKeywords}{React · Node.js · Python · FastAPI · Microservices · Docker · MongoDB · API REST · Agile}
-% Exemples (remplacer \TargetTitle selon l'offre) :
-% \newcommand{\TargetTitle}{Ingénieur IA / LLM}
-% \newcommand{\TargetKeywords}{LLM · LangGraph · RAG · Python · FastAPI · Computer Vision · YOLO · Agents}
-% \newcommand{\TargetTitle}{Développeur Full-Stack PHP / Laravel}
-% \newcommand{\TargetKeywords}{PHP · Laravel · Blade · MySQL · PostgreSQL · MVC · GitLab CI/CD · Docker}
 
 \hypersetup{
-  colorlinks=true,
-  linkcolor=accent,
-  urlcolor=accent,
-  pdfauthor={Hamouda Chekir},
-  pdftitle={CV — Hamouda Chekir — Master Template FR}
+ colorlinks=true,
+ linkcolor=accent,
+ urlcolor=accent,
+ pdfauthor={Hamouda Chekir},
+ pdftitle={CV - Hamouda Chekir - Master Template FR}
 }
 
 \titleformat{\section}
-  {\color{primary}\large\bfseries}
-  {}
-  {0pt}
-  {}
-  [\vspace{1pt}{\color{accent}\titlerule[1.6pt]}\vspace{5pt}]
+ {\color{primary}\large\bfseries}
+ {}
+ {0pt}
+ {}
+ [\vspace{1pt}{\color{accent}\titlerule[1.6pt]}\vspace{5pt}]
 \titlespacing*{\section}{0pt}{11pt}{3pt}
 
 \newcommand{\job}[3]{%
-  \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
-  {\color{accent}\textit{#3}}\\[2pt]
-  \begin{itemize}[leftmargin=0.85em, itemsep=1pt, topsep=0pt, parsep=0pt, partopsep=0pt]
+ \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
+ {\color{accent}\textit{#3}}\\[2pt]
+ \begin{itemize}[leftmargin=0.85em, itemsep=1pt, topsep=0pt, parsep=0pt, partopsep=0pt]
 }
 
 \newcommand{\proj}[3]{%
-  \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
-  {\color{accent}\textit{#3}}\\[1pt]
-  \begin{itemize}[leftmargin=0.85em, itemsep=1pt, topsep=0pt, parsep=0pt, partopsep=0pt]
+ \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
+ {\color{accent}\textit{#3}}\\[1pt]
+ \begin{itemize}[leftmargin=0.85em, itemsep=1pt, topsep=0pt, parsep=0pt, partopsep=0pt]
 }
 
 \newcommand{\edu}[3]{%
-  \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
-  {\color{accent}\textit{#3}}\\[3pt]
+ \textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\\[-1pt]
+ {\color{accent}\textit{#3}}\\[3pt]
 }
 
 \newcommand{\cert}[4]{%
-  \textbf{\color{primary}\small #1}\hfill{\color{muted}\scriptsize #3}\\[-1pt]
-  {\color{accent}\small\textit{#2}}\\[0pt]
-  {\color{muted}\scriptsize #4}\\[4pt]
+ \textbf{\color{primary}\small #1}\hfill{\color{muted}\scriptsize #3}\\[-1pt]
+ {\color{accent}\small\textit{#2}}\\[0pt]
+ {\color{muted}\scriptsize #4}\\[4pt]
 }
 
 \newcommand{\contactsep}{\hspace{5pt}{\color{rulecolor}|}\hspace{5pt}}
@@ -89,16 +84,16 @@
 {\fontsize{22}{26}\selectfont\bfseries\color{primary}HAMOUDA CHEKIR}\\[2pt]
 {\large\color{accent}\TargetTitle}\\[4pt]
 {\footnotesize\color{muted}%
-  \faIcon{envelope}\hspace{3pt}\href{mailto:hamoudachkir@yahoo.fr}{hamoudachkir@yahoo.fr}%
-  \contactsep
-  \faIcon{phone}\hspace{3pt}+216\,55\,913\,832%
-  \contactsep
-  \faIcon{map-marker-alt}\hspace{3pt}Tunis, Tunisie%
+ \faIcon{envelope}\hspace{3pt}\href{mailto:hamoudachkir@yahoo.fr}{hamoudachkir@yahoo.fr}%
+ \contactsep
+ \faIcon{phone}\hspace{3pt}+216\,55\,913\,832%
+ \contactsep
+ \faIcon{map-marker-alt}\hspace{3pt}Tunis, Tunisie%
 }\\[2pt]
 {\footnotesize\color{muted}%
-  \faIcon{linkedin}\hspace{3pt}\href{https://www.linkedin.com/in/hamouda-chekir-5053572b4}{hamouda-chekir}%
-  \contactsep
-  \faIcon{github}\hspace{3pt}\href{https://github.com/hamoudachekir}{hamoudachekir}%
+ \faIcon{linkedin}\hspace{3pt}\href{https://www.linkedin.com/in/hamouda-chekir-5053572b4}{hamouda-chekir}%
+ \contactsep
+ \faIcon{github}\hspace{3pt}\href{https://github.com/hamoudachekir}{hamoudachekir}%
 }\\[6pt]
 
 % ═══════════════════════════════ PROFIL ═════════════════════════════════════
@@ -110,26 +105,26 @@ Preuve récente : chez Talan, conception et livraison de NextHire, un ATS AI-fir
 % ═══════════════════════════════ EXPÉRIENCE ═════════════════════════════════
 \section{EXPÉRIENCE}
 
-\job{Ingénieur Logiciel — Projet de Fin d'Études}{Févr. 2026 -- Août 2026}{Talan \textbar{} Tunis}
-  \item Livré un ATS AI-first (NextHire) de \textbf{16 microservices} (1 passerelle Node/Express, 2 SPA React, 13 services Python FastAPI/Flask) en concevant une architecture MongoDB partagée et des frontières de services dockerisées.
-  \item Réduit l'effort de screening manuel en automatisant le parcours d'entretien : agent vocal LLM adaptatif et module d'intégrité YOLO (vérification faciale + détection d'objets interdits) sur sessions WebRTC live.
-  \item Produit des décisions d'embauche scorées pour les recruteurs en implémentant un pipeline LangGraph fusionnant transcription, comportement et signaux visuels en rapports classés.
-  \item Accéléré la préparation candidat en automatisant le parsing de CV (spaCy, PaddleOCR) et le CV tailoring LLM avec contrôle anti-hallucination, quiz adaptatifs et planification Google Calendar.
+\job{Ingénieur Logiciel - Projet de Fin d'Études}{Févr. 2026 -- Août 2026}{Talan \textbar{} Tunis}
+ \item Livré un ATS AI-first (NextHire) de \textbf{16 microservices} (1 passerelle Node/Express, 2 SPA React, 13 services Python FastAPI/Flask) en concevant une architecture MongoDB partagée et des frontières de services dockerisées.
+ \item Réduit l'effort de screening manuel en automatisant le parcours d'entretien : agent vocal LLM adaptatif et module d'intégrité YOLO (vérification faciale + détection d'objets interdits) sur sessions WebRTC live.
+ \item Produit des décisions d'embauche scorées pour les recruteurs en implémentant un pipeline LangGraph fusionnant transcription, comportement et signaux visuels en rapports classés.
+ \item Accéléré la préparation candidat en automatisant le parsing de CV (spaCy, PaddleOCR) et le CV tailoring LLM avec contrôle anti-hallucination, quiz adaptatifs et planification Google Calendar.
 \end{itemize}
 
-\job{Stagiaire Développeur Full-Stack}{Juin 2025 -- Août 2025}{SmartConseil — Dafe Management \textbar{} Tunis}
-  \item Livré un back-office Laravel modulaire (régions, packs, modules) en reconstruisant les workflows CRUD en Blade/JavaScript sur PostgreSQL et MongoDB.
-  \item Réduit la fragmentation des outils crawler en migrant pilotes HTML/API, grilles et modules IP vers une codebase Laravel centralisée.
-  \item Accéléré le travail opérateurs avec interfaces filtrables et exports PDF/Excel ; livré en agile (dailies, revues de code, tests unitaires, SonarQube, GitLab CI/CD, Docker).
+\job{Stagiaire Développeur Full-Stack}{Juin 2025 -- Août 2025}{SmartConseil / Dafe Management \textbar{} Tunis}
+ \item Livré un back-office Laravel modulaire (régions, packs, modules) en reconstruisant les workflows CRUD en Blade/JavaScript sur PostgreSQL et MongoDB.
+ \item Réduit la fragmentation des outils crawler en migrant pilotes HTML/API, grilles et modules IP vers une codebase Laravel centralisée.
+ \item Accéléré le travail opérateurs avec interfaces filtrables et exports PDF/Excel ; livré en agile (dailies, revues de code, tests unitaires, SonarQube, GitLab CI/CD, Docker).
 \end{itemize}
 
 \job{Stagiaire Développeur Web}{Juin 2024 -- Août 2024}{Big Deal (Club Privilèges) \textbar{} Tunis}
-  \item Mis en service un module de codes cadeaux numériques (génération, attribution, suivi) sous Laravel/Filament, permettant d'activer des campagnes promotionnelles de bout en bout.
-  \item Sécurisé le cycle de livraison avec Git, tests manuels via Postman et validation fonctionnelle avant mise en production.
+ \item Mis en service un module de codes cadeaux numériques (génération, attribution, suivi) sous Laravel/Filament, permettant d'activer des campagnes promotionnelles de bout en bout.
+ \item Sécurisé le cycle de livraison avec Git, tests manuels via Postman et validation fonctionnelle avant mise en production.
 \end{itemize}
 
 \job{Stagiaire Développeur Web}{Févr. 2023 -- Mai 2023}{HOTIX \textbar{} Tunis}
-  \item Mis en production le site e-commerce «\,Consommi Tounsi \#619\,» en implémentant les fonctionnalités storefront en .NET sous Scrum, avec campagne de tests et déploiement final.
+ \item Mis en production le site e-commerce «\,Consommi Tounsi \#619\,» en implémentant les fonctionnalités storefront en .NET sous Scrum, avec campagne de tests et déploiement final.
 \end{itemize}
 
 % ═══════════════════════════════ PROJETS ════════════════════════════════════
@@ -137,53 +132,39 @@ Preuve récente : chez Talan, conception et livraison de NextHire, un ATS AI-fir
 {\footnotesize
 \setlength{\parskip}{1pt}
 
-\proj{Carnet de Santé — Django Health Tracking Platform}{2025}{Django · Python · SQLite · JWT}
-  \item Livré une plateforme de suivi santé (TA, FC, sommeil, pas + rapports PDF mensuels) en combinant vision médicale ResNet50/ResNet18 (14 pathologies thoraciques + tumeurs cérébrales), recommandations (20+ règles + feedback ML), anomalies (Isolation Forest + One-Class SVM, score 0--100), chatbot santé mentale T5 et API sécurisée (JWT, rôles/admin, HTTPS).
+\proj{Carnet de Santé - Django Health Tracking Platform}{2025}{Django · Python · SQLite · JWT}
+ \item Livré une plateforme de suivi santé (TA, FC, sommeil, pas + rapports PDF mensuels) en combinant vision médicale ResNet50/ResNet18 (14 pathologies thoraciques + tumeurs cérébrales), recommandations (20+ règles + feedback ML), anomalies (Isolation Forest + One-Class SVM, score 0--100), chatbot santé mentale T5 et API sécurisée (JWT, rôles/admin, HTTPS).
 \end{itemize}
 
-\proj{TuniVert — Plateforme environnementale}{2025}{Laravel · PHP 8.3 · MySQL · Stripe/PayPal/Paymee}
-  \item Livré une plateforme d'événements éco-responsables et de dons multi-passerelles (Stripe, PayPal, Paymee) avec QR de vérification, challenges gamifiés, forums et dashboard admin analytics temps réel + suggestions IA / chatbot OpenAI.
+\proj{TuniVert - Plateforme environnementale}{2025}{Laravel · PHP 8.3 · MySQL · Stripe/PayPal/Paymee}
+ \item Livré une plateforme d'événements éco-responsables et de dons multi-passerelles (Stripe, PayPal, Paymee) avec QR de vérification, challenges gamifiés, forums et dashboard admin analytics temps réel + suggestions IA / chatbot OpenAI.
 \end{itemize}
 
-\proj{TalentMatch — Plateforme d'enchères sécurisée}{2025}{Python/FastAPI · React · Qwen2.5-VL · Gemini 2.5 · Serper.dev · Solidity · Blockchain}
-  \item Conçu une plateforme d'enchères sécurisée intégrant l'\textbf{IA} (vérification d'authenticité, estimation de prix via web scraping, génération d'annonces multimodale) et la \textbf{blockchain} (smart contracts Solidity sur Ethereum/Sepolia, cryptographie post-quantique).
+\proj{TalentMatch - Plateforme d'enchères sécurisée}{2025}{Python/FastAPI · React · Qwen2.5-VL · Gemini 2.5 · Serper.dev · Solidity · Blockchain}
+ \item Conçu une plateforme d'enchères sécurisée intégrant l'\textbf{IA} (vérification d'authenticité, estimation de prix via web scraping, génération d'annonces multimodale) et la \textbf{blockchain} (smart contracts Solidity sur Ethereum/Sepolia, cryptographie post-quantique).
 \end{itemize}
 
 \proj{Support à la décision clinique}{2025}{BLIP · CLIP+LLaMA (LoRA) · RAG · Meditron-7B · Qdrant}
-  \item Généré des rapports médicaux à partir de radiographies et répondu à des questions cliniques avec citations en fine-tunant des VLM (BLIP, CLIP+LLaMA LoRA) et un stack RAG (Meditron-7B, Qdrant, PubMedBERT), exploré via reinforcement learning.
+ \item Généré des rapports médicaux à partir de radiographies et répondu à des questions cliniques avec citations en fine-tunant des VLM (BLIP, CLIP+LLaMA LoRA) et un stack RAG (Meditron-7B, Qdrant, PubMedBERT), exploré via reinforcement learning.
 \end{itemize}
 
 \proj{Moteur AML multi-agents}{2025}{Règles métier · Agents LLM RAG/Critic · MCP}
-  \item Détecté des schémas AML (smurfing, boucles) en combinant règles métier, patterns et analyse contextuelle LLM (agents RAG/Critic) derrière une passerelle MCP sécurisée avec contrôle d'accès, immutabilité et traçabilité réglementaire.
+ \item Détecté des schémas AML (smurfing, boucles) en combinant règles métier, patterns et analyse contextuelle LLM (agents RAG/Critic) derrière une passerelle MCP sécurisée avec contrôle d'accès, immutabilité et traçabilité réglementaire.
 \end{itemize}
 
-% ── PROJETS EN RÉSERVE (décommenter selon l'offre) ─────────────────────────
-%\proj{Pilotage agile — Gestion de projet (Jira)}{2024}{Jira · Scrum · Backlog}
-%  \item Piloté la livraison sous Jira en gérant backlog, user stories, sprints, burndown, suivi des issues et revues de sprint.
-%\end{itemize}
-%\proj{Full Stack JS Project}{2023}{React · Node.js · MongoDB · REST · MVC}
-%  \item Développé une application MERN avec API REST, authentification et gestion des rôles sur une architecture MVC et persistance MongoDB.
-%\end{itemize}
-%\proj{Projet Adventure}{2023}{Symfony · FlutterFlow · JavaFX}
-%  \item Construit une suite multi-plateformes (web, mobile, desktop) avec synchronisation des données et cohérence fonctionnelle entre les clients.
-%\end{itemize}
-%\proj{Système multimodal émotions \& stress}{2025}{YAMNet · BERT · YOLOv8 · XGBoost}
-%  \item Détecté émotions et niveau de stress par fusion multimodale (audio/texte/image/tabulaire) en appliquant CRISP-DM, un benchmarking ML/DL et une interface web de démonstration.
-%\end{itemize}
-
-% Note: NextHire est déjà détaillé en Expérience (Talan) — pas de doublon ici.
+% Note: NextHire est déjà détaillé en Expérience (Talan) - pas de doublon ici.
 }
 
 % ═══════════════════════════════ FORMATION ══════════════════════════════════
 \section{FORMATION}
-\edu{Cycle Ingénieur — Spécialité TWIN (Technologies du Web, de l'Internet et des Réseaux)}{2023 -- 2026}{ESPRIT — École Supérieure Privée d'Ingénierie et de Technologies \textbar{} Tunis}
-\edu{Licence Business Computing — E-Business}{2020 -- 2023}{ESEN — École Supérieure d'Économie Numérique \textbar{} Manouba}
+\edu{Cycle Ingénieur - Spécialité TWIN (Technologies du Web, de l'Internet et des Réseaux)}{2023 -- 2026}{ESPRIT - École Supérieure Privée d'Ingénierie et de Technologies \textbar{} Tunis}
+\edu{Licence Business Computing - E-Business}{2020 -- 2023}{ESEN - École Supérieure d'Économie Numérique \textbar{} Manouba}
 
 % ═══════════════════════════════ COMPÉTENCES ════════════════════════════════
 \section{COMPÉTENCES}
 {\small
-\textbf{\color{primary}Socle :} Python, JavaScript, Java, React, Node/Express, FastAPI, Flask, Django, Laravel, MongoDB, PostgreSQL, MySQL, Docker, Git, API REST, Scrum/Agile\\[2pt]
-\textbf{\color{primary}IA \& Blockchain :} Agents LLM, LangGraph, LangChain, RAG, YOLO, Computer Vision, spaCy, PaddleOCR, PyTorch, scikit-learn, Solidity, Ethereum\\[2pt]
+\textbf{\color{primary}Socle :} Python, JavaScript, TypeScript, Java, React, Node/Express, FastAPI, Flask, Django, Laravel, MongoDB, PostgreSQL, MySQL, Docker, Git, API REST, Scrum/Agile\\[2pt]
+\textbf{\color{primary}IA \& Blockchain :} Agents LLM, LangGraph, LangChain, RAG, YOLO, Computer Vision, spaCy, PaddleOCR, PyTorch, scikit-learn, Solidity, Ethereum, Gemini\\[2pt]
 \textbf{\color{primary}Livraison :} GitLab CI/CD, SonarQube, Postman, WebRTC, RabbitMQ, Keycloak, AWS (Cloud Foundations)\\[2pt]
 \textbf{\color{primary}Pour ce poste :} \TargetKeywords
 }
@@ -192,17 +173,17 @@ Preuve récente : chez Talan, conception et livraison de NextHire, un ATS AI-fir
 \vspace{2pt}
 \begin{minipage}[t]{0.68\textwidth}
 \section{CERTIFICATIONS}
-\cert{CCNA — Switching, Routing \& Wireless Essentials}{Cisco Networking Academy}{Sept. 2024}{VLAN / inter-VLAN, STP, EtherChannel, WLAN (WLC), sécurité L2, routage statique IPv4/IPv6}
-\cert{AWS Academy Graduate — Cloud Foundations}{AWS Academy · 20\,h · badge Credly}{Mai 2025}{Compute, stockage, réseau, IAM, facturation, Well-Architected}
+\cert{CCNA - Switching, Routing \& Wireless Essentials}{Cisco Networking Academy}{Sept. 2024}{VLAN / inter-VLAN, STP, EtherChannel, WLAN (WLC), sécurité L2, routage statique IPv4/IPv6}
+\cert{AWS Academy Graduate - Cloud Foundations}{AWS Academy · 20\,h · badge Credly}{Mai 2025}{Compute, stockage, réseau, IAM, facturation, Well-Architected}
 \cert{Hashgraph Developer Course}{Hedera Hashgraph}{Oct. 2025}{DLT Hedera : comptes/clefs, HBAR, Consensus/Token, smart contracts, SDKs}
 \cert{SDG, Work Ethics \& Gender Equity}{Honoris United Universities}{2024}{17 ODD ONU, éthique professionnelle, équité de genre, compétences transversales}
 \end{minipage}%
 \hfill
 \begin{minipage}[t]{0.28\textwidth}
 \section{LANGUES}
-{\small\textbf{Arabe} — Langue maternelle}\\[2pt]
-{\small\textbf{Français} — Courant}\\[2pt]
-{\small\textbf{Anglais} — Avancé}
+{\small\textbf{Arabe} - Langue maternelle}\\[2pt]
+{\small\textbf{Français} - Courant}\\[2pt]
+{\small\textbf{Anglais} - Avancé}
 \end{minipage}
 
 \end{document}

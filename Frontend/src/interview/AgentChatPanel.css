@@ -52,8 +52,12 @@
   text-transform: uppercase;
 }
 
-.agent-panel__phase--intro { background: #3a2f1a; color: #fcd34d; }
+.agent-panel__phase--intro,
+.agent-panel__phase--introduction { background: #3a2f1a; color: #fcd34d; }
+.agent-panel__phase--experience { background: #2a2418; color: #fbbf24; }
 .agent-panel__phase--technical { background: #1e2a4a; color: #93c5fd; }
+.agent-panel__phase--behavioral { background: #2a1f3d; color: #c4b5fd; }
+.agent-panel__phase--closing { background: #1a2f28; color: #6ee7b7; }
 
 .agent-panel__controls {
   display: flex;
@@ -332,6 +336,15 @@
   border-radius: 999px;
   margin-top: 1px;
 }
+.agent-msg__speaker {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #c4b5fd;
+  padding: 2px 0;
+  margin-top: 1px;
+}
 .agent-msg--agent .agent-msg__badge {
   background: #9a4bff;
   color: #fff;
@@ -350,6 +363,51 @@
   padding: 10px 12px;
   border-top: 1px solid #2a2b2d;
   background: #242526;
+}
+
+.agent-composer__mode {
+  flex-basis: 100%;
+  display: inline-flex;
+  border: 1px solid #3a3b3d;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #18191a;
+  width: fit-content;
+}
+
+.agent-composer__mode-btn {
+  border: 0;
+  border-right: 1px solid #3a3b3d;
+  background: transparent;
+  color: #b0b3b8;
+  min-height: 30px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.agent-composer__mode-btn:last-child {
+  border-right: 0;
+}
+
+.agent-composer__mode-btn--active {
+  background: #3a3b3d;
+  color: #f0f2f5;
+}
+
+.agent-composer__mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agent-composer__speak-hint {
+  flex: 1;
+  min-width: 180px;
+  color: #b0b3b8;
+  font-size: 13px;
+  line-height: 1.35;
+  padding: 8px 2px;
 }
 
 .agent-panel__notice {

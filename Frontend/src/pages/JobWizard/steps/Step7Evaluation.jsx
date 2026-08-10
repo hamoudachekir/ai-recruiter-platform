@@ -113,7 +113,7 @@ export default function Step7Evaluation({ state, dispatch }) {
         {/* Interview style */}
         <Field
           label="Interview Style"
-          hint="Drives the difficulty range and tone of the questions Nour generates."
+          hint="Drives the difficulty range and tone of the questions Cyriness generates."
           htmlFor="ec-style"
         >
           <SelectInput

@@ -511,12 +511,20 @@ const setupSocket = (server) => {
         : 'I had a temporary AI delay. Please continue: share one concrete example from your background, your role, and the result.',
     });
 
+    const sanitizeAgentText = (text) =>
+      String(text || '')
+        .replace(/\bNour\b/gi, 'Cyriness')
+        .replace(/\bCyrine\b/gi, 'Cyriness');
+
     const broadcastAgentMessage = (roomId, _roomDbId, payload) => {
       // Emit to a single canonical channel. Every participant joins `roomId`
       // via the `join-room` handler; emitting to multiple overlapping channels
       // (roomId + roomDbId + personal socket) caused the greeting to appear
       // 3× in the chat.
-      if (roomId) io.to(roomId).emit('agent:message', payload);
+      const nextPayload = payload && typeof payload === 'object'
+        ? { ...payload, text: sanitizeAgentText(payload.text) }
+        : payload;
+      if (roomId) io.to(roomId).emit('agent:message', nextPayload);
     };
 
     const sendAgentScore = async (roomDbId, roomId, payload) => {
@@ -588,7 +596,9 @@ const setupSocket = (server) => {
         // marker (payload=null) blocks simultaneous races from both hitting
         // Python while the first call is still in flight.
         const existing = activeAgentSessions.get(interviewId);
-        if (existing && !restart && Date.now() - existing.startedAt < AGENT_STICKY_MS) {
+        const cachedText = String(existing?.payload?.text || '');
+        const staleAgentName = /\bNour\b|\bCyrine\b(?!ss)/i.test(cachedText);
+        if (existing && !restart && !staleAgentName && Date.now() - existing.startedAt < AGENT_STICKY_MS) {
           if (existing.payload) {
             broadcastAgentMessage(room.roomId, interviewId, existing.payload);
             if (existing.scoring) {
@@ -596,6 +606,9 @@ const setupSocket = (server) => {
             }
           }
           return;
+        }
+        if (staleAgentName) {
+          activeAgentSessions.delete(interviewId);
         }
 
         activeAgentSessions.set(interviewId, { startedAt: Date.now(), payload: null, scoring: null });
@@ -720,6 +733,8 @@ const setupSocket = (server) => {
         const introPayload = {
           interviewId, roomId: room.roomId,
           phase: result.phase,
+          interviewPhase: result.current_phase || result.agent_message?.interview_phase || null,
+          currentPhase: result.current_phase || result.agent_message?.interview_phase || null,
           interviewStyle: result.interview_style || normalizedInterviewStyle,
           turnIndex: result.turn_index,
           text: result.agent_message?.text,
@@ -929,6 +944,8 @@ const setupSocket = (server) => {
         broadcastAgentMessage(roomId, interviewId, {
           interviewId, roomId,
           phase: result.phase,
+          interviewPhase: result.current_phase || result.agent_message?.interview_phase || null,
+          currentPhase: result.current_phase || result.agent_message?.interview_phase || null,
           interviewStyle: result.interview_style,
           turnIndex: result.turn_index,
           text: result.agent_message?.text,
@@ -968,6 +985,8 @@ const setupSocket = (server) => {
         broadcastAgentMessage(roomId, interviewId, {
           interviewId, roomId,
           phase: result.phase,
+          interviewPhase: result.current_phase || result.agent_message?.interview_phase || null,
+          currentPhase: result.current_phase || result.agent_message?.interview_phase || null,
           interviewStyle: result.interview_style,
           turnIndex: result.turn_index,
           text: result.agent_message?.text,

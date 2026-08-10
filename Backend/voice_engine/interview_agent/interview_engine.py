@@ -654,6 +654,12 @@ def _normalize_preferred_language(value: str | None) -> str:
 
 
 def _detect_language_request(text: str) -> str | None:
+    """Detect an *explicit* request to switch interview language.
+
+    Keep this strict: bare phrases like "in french" used to false-trigger on
+    normal English answers (or STT noise). Only switch when the candidate
+    clearly asks the interviewer to change language.
+    """
     key = _language_key(text)
     if not key:
         return None
@@ -665,20 +671,26 @@ def _detect_language_request(text: str) -> str | None:
         "talk frensh",
         "ask me in french",
         "ask me in frensh",
-        "in french",
-        "in frensh",
+        "switch to french",
+        "switch to frensh",
+        "change to french",
+        "continue in french",
+        "continue in frensh",
         "turn this convo in french",
         "turn this convo in frensh",
         "turn this conversation in french",
         "turn this conversation in frensh",
         "french language",
         "frensh language",
-        "continue in french",
-        "continue in frensh",
         "parle francais",
         "parlez francais",
-        "en francais",
+        "en francais s il",
+        "en francais stp",
+        "en francais svp",
         "reponds en francais",
+        "repondez en francais",
+        "passer en francais",
+        "passe en francais",
         "francais stp",
         "francais svp",
     ]
@@ -689,10 +701,14 @@ def _detect_language_request(text: str) -> str | None:
         "speak english",
         "talk english",
         "ask me in english",
-        "in english",
+        "switch to english",
+        "change to english",
         "continue in english",
         "parle anglais",
+        "parlez anglais",
         "en anglais",
+        "reponds en anglais",
+        "passer en anglais",
     ]
     if any(phrase in key for phrase in wants_english):
         return "en"
@@ -702,20 +718,68 @@ def _detect_language_request(text: str) -> str | None:
 
 def _is_french_question(text: str) -> bool:
     key = _language_key(text)
-    return any(
-        phrase in key
-        for phrase in {
-            "bien sur",
-            "pouvez vous",
-            "peux tu",
-            "votre experience",
-            "votre parcours",
-            "developpeur",
-            "francais",
-            "quel est",
-            "qu est ce",
-        }
-    )
+    if not key:
+        return False
+    # Prefer multi-word French markers; avoid bare English-shared words like
+    # "role" / "experience" which false-positive on English questions.
+    french_markers = {
+        "bien sur",
+        "pouvez vous",
+        "pouvezvous",
+        "peux tu",
+        "votre experience",
+        "votre parcours",
+        "votre role",
+        "votre motivation",
+        "developpeur",
+        "francais",
+        "quel est",
+        "quelle est",
+        "qu est ce",
+        "decrivez",
+        "decrire",
+        "parlez moi",
+        "parle moi",
+        "expliquez",
+        "donnez moi",
+        "un projet",
+        "resultats mesurables",
+        "avez vous",
+        "est ce que",
+        "comment avez",
+        "merci de",
+        "je vais",
+        "pour commencer",
+        "aujourd hui",
+        "ce poste",
+    }
+    return any(phrase in key for phrase in french_markers)
+
+
+def _english_question_for(state: InterviewState, question: str, skill_focus: str) -> str:
+    """Force an English question when the LLM drifts into French."""
+    if not _is_french_question(question):
+        cleaned = str(question or "").strip()
+        if cleaned:
+            return cleaned
+
+    topic = str(skill_focus or state.last_question_meta.get("skill_focus") or "your experience").strip()
+    topic_key = _question_key(topic)
+
+    if topic_key in {"background", "general", "clarification"}:
+        return "Could you briefly describe your background and a concrete project you worked on recently?"
+    if topic_key == "motivation":
+        return "What interests you most about this role, and how does it fit your career goals?"
+    if topic_key in {"communication", "collaboration", "team", "teamwork"}:
+        return "Can you share a concrete example of how you work with a team, including your role and the outcome?"
+    if topic_key in {"career", "career goals"}:
+        return "What are your career goals, and how does this role fit into them?"
+    if state.phase == "technical" or topic_key not in {"", "background", "motivation", "general"}:
+        return (
+            f"Can you describe a concrete full-stack project related to {topic}, "
+            "your specific role, and the measurable results you achieved?"
+        )
+    return "Could you share one concrete project example, including your role, what you built, and the result?"
 
 
 def _topic_fr(topic: str) -> str:
@@ -744,7 +808,7 @@ def _french_question_for(state: InterviewState, question: str, skill_focus: str)
 
     if state.turn_index == 0 and state.phase == "intro":
         return (
-            "Bonjour, je suis Nour, votre assistante d'entretien IA pour aujourd'hui. "
+            "Bonjour, je suis Cyriness, votre assistante d'entretien IA pour aujourd'hui. "
             "Je vais vous poser quelques questions liees a votre profil et a ce poste. "
             "Pour commencer, pouvez-vous vous presenter brievement et parler de votre parcours ?"
         )
@@ -772,9 +836,17 @@ def _french_question_for(state: InterviewState, question: str, skill_focus: str)
 
 
 def _localize_question(state: InterviewState, question: str, skill_focus: str) -> str:
-    if _normalize_preferred_language(state.preferred_language) == "fr":
+    preferred = _normalize_preferred_language(state.preferred_language)
+    if preferred == "fr":
         return _french_question_for(state, question, skill_focus)
-    return question
+    # Hard guard: never let a French LLM drift leak into an English interview.
+    if _is_french_question(question):
+        logger.warning(
+            "[interview-agent] Rejected French question while preferred_language=en: %r",
+            str(question or "")[:160],
+        )
+        return _english_question_for(state, question, skill_focus)
+    return str(question or "").strip() or _english_question_for(state, question, skill_focus)
 
 
 def _build_language_switch_question(state: InterviewState, language: str) -> tuple[str, int, str]:
@@ -1624,9 +1696,9 @@ class InterviewEngine:
         clean_text = _sanitize_candidate_answer(text)
         if not clean_text:
             clean_text = str(text or "").strip()
-        requested_language = _detect_language_request(clean_text) or (
-            _normalize_preferred_language(preferred_language) if preferred_language else None
-        )
+        # Mid-session language changes must come from an explicit request in the
+        # candidate's answer. Ignore loosely echoed client preferred_language.
+        requested_language = _detect_language_request(clean_text)
 
         with self._lock:
             if requested_language:
@@ -1834,12 +1906,12 @@ class InterviewEngine:
         # Opening turn is generated locally so "Start Intro" responds instantly.
         if state.turn_index == 0:
             if state.phase == "intro":
-                # Fixed Nour introduction. The opener must be deterministic so
+                # Fixed Cyriness introduction. The opener must be deterministic so
                 # the candidate always hears the same greeting first — no LLM
                 # variance, no style branching. The "background" follow-up that
                 # this line ends with becomes the first scored question.
                 question = (
-                    "Hello, I'm Nour, your AI interview assistant for today. "
+                    "Hello, I'm Cyriness, your AI interview assistant for today. "
                     "I'll ask you a few questions related to your profile and this job position. "
                     "Please answer naturally. "
                     "Let's begin with a short introduction about your background."
