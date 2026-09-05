@@ -37,8 +37,8 @@ function Stop-PortProcess {
 }
 
 # Always kill old processes on core ports to ensure new code is loaded
-Write-Host "[INFO] Clearing old processes on ports 3001 5173 8001 8011 8012 8013 8014 8090..."
-foreach ($port in @(3001, 5173, 8001, 8011, 8012, 8013, 8014, 8090)) {
+Write-Host "[INFO] Clearing old processes on ports 3001 5173 5174 8001 8011 8012 8013 8014 8090..."
+foreach ($port in @(3001, 5173, 5174, 8001, 8011, 8012, 8013, 8014, 8090)) {
     Stop-PortProcess -Port $port
 }
 Start-Sleep -Milliseconds 800
@@ -79,7 +79,7 @@ function Wait-Health {
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     while ((Get-Date) -lt $deadline) {
         $health = Test-HealthJson -Url $Url
-        if ($health -and ($health.status -eq 'ok' -or $health.ok -eq $true)) {
+        if ($health -and ($health.status -eq 'ok' -or $health.status -eq 'healthy' -or $health.ok -eq $true)) {
             Write-Host "[OK] $Name ready at $Url"
             return
         }
@@ -89,6 +89,19 @@ function Wait-Health {
 }
 
 Write-Host "[INFO] Starting full call-room stack..."
+
+# 0) Redis check / start if needed
+$redisListening = Get-NetTCPConnection -LocalPort 6379 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $redisListening) {
+    $redisDir = "C:\Users\omars\AppData\Local\Microsoft\WinGet\Packages\taizod1024.redis-windows-fork_Microsoft.Winget.Source_8wekyb3d8bbwe\Redis-8.8.0-Windows-x64-msys2"
+    if (Test-Path (Join-Path $redisDir "redis-server.exe")) {
+        Start-Process -FilePath (Join-Path $redisDir "redis-server.exe") -WorkingDirectory $redisDir -WindowStyle Minimized
+        Write-Host "[STARTED] Redis server (6379)"
+        Start-Sleep -Seconds 1
+    }
+} else {
+    Write-Host "[OK] Redis server running on port 6379"
+}
 
 # 1) Backend Node API
 Start-Detached `
@@ -105,6 +118,13 @@ Start-Detached `
     -FilePath 'cmd.exe' `
     -ArgumentList @('/c', 'node node_modules\vite\bin\vite.js --port 5173 --host') `
     -WorkingDirectory (Join-Path $repoRoot 'Frontend') | Out-Null
+
+# 2b) Login App (5174)
+Start-Detached `
+    -Name 'Login App (5174)' `
+    -FilePath 'cmd.exe' `
+    -ArgumentList @('/c', 'node node_modules\vite\bin\vite.js --port 5174 --host') `
+    -WorkingDirectory (Join-Path $repoRoot 'Frontend\login') | Out-Null
 
 # 3) Speech stack + Interview agent (8012/8013)
 Start-Detached `
@@ -177,6 +197,7 @@ Write-Host "[STARTED] CV Tailoring service (8014) -- logs at $cvOutLog"
 
 Write-Host ""
 Write-Host "[INFO] Waiting for health checks..."
+Wait-Health -Name 'Node API'         -Url 'http://127.0.0.1:3001/api/health' -TimeoutSec 60
 Wait-Health -Name 'Analysis service' -Url 'http://127.0.0.1:8090/health' -TimeoutSec 120
 Wait-Health -Name 'YOLO service'     -Url 'http://127.0.0.1:8001/health' -TimeoutSec 300
 Wait-Health -Name 'Speech stack'     -Url 'http://127.0.0.1:8012/health' -TimeoutSec 180
@@ -187,6 +208,7 @@ Wait-Health -Name 'CV Tailoring'     -Url 'http://127.0.0.1:8014/health' -Timeou
 Write-Host ""
 Write-Host "[READY] Open these URLs:" -ForegroundColor Green
 Write-Host "  - Frontend:         http://localhost:5173"
+Write-Host "  - Login app:        http://localhost:5174"
 Write-Host "  - Call room page:   http://localhost:5173/call-room/<room-id>"
 Write-Host "  - Analysis health:  http://127.0.0.1:8090/health"
 Write-Host "  - YOLO health:      http://127.0.0.1:8001/health"

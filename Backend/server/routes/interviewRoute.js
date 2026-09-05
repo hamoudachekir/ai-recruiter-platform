@@ -938,49 +938,78 @@ router.post("/:interviewId/analyze-video", async (req, res) => {
 
 router.get("/:interviewId/analysis-status", async (req, res) => {
   try {
-    const interviewId = await resolveInterviewId(req.params.interviewId);
-    const response = await axios.get(
-      `${ANALYSIS_SERVICE_URL}/api/interviews/${interviewId}/analysis-status`,
-    );
-    return res.status(response.status).json(response.data);
-  } catch (error) {
-    const status = error?.response?.status;
-    const networkCode = error?.code;
-    if (
-      status === 404 ||
-      networkCode === "ECONNREFUSED" ||
-      networkCode === "ENOTFOUND" ||
-      networkCode === "ETIMEDOUT"
-    ) {
+    const rawId = req.params.interviewId;
+    if (!rawId || rawId === "undefined" || rawId === "null") {
       return res.status(200).json({
         success: true,
         job: null,
         available: false,
-        message:
-          status === 404
-            ? "No analysis job found for this interview"
-            : "Analysis service unavailable",
+        message: "No interview ID provided",
       });
     }
 
-    return res.status(error?.response?.status || 500).json({
-      success: false,
-      message: error?.response?.data?.detail || error.message,
+    const interviewId = await resolveInterviewId(rawId);
+    const response = await axios.get(
+      `${ANALYSIS_SERVICE_URL}/api/interviews/${interviewId}/analysis-status`,
+      { timeout: 5000 },
+    );
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error?.response?.status;
+    return res.status(200).json({
+      success: true,
+      job: null,
+      available: false,
+      message:
+        status === 404
+          ? "No analysis job found for this interview"
+          : error?.response?.data?.detail || error.message || "Analysis status unavailable",
     });
   }
 });
 
 router.get("/:interviewId/final-report", async (req, res) => {
   try {
-    const interviewId = await resolveInterviewId(req.params.interviewId);
+    const rawId = req.params.interviewId;
+    if (!rawId || rawId === "undefined" || rawId === "null") {
+      return res.status(200).json({
+        success: true,
+        report: null,
+        available: false,
+        message: "No interview ID provided",
+      });
+    }
+
+    const interviewId = await resolveInterviewId(rawId);
     const response = await axios.get(
       `${ANALYSIS_SERVICE_URL}/api/interviews/${interviewId}/final-report`,
+      { timeout: 8000 },
     );
     return res.status(response.status).json(response.data);
   } catch (error) {
-    return res.status(error?.response?.status || 500).json({
-      success: false,
-      message: error?.response?.data?.detail || error.message,
+    const status = error?.response?.status;
+    if (
+      status === 404 ||
+      error.code === "ECONNREFUSED" ||
+      error.code === "ENOTFOUND" ||
+      error.code === "ETIMEDOUT"
+    ) {
+      return res.status(200).json({
+        success: true,
+        report: null,
+        available: false,
+        message:
+          status === 404
+            ? "Final report not found or not yet generated"
+            : "Analysis service unavailable",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      report: null,
+      available: false,
+      message: error?.response?.data?.detail || error.message || "Report unavailable",
     });
   }
 });
@@ -1136,14 +1165,40 @@ router.get("/:interviewId/behavioral-timeline", async (req, res) => {
 // Candidate-facing report endpoint (simplified, no internal metrics)
 router.get("/:interviewId/candidate-report", async (req, res) => {
   try {
-    const interviewId = await resolveInterviewId(req.params.interviewId);
-    const response = await axios.get(
-      `${ANALYSIS_SERVICE_URL}/api/interviews/${interviewId}/final-report`,
-    );
+    const rawId = req.params.interviewId;
+    if (!rawId || rawId === "undefined" || rawId === "null") {
+      return res.status(200).json({
+        success: true,
+        report: null,
+        available: false,
+        message: "No interview ID provided",
+      });
+    }
 
-    if (!response.data || !response.data.report) {
-      return res.status(404).json({
-        success: false,
+    const interviewId = await resolveInterviewId(rawId);
+    let response;
+    try {
+      response = await axios.get(
+        `${ANALYSIS_SERVICE_URL}/api/interviews/${interviewId}/final-report`,
+        { timeout: 8000 },
+      );
+    } catch (err) {
+      if (err?.response?.status === 404) {
+        return res.status(200).json({
+          success: true,
+          report: null,
+          available: false,
+          message: "Report not yet available. Please check back later.",
+        });
+      }
+      throw err;
+    }
+
+    if (!response?.data || !response.data.report) {
+      return res.status(200).json({
+        success: true,
+        report: null,
+        available: false,
         message: "Report not yet available. Please check back later.",
       });
     }

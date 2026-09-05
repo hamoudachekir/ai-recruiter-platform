@@ -38,6 +38,24 @@ export default function AnalysisReport({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const pollCleanupRef = useRef(null);
+  const isFetchingReportRef = useRef(false);
+  const isFetchingJobRef = useRef(false);
+  const lastFetchedIdRef = useRef(null);
+  const interviewIdRef = useRef(interviewId);
+  interviewIdRef.current = interviewId;
+
+  // Sync prop updates to state if changed externally
+  useEffect(() => {
+    if (initialReport) {
+      setReport(initialReport);
+    }
+  }, [initialReport]);
+
+  useEffect(() => {
+    if (initialJob) {
+      setJob(initialJob);
+    }
+  }, [initialJob]);
 
   // Fetch report from API.
   // Uses getInterviewReportWithRetry when called after job completion so that
@@ -45,18 +63,20 @@ export default function AnalysisReport({
   // leave the recruiter staring at an empty page.
   const fetchReport = useCallback(
     async ({ withRetry = false } = {}) => {
-      if (!interviewId) return;
+      const currentId = interviewIdRef.current;
+      if (!currentId || isFetchingReportRef.current) return;
 
+      isFetchingReportRef.current = true;
       setIsLoading(true);
       setError(null);
 
       try {
         const result = withRetry
-          ? await getInterviewReportWithRetry(interviewId)
-          : await getInterviewReport(interviewId);
-        if (result.report) {
+          ? await getInterviewReportWithRetry(currentId)
+          : await getInterviewReport(currentId);
+        if (result?.report) {
           setReport(result.report);
-        } else if (withRetry && result.error) {
+        } else if (withRetry && result?.error) {
           // All retries exhausted — surface a friendly error.
           setError(
             "Report generation completed but the report could not be loaded. " +
@@ -67,73 +87,79 @@ export default function AnalysisReport({
         setError(err.message || "Failed to fetch report");
       } finally {
         setIsLoading(false);
+        isFetchingReportRef.current = false;
       }
     },
-    [interviewId],
+    [],
   );
 
   // Fetch job status
   const fetchJobStatus = useCallback(async () => {
-    if (!interviewId) return;
+    const currentId = interviewIdRef.current;
+    if (!currentId || isFetchingJobRef.current) return;
 
+    isFetchingJobRef.current = true;
     try {
-      const result = await getReportJobStatus(interviewId);
-      if (result.job) {
+      const result = await getReportJobStatus(currentId);
+      if (result?.job) {
         setJob(result.job);
       }
     } catch (err) {
       // Silently fail - job might not exist yet
       console.debug("Job status fetch failed:", err);
+    } finally {
+      isFetchingJobRef.current = false;
     }
-  }, [interviewId]);
+  }, []);
 
   // Handle status change from polling or actions
-  const handleStatusChange = useCallback(
-    (statusUpdate) => {
-      setJob((prev) => ({
-        ...prev,
-        ...statusUpdate,
-      }));
-
-      // If completed, fetch the report with retry to handle the
-      // brief window between job-completion and MongoDB read visibility.
-      if (statusUpdate.status === "completed") {
-        fetchReport({ withRetry: true });
-      }
-    },
-    [fetchReport],
-  );
+  const handleStatusChange = useCallback((statusUpdate) => {
+    setJob((prev) => ({
+      ...prev,
+      ...statusUpdate,
+    }));
+  }, []);
 
   // Handle report generated
   const handleReportGenerated = useCallback((newReport) => {
     setReport(newReport);
   }, []);
 
+  const reportStatus = determineReportStatus(job, report);
+
   // Start polling when analysis is running
   useEffect(() => {
     // Don't poll if we already have a report
     if (report) {
+      if (pollCleanupRef.current) {
+        pollCleanupRef.current();
+        pollCleanupRef.current = null;
+      }
       return;
     }
 
-    const status = determineReportStatus(job, report);
-
-    if (status === "running" || status === "pending") {
-      // Start polling
-      pollCleanupRef.current = pollAnalysisStatus(
-        interviewId,
-        handleStatusChange,
-        {
-          intervalMs: 3000,
-          maxAttempts: 200,
-          onComplete: () => {
-            fetchReport({ withRetry: true });
+    if (reportStatus === "running" || reportStatus === "pending") {
+      if (!pollCleanupRef.current) {
+        pollCleanupRef.current = pollAnalysisStatus(
+          interviewId,
+          handleStatusChange,
+          {
+            intervalMs: 3000,
+            maxAttempts: 200,
+            onComplete: () => {
+              fetchReport({ withRetry: true });
+            },
+            onError: (err) => {
+              setError(err.message);
+            },
           },
-          onError: (err) => {
-            setError(err.message);
-          },
-        },
-      );
+        );
+      }
+    } else {
+      if (pollCleanupRef.current) {
+        pollCleanupRef.current();
+        pollCleanupRef.current = null;
+      }
     }
 
     return () => {
@@ -142,17 +168,21 @@ export default function AnalysisReport({
         pollCleanupRef.current = null;
       }
     };
-  }, [interviewId, job, report, handleStatusChange, fetchReport]);
+  }, [interviewId, reportStatus, report, handleStatusChange, fetchReport]);
 
-  // Initial fetch
+  // Initial fetch only once per interviewId
   useEffect(() => {
+    if (!interviewId) return;
+    if (lastFetchedIdRef.current === interviewId) return;
+    lastFetchedIdRef.current = interviewId;
+
     if (!initialReport) {
       fetchReport();
     }
     if (!initialJob) {
       fetchJobStatus();
     }
-  }, [fetchReport, fetchJobStatus, initialReport, initialJob]);
+  }, [interviewId, fetchReport, fetchJobStatus, initialReport, initialJob]);
 
   const handleRetry = () => {
     setError(null);

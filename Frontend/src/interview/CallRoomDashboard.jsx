@@ -51,6 +51,8 @@ const CallRoomDashboard = () => {
   const [detailTab, setDetailTab] = useState("transcript"); // transcript | audio | vision
   const [legacyReportOpen, setLegacyReportOpen] = useState(false);
   const [analysisByRoom, setAnalysisByRoom] = useState({});
+  const analysisByRoomRef = useRef(analysisByRoom);
+  analysisByRoomRef.current = analysisByRoom;
   const [roomTabPrefs, setRoomTabPrefs] = useState(() => {
     try {
       const raw = localStorage.getItem(TAB_STORAGE_KEY);
@@ -1165,12 +1167,13 @@ const CallRoomDashboard = () => {
   const fetchFinalAnalysisReport = useCallback(
     async (roomId) => {
       if (!roomId) return;
+      if (analysisByRoomRef.current[roomId]?.report) return;
       try {
         const response = await fetch(
           `${API_BASE}/api/interviews/${roomId}/final-report`,
         );
         const data = await response.json();
-        if (!response.ok || !data.success) {
+        if (!response.ok || !data.success || !data.report) {
           return;
         }
         patchAnalysisState(roomId, { report: data.report, error: "" });

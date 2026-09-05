@@ -3014,6 +3014,11 @@ app.use(
 // Middleware — 10 MB limit to handle base64 webcam frames from face verification
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
+
+// Health check endpoints for orchestration
+app.get("/health", (req, res) => res.json({ status: "ok" }));
+app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+
 app.use("/api/messages", messageRoutes);
 app.use("/api/voice", voiceRoutes);
 

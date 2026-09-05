@@ -1314,6 +1314,25 @@ def _is_off_topic_answer(state: InterviewState, text: str) -> bool:
     return overlap == 0 and len(answer_tokens) <= 4
 
 
+def _strip_conversational_prefixes(text: str) -> str:
+    """Strip repeated conversational openers so questions do not stack multiple
+    prefixes when candidate asks to rephrase or clarify.
+    """
+    cleaned = str(text or "").strip()
+    pattern = (
+        r"^(?:of\s+course\.?\s*let\s+me\s+(?:rephrase|restate):?|"
+        r"good\s+question\.?\s*let\s+me\s+clarify\s+in\s+simpler\s+words:?\.?|"
+        r"absolutely,?\s*let\s+me\s+clarify:?\.?|"
+        r"no\s+problem,?\s*let\s+me\s+rephrase:?)\s*"
+    )
+    while True:
+        stripped = re.sub(pattern, "", cleaned, flags=re.IGNORECASE).strip()
+        if stripped == cleaned:
+            break
+        cleaned = stripped
+    return cleaned
+
+
 def _build_repeat_question(state: InterviewState) -> tuple[str, int, str]:
     last_agent_question = next(
         (entry for entry in reversed(state.transcript) if entry.role == "agent"),
@@ -1324,7 +1343,8 @@ def _build_repeat_question(state: InterviewState) -> tuple[str, int, str]:
     skill_focus = str((last_agent_question.meta or {}).get("skill_focus", "clarification")) if last_agent_question else "clarification"
 
     if last_text:
-        question = f"Of course. Let me rephrase: {last_text}"
+        cleaned = _strip_conversational_prefixes(last_text)
+        question = f"Of course. Let me rephrase: {cleaned}"
     elif state.phase == "intro":
         question = "Of course. Could you briefly introduce yourself and what motivated you to apply for this role?"
     else:
@@ -1348,11 +1368,13 @@ def _build_confusion_clarification(state: InterviewState) -> tuple[str, int, str
             "what you implemented, and one challenge you handled."
         )
         if last_text:
-            question = f"Good question. Let me clarify in simpler words. {last_text}"
+            cleaned = _strip_conversational_prefixes(last_text)
+            question = f"Good question. Let me clarify in simpler words: {cleaned}"
         return question, 1, skill_focus
 
     if last_text:
-        return f"Absolutely, let me clarify. {last_text}", 1, skill_focus
+        cleaned = _strip_conversational_prefixes(last_text)
+        return f"Absolutely, let me clarify: {cleaned}", 1, skill_focus
     return "Absolutely, let me clarify. Could you share one concrete example from your background?", 1, "background"
 
 
