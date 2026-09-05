@@ -775,8 +775,14 @@ def _english_question_for(state: InterviewState, question: str, skill_focus: str
     if topic_key in {"career", "career goals"}:
         return "What are your career goals, and how does this role fit into them?"
     if state.phase == "technical" or topic_key not in {"", "background", "motivation", "general"}:
+        domain_hint = str(state.candidate_facts.get("domain", "") or "").lower()
+        if any(m in domain_hint for m in ["management", "business", "marketing", "finance", "hr", "strategy"]):
+            return (
+                f"Could you describe a concrete project or initiative related to {topic}, "
+                "your specific role, and the measurable outcomes you achieved?"
+            )
         return (
-            f"Can you describe a concrete full-stack project related to {topic}, "
+            f"Can you describe a concrete project related to {topic}, "
             "your specific role, and the measurable results you achieved?"
         )
     return "Could you share one concrete project example, including your role, what you built, and the result?"
@@ -970,10 +976,46 @@ def _build_age_answer(state: InterviewState) -> tuple[str, int, str]:
     return question, 1, "background"
 
 
+def _extract_candidate_domain_facts(text: str) -> dict[str, str]:
+    lower = str(text or "").lower()
+    facts: dict[str, str] = {}
+
+    if re.search(r"\b(?:strategic\s+management|management\s+strategique)\b", lower):
+        facts["domain"] = "Strategic Management"
+    elif re.search(r"\b(?:management|business\s+administration|gestion)\b", lower):
+        facts["domain"] = "Management & Business"
+    elif re.search(r"\b(?:marketing|communication)\b", lower):
+        facts["domain"] = "Marketing"
+    elif re.search(r"\b(?:finance|accounting|comptabilite)\b", lower):
+        facts["domain"] = "Finance"
+    elif re.search(r"\b(?:human\s+resources|ressources\s+humaines|hr|rh)\b", lower):
+        facts["domain"] = "Human Resources"
+    elif re.search(r"\b(?:data\s+management|data\s+science|data\s+analyst)\b", lower):
+        facts["domain"] = "Data & Analytics"
+    elif re.search(r"\b(?:software\s+engineer|full\s*stack|developer|developpeur|programmer)\b", lower):
+        facts["domain"] = "Software Engineering"
+
+    if re.search(r"\b(?:student|etudiant|etudiante|studying|master|bachelor|licence)\b", lower):
+        facts["status"] = "Student"
+    elif re.search(r"\b(?:intern|stagiaire|internship|stage)\b", lower):
+        facts["status"] = "Intern"
+
+    if re.search(r"\b(?:zero\s+knowledge\s+in\s+it|no\s+it\s+background|non[- ]technical|not\s+technical|pas\s+de\s+connaissances?\s+en\s+it)\b", lower):
+        facts["tech_familiarity"] = "Non-technical (business/management focus)"
+    elif re.search(r"\b(?:software\s+engineer|full\s*stack|developer|developpeur|programmer)\b", lower):
+        facts["tech_familiarity"] = "Technical / Software Developer"
+
+    return facts
+
+
 def _update_candidate_facts(state: InterviewState, candidate_text: str) -> None:
     age = _extract_age(candidate_text)
     if age is not None:
         state.candidate_facts["age"] = age
+
+    extracted = _extract_candidate_domain_facts(candidate_text)
+    for k, v in extracted.items():
+        state.candidate_facts[k] = v
 
     normalized = str(candidate_text or "").lower()
     if "full stack" in normalized or "fullstack" in normalized:
@@ -989,8 +1031,20 @@ def _serialize_candidate_facts(state: InterviewState) -> str:
     if isinstance(age, int):
         parts.append(f"candidate_age={age}")
 
+    domain = state.candidate_facts.get("domain")
+    if domain:
+        parts.append(f"candidate_domain={domain}")
+
+    status = state.candidate_facts.get("status")
+    if status:
+        parts.append(f"candidate_status={status}")
+
+    tech_fam = state.candidate_facts.get("tech_familiarity")
+    if tech_fam:
+        parts.append(f"candidate_tech_profile={tech_fam}")
+
     role_hint = str(state.candidate_facts.get("role_hint") or "").strip()
-    if role_hint:
+    if role_hint and "domain" not in state.candidate_facts:
         parts.append(f"candidate_role_hint={role_hint}")
 
     return ", ".join(parts) if parts else "(none)"
@@ -1053,6 +1107,9 @@ COMMON_TECH_SKILLS = {
 
 
 def _mentions_skills(text: str, state: InterviewState) -> bool:
+    if _detect_candidate_inquiry(text):
+        return False
+
     normalized = _answer_key(text)
     if not normalized:
         return False
@@ -1245,7 +1302,42 @@ def _build_meta_realign_question(state: InterviewState) -> tuple[str, int, str]:
     )
 
 
+def _detect_candidate_inquiry(text: str) -> bool:
+    """Detect if candidate is asking an interview question, asking for clarification,
+    or requesting an explanation of a concept/term (e.g. 'Can you explain react or nodejs to someone with zero knowledge in IT?').
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    lower = raw.lower()
+
+    if _is_repeat_request(raw):
+        return False
+
+    if raw.endswith("?") and len(raw.split()) >= 3:
+        return True
+
+    inquiry_patterns = [
+        r"\b(?:can|could|would)\s+you\s+(?:explain|clarify|tell\s+me|elaborate|describe|define)\b",
+        r"\b(?:pouvez[- ]vous|peux[- ]tu|pourriez[- ]vous)\s+(?:m['’]expliquer|expliquer|clarifier|dire|definir)\b",
+        r"\bwhat\s+(?:is|are|does|do|mean|means)\b",
+        r"\bc['’]est\s+quoi\b|\bqu['’]est[- ]ce\s+que\b",
+        r"\bwhat\s+do\s+you\s+mean\b",
+        r"\b(?:explain|clarify)\s+(?:for\s+me|please|to\s+someone)\b",
+        r"\bhow\s+(?:does|do|can|would|is)\b",
+        r"\b(?:i\s+don['’]?t\s+understand|i\s+do\s+not\s+understand|not\s+clear|im\s+confused|i\s+am\s+confused)\b",
+        r"\b(?:je\s+ne\s+comprends?\s+pas|pas\s+clair|c['’]est\s+confus)\b",
+        r"\b(?:zero\s+(?:knowledge|experience)|no\s+experience|not\s+familiar)\s+(?:in|with)\b",
+        r"\b(?:aucune\s+connaissance|pas\s+d['’]experience)\b",
+        r"\b(?:what\s+about\s+you|who\s+are\s+you)\b",
+        r"\b(?:qui\s+etes[- ]vous|parle[- ]moi\s+de\s+toi)\b",
+    ]
+    return any(re.search(pat, lower) for pat in inquiry_patterns)
+
+
 def _is_low_information_answer(text: str) -> bool:
+    if _detect_candidate_inquiry(text):
+        return False
     normalized = _answer_key(text)
     if not normalized:
         return True
@@ -1266,6 +1358,8 @@ def _is_low_information_answer(text: str) -> bool:
 
 
 def _is_off_topic_answer(state: InterviewState, text: str) -> bool:
+    if _detect_candidate_inquiry(text):
+        return False
     normalized = _answer_key(text)
     if not normalized:
         return True
@@ -1513,29 +1607,43 @@ def _fallback_question(state: InterviewState) -> tuple[str, int, str]:
             ("How do you make sure knowledge is shared with the rest of your team?", 2, "collaboration"),
         ]
     else:
-        available_skills = [
-            str(skill).strip() for skill in state.job_skills
-            if str(skill or "").strip()
-        ]
-        target_skill = next(
-            (
-                skill for skill in available_skills
-                if _question_key(skill) not in asked_skill_keys
-            ),
-            available_skills[0] if available_skills else "problem-solving",
-        )
-        bank = [
-            (f"What was the most important technical decision you made in that project, and why?", 3, "technical decision"),
-            (f"How did you test your solution to make sure it was reliable?", 2, "testing"),
-            (f"What would you improve in that project if you had more time?", 2, "reflection"),
-            (f"How did you communicate progress or blockers to your team during that work?", 2, "collaboration"),
-            (f"What common mistakes do teams make with {target_skill}, and how would you avoid them?", 3, target_skill),
-            (f"Describe one performance or reliability challenge you've faced and how you resolved it.", 3, "problem-solving"),
-            (f"How do you ensure code you write is easy to maintain for the next developer?", 2, "code quality"),
-            (f"Walk me through how you would debug a hard-to-reproduce issue in a {target_skill} system.", 3, target_skill),
-            (f"What did you learn from that work that you would apply differently next time?", 2, "learning"),
-            (f"How did you validate that your solution actually solved the original problem?", 3, "validation"),
-        ]
+        domain_hint = str(state.candidate_facts.get("domain", "") or "").lower()
+        is_non_tech = any(m in domain_hint for m in ["management", "business", "marketing", "finance", "hr", "strategy"])
+
+        if is_non_tech:
+            bank = [
+                ("What was the most important strategic or operational decision you made in that project, and why?", 2, "decision-making"),
+                ("How did you evaluate the business impact or success of that initiative?", 2, "impact analysis"),
+                ("What methodology or analytical tools did you rely on to structure your work?", 2, "methodology"),
+                ("How did you coordinate with other teams or stakeholders to overcome blockers?", 2, "collaboration"),
+                ("Describe one unexpected challenge you faced during that project and how you resolved it.", 2, "problem-solving"),
+                ("What would you do differently if you had to approach that project again?", 2, "reflection"),
+                ("How do you ensure your recommendations align with overall strategic goals?", 2, "strategic alignment"),
+            ]
+        else:
+            available_skills = [
+                str(skill).strip() for skill in state.job_skills
+                if str(skill or "").strip()
+            ]
+            target_skill = next(
+                (
+                    skill for skill in available_skills
+                    if _question_key(skill) not in asked_skill_keys
+                ),
+                available_skills[0] if available_skills else "problem-solving",
+            )
+            bank = [
+                (f"What was the most important technical decision you made in that project, and why?", 3, "technical decision"),
+                (f"How did you test your solution to make sure it was reliable?", 2, "testing"),
+                (f"What would you improve in that project if you had more time?", 2, "reflection"),
+                (f"How did you communicate progress or blockers to your team during that work?", 2, "collaboration"),
+                (f"What common mistakes do teams make with {target_skill}, and how would you avoid them?", 3, target_skill),
+                (f"Describe one performance or reliability challenge you've faced and how you resolved it.", 3, "problem-solving"),
+                (f"How do you ensure code you write is easy to maintain for the next developer?", 2, "code quality"),
+                (f"Walk me through how you would debug a hard-to-reproduce issue in a {target_skill} system.", 3, target_skill),
+                (f"What did you learn from that work that you would apply differently next time?", 2, "learning"),
+                (f"How did you validate that your solution actually solved the original problem?", 3, "validation"),
+            ]
 
     for item in bank:
         if not _is_question_repetitive(state, item[0]):
@@ -2015,9 +2123,12 @@ class InterviewEngine:
                 state.same_answer_streak = 0
                 state.last_candidate_answer_norm = normalized_answer
 
+        is_candidate_inquiry = _detect_candidate_inquiry(last_answer)
+
         last_focus_key = _question_key(str(state.last_question_meta.get("skill_focus", "") or ""))
         if (
-            state.phase == "intro"
+            not is_candidate_inquiry
+            and state.phase == "intro"
             and last_focus_key in {"", "background", "motivation", "general"}
             and _mentions_skills(last_answer, state)
         ):
@@ -2043,7 +2154,7 @@ class InterviewEngine:
                 record_evaluation=True,
             )
 
-        if _mentions_skills(last_answer, state) and len(normalized_answer.split()) <= 7:
+        if not is_candidate_inquiry and _mentions_skills(last_answer, state) and len(normalized_answer.split()) <= 7:
             question, difficulty, skill_focus = _build_low_info_followup(
                 state,
                 last_answer,
@@ -2116,53 +2227,9 @@ class InterviewEngine:
                 record_evaluation=False,
             )
 
-        if _is_confusion_request(last_answer):
-            question, difficulty, skill_focus = _build_confusion_clarification(state)
-            score = 0.45
-            confidence = 0.4
-            done = False
-            agent_mode = get_agent_mode(state.stress_level)
+        is_candidate_inquiry = _detect_candidate_inquiry(last_answer)
 
-            return self._finish_turn(
-                state,
-                question=question,
-                difficulty=difficulty,
-                skill_focus=skill_focus,
-                score=score,
-                confidence=confidence,
-                agent_mode=agent_mode,
-                reasoning="Candidate signaled confusion, so the question was clarified before moving on.",
-                done=done,
-                last_answer=last_answer,
-                last_sentiment=last_sentiment,
-                auto_switched=auto_switched,
-                record_evaluation=False,
-            )
-
-        if _is_meta_question_to_interviewer(last_answer):
-            question, difficulty, skill_focus = _build_meta_realign_question(state)
-            score = 0.4
-            confidence = 0.35
-            done = False
-            agent_mode = get_agent_mode(state.stress_level)
-
-            return self._finish_turn(
-                state,
-                question=question,
-                difficulty=difficulty,
-                skill_focus=skill_focus,
-                score=score,
-                confidence=confidence,
-                agent_mode=agent_mode,
-                reasoning="Candidate asked about the interviewer, so a brief context + refocus prompt was used.",
-                done=done,
-                last_answer=last_answer,
-                last_sentiment=last_sentiment,
-                auto_switched=auto_switched,
-                record_evaluation=False,
-            )
-
-        if _is_off_topic_answer(state, last_answer):
+        if not is_candidate_inquiry and _is_off_topic_answer(state, last_answer):
             question, difficulty, skill_focus = _build_off_topic_steer_back(state)
             score = 0.3
             confidence = 0.25
@@ -2252,6 +2319,7 @@ class InterviewEngine:
                 seniority=state.seniority,
                 current_phase=state.current_phase,
                 is_phase_transition=is_phase_transition,
+                candidate_inquiry=last_answer if is_candidate_inquiry else "",
             )
         else:
             user = build_user_turn_prompt(
@@ -2276,6 +2344,7 @@ class InterviewEngine:
                 seniority=state.seniority,
                 current_phase=state.current_phase,
                 is_phase_transition=is_phase_transition,
+                candidate_inquiry=last_answer if is_candidate_inquiry else "",
             )
 
         system_with_comfort = system + comfort_addendum
@@ -2290,22 +2359,30 @@ class InterviewEngine:
         except LLMError as exc:
             # Keep the interview live even if the external LLM times out.
             logger.warning("[interview-agent] LLM provider failed; using fallback question: %s", exc)
-            fallback_question, fallback_difficulty, fallback_skill = _fallback_question(state)
+            if is_candidate_inquiry:
+                fallback_question = (
+                    "I understand your question. In simple terms, we are exploring how you apply problem-solving, "
+                    "project management, and collaboration in your field. To continue, could you tell me about a project or achievement you are proud of?"
+                )
+                fallback_difficulty = 2
+                fallback_skill = "clarification"
+            else:
+                fallback_question, fallback_difficulty, fallback_skill = _fallback_question(state)
             return self._finish_turn(
                 state,
                 question=fallback_question,
                 difficulty=fallback_difficulty,
                 skill_focus=fallback_skill,
-                score=0.45,
-                confidence=0.35,
+                score=0.5,
+                confidence=0.5,
                 agent_mode=agent_mode,
                 reasoning=f"LLM fallback due to provider error: {exc}",
                 done=False,
                 last_answer=last_answer,
                 last_sentiment=last_sentiment,
                 auto_switched=auto_switched,
-                update_ability=True,
-                record_evaluation=True,
+                update_ability=not is_candidate_inquiry,
+                record_evaluation=not is_candidate_inquiry,
             )
 
         score = float(payload.get("score", 0.5))
@@ -2326,7 +2403,8 @@ class InterviewEngine:
         # Remember the phase-objective signal so the NEXT turn can advance early.
         state.last_objective_met = bool(payload.get("phase_objective_met", False))
 
-        if _is_low_information_answer(last_answer):
+        # Only use low-info fallback if LLM produced an empty question or candidate repeated identical text
+        if (not question or state.same_answer_streak >= 2) and _is_low_information_answer(last_answer):
             question, difficulty, skill_focus = _build_low_info_followup(
                 state,
                 last_answer,
@@ -2335,11 +2413,12 @@ class InterviewEngine:
 
         if state.phase == "technical":
             rotated_skill = _select_rotating_skill(state, skill_focus)
-            if _question_key(rotated_skill) != _question_key(skill_focus):
+            if not skill_focus:
                 skill_focus = rotated_skill
+            if not question:
                 question = _build_rotated_technical_question(rotated_skill, difficulty)
 
-        if not question or _is_question_repetitive(state, question):
+        if not question or (not is_candidate_inquiry and _is_question_repetitive(state, question)):
             fallback_question, fallback_difficulty, fallback_skill = _fallback_question(state)
             question = fallback_question
             difficulty = fallback_difficulty
@@ -2350,7 +2429,7 @@ class InterviewEngine:
             question=question,
             difficulty=difficulty,
             skill_focus=skill_focus,
-            score=score,
+            score=score if not is_candidate_inquiry else 0.5,
             confidence=confidence,
             agent_mode=agent_mode,
             reasoning=str(payload.get("reasoning", "")),
@@ -2358,6 +2437,6 @@ class InterviewEngine:
             last_answer=last_answer,
             last_sentiment=last_sentiment,
             auto_switched=auto_switched,
-            update_ability=True,
-            record_evaluation=True,
+            update_ability=not is_candidate_inquiry,
+            record_evaluation=not is_candidate_inquiry,
         )
