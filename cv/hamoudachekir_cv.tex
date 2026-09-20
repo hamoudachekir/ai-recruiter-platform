@@ -1,9 +1,9 @@
 % !TEX TS-program = latexmk
 % =============================================================================
-% MASTER CV - Hamouda Chekir (English)
-% Source of truth: CV_Hamouda_Chekir_EN.pdf (1 page, same sections and wording).
-% Tailor: copy to hamoudachekir_cv.tex. Never overwrite this file.
-% Dates: use "to", not em/en dashes.
+% LIVE CV - Hamouda Chekir
+% Target: Raincode, Junior Full Stack Developer (EN JD).
+% Copied from hamouda_chekir_cv_master_en.tex. Do not overwrite the master.
+% Dates: use "to", not em/en dashes. No invented Vue/Angular or staff-aug.
 % =============================================================================
 \documentclass[10pt,a4paper]{article}
 
@@ -19,11 +19,10 @@
 \usepackage{hyperref}
 \usepackage{microtype}
 
-\AtBeginDocument{\setlist[itemize]{label=\textbullet}}
+\setlist[itemize]{label=\textbullet}
 % Do not break at existing hyphens: PDF extractors drop them (scikit-learn, prohibited-object).
 \exhyphenpenalty=10000
 \emergencystretch=2em
-\newcommand{\kw}[1]{\mbox{#1}}
 
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0pt}
@@ -36,15 +35,15 @@
 \definecolor{muted}{HTML}{4A5568}
 \definecolor{rulecolor}{HTML}{E2E8F0}
 
-\newcommand{\TargetTitle}{Software Engineer, \kw{Full-Stack} and Applied Artificial Intelligence}
-\newcommand{\TargetKeywords}{React · Node.js · Python · FastAPI · Microservices · Docker · MongoDB · REST APIs · Agile}
+\newcommand{\TargetTitle}{Junior Full-Stack Developer}
+\newcommand{\TargetKeywords}{React · Node.js · Python · JavaScript · HTML · CSS · REST APIs · Git · MongoDB · PostgreSQL · Agile}
 
 \hypersetup{
  colorlinks=true,
  linkcolor=accent,
  urlcolor=accent,
  pdfauthor={Hamouda Chekir},
- pdftitle={CV - Hamouda Chekir - Master EN}
+ pdftitle={CV - Hamouda Chekir - Junior Full-Stack Developer - Raincode}
 }
 
 \titleformat{\section}
@@ -58,12 +57,12 @@
 \newcommand{\job}[3]{%
  \par\noindent\textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\par\vspace{0.4pt}%
  {\noindent\color{accent}\textit{\small #3}}\par\vspace{1pt}%
- \begin{itemize}[label=\textbullet, leftmargin=0.85em, itemsep=0.8pt, topsep=0.4pt, parsep=0pt, partopsep=0pt]
+ \begin{itemize}[leftmargin=0.85em, itemsep=0.8pt, topsep=0.4pt, parsep=0pt, partopsep=0pt]
 }
 
 \newcommand{\proj}[2]{%
  \par\noindent\textbf{\color{primary}#1}\hfill{\color{muted}\small #2}\par\vspace{0.4pt}%
- \begin{itemize}[label=\textbullet, leftmargin=0.85em, itemsep=0.8pt, topsep=0.4pt, parsep=0pt, partopsep=0pt]
+ \begin{itemize}[leftmargin=0.85em, itemsep=0.8pt, topsep=0.4pt, parsep=0pt, partopsep=0pt]
 }
 
 \newcommand{\edu}[3]{%
@@ -95,41 +94,41 @@
 \par\vspace{4pt}}
 
 \section{PROFILE}
-{\small Software engineer, ESPRIT graduate (TWIN specialisation), focused on delivery. I design and ship reliable web products using \kw{full-stack} development, applied AI and microservices architectures. Most recent work at Talan: NextHire, an \kw{AI-first} applicant tracking system of \textbf{16 microservices} (React, Node.js, Python, FastAPI, MongoDB, Docker).}
+{\small Software engineer, ESPRIT graduate (TWIN specialisation), focused on delivery. I build and maintain frontend and backend parts of web applications: React interfaces, REST APIs in Node.js and Python, and SQL/NoSQL data stores. Most recent work at Talan: NextHire, \textbf{16 microservices} (React, Node.js, Python, FastAPI, MongoDB, Docker), shipped with Git, code reviews and Agile rituals.}
 
 \section{PROFESSIONAL EXPERIENCE}
 
 \job{Software Engineer, Final-Year Project}{February 2026 to August 2026}{Talan, Tunis, Tunisia}
- \item Delivered an \kw{AI-first} applicant tracking system (NextHire) of \textbf{16 microservices}: 1 Node.js/Express gateway, 2 React SPAs and 13 Python FastAPI/Flask services, on a shared MongoDB architecture with Dockerised service boundaries.
- \item Automated the interview flow with an adaptive LLM voice agent and a YOLO integrity module (face verification, \kw{prohibited-object} detection) running on live WebRTC sessions.
- \item Implemented a LangGraph pipeline fusing transcription, behavioural and visual signals into scored, ranked hiring reports; automated CV parsing (spaCy, PaddleOCR) with \kw{anti-hallucination} checks.
+ \item Delivered an applicant tracking system (NextHire) of \textbf{16 microservices}: 2 React SPAs, 1 Node.js/Express gateway and 13 Python FastAPI/Flask services, on shared MongoDB with Dockerised service boundaries.
+ \item Built REST APIs and frontend flows for interviews, then wired them to an LLM voice agent and a YOLO integrity module (face verification, prohibited-object detection) on live WebRTC sessions.
+ \item Implemented a LangGraph pipeline fusing transcription, behavioural and visual signals into scored hiring reports; automated CV parsing (spaCy, PaddleOCR) with anti-hallucination checks.
 \end{itemize}
 
-\job{\kw{Full-Stack} Developer Intern}{June 2025 to August 2025}{SmartConseil / Dafe Management, Tunis, Tunisia}
- \item Delivered a modular Laravel back office (regions, packs, modules) by rebuilding CRUD workflows in Blade and JavaScript on PostgreSQL and MongoDB.
- \item Centralised fragmented crawler tooling (HTML and API drivers, grids, IP modules) into a single codebase; shipped in Agile with code reviews, unit tests, SonarQube and GitLab CI/CD.
+\job{Full-Stack Developer Intern}{June 2025 to August 2025}{SmartConseil / Dafe Management, Tunis, Tunisia}
+ \item Delivered a modular Laravel back office (regions, packs, modules) by rebuilding CRUD workflows in Blade, HTML, CSS and JavaScript on PostgreSQL and MongoDB.
+ \item Centralised fragmented crawler tooling (HTML and API drivers) into one codebase; shipped in Agile with Git, code reviews, unit tests, SonarQube and GitLab CI/CD.
 \end{itemize}
 
 \job{Web Developer Intern}{June 2024 to August 2024}{Big Deal (Club Privileges), Tunis, Tunisia}
- \item Shipped a digital \kw{gift-code} module (generation, assignment, tracking) on Laravel and Filament, enabling \kw{end-to-end} promotional campaigns.
+ \item Shipped a digital gift-code module (generation, assignment, tracking) on Laravel and Filament, enabling end-to-end promotional campaigns.
 \end{itemize}
 
 \job{Web Developer Intern}{February 2023 to May 2023}{HOTIX, Tunis, Tunisia}
- \item Launched the Consommi Tounsi \#619 e-commerce site: core storefront features in .NET, Scrum delivery, full test pass and production deployment.
+ \item Launched the Consommi Tounsi \#619 e-commerce site: storefront features in C\# / .NET, Scrum delivery, full test pass and production deployment.
 \end{itemize}
 
 \section{ACADEMIC PROJECTS}
 
 \proj{TalentMatch, a secure auction platform (AI and blockchain)}{2025}
- \item Python, FastAPI, React, \kw{Qwen2.5-VL}, Gemini 2.5, Solidity: authenticity verification, price estimation through web scraping, and smart contracts on Ethereum and Sepolia.
+ \item Python, FastAPI, React, Qwen2.5-VL, Gemini 2.5, Solidity: REST APIs and a React frontend for authenticity checks, price estimation through web scraping, and smart contracts on Ethereum and Sepolia.
 \end{itemize}
 
 \proj{Clinical Decision Support (computer vision and RAG)}{2025}
- \item Fine-tuned \kw{vision-language} models (BLIP, CLIP+LLaMA LoRA) and a RAG stack (\kw{Meditron-7B}, Qdrant, PubMedBERT) to generate medical reports with citations from radiographs.
+ \item Fine-tuned vision-language models (BLIP, CLIP+LLaMA LoRA) and a RAG stack (Meditron-7B, Qdrant, PubMedBERT) to generate medical reports with citations from radiographs.
 \end{itemize}
 
 \proj{Health Record, a health tracking platform}{2025}
- \item Django, PyTorch: ResNet50 and ResNet18 medical vision across 14 thoracic pathologies, anomaly detection (Isolation Forest, One-Class SVM), a T5 chatbot and a JWT-secured API.
+ \item Django REST API with JWT: ResNet50 and ResNet18 medical vision across 14 thoracic pathologies, anomaly detection (Isolation Forest, One-Class SVM) and a T5 chatbot.
 \end{itemize}
 
 \section{EDUCATION}
@@ -138,10 +137,11 @@
 
 \section{TECHNICAL SKILLS}
 {\small
-\textbf{\color{primary}Languages and frameworks:} Python, JavaScript, TypeScript, Java, React, Node.js, Express, FastAPI, Flask, Django, Laravel, PHP\par\vspace{1pt}
-\textbf{\color{primary}AI and machine learning:} LLM Agents, LangGraph, LangChain, RAG, PyTorch, \kw{scikit-learn}, TensorFlow, YOLO, Computer Vision, spaCy, PaddleOCR\par\vspace{1pt}
-\textbf{\color{primary}Data and DevOps:} MongoDB, PostgreSQL, MySQL, Qdrant, Docker, Git, GitLab CI/CD, SonarQube, AWS, RabbitMQ, Keycloak\par\vspace{1pt}
-\textbf{\color{primary}Methods:} REST APIs, microservices architecture, Scrum, Agile, unit testing, code review
+\textbf{\color{primary}Frontend:} HTML, CSS, JavaScript, TypeScript, React\par\vspace{1pt}
+\textbf{\color{primary}Backend:} Node.js, Express, Python, FastAPI, Flask, Django, Java, C\# / .NET, Laravel, PHP\par\vspace{1pt}
+\textbf{\color{primary}Data and tools:} MongoDB, PostgreSQL, MySQL, REST APIs, Git, GitLab CI/CD, Docker, SonarQube\par\vspace{1pt}
+\textbf{\color{primary}Methods:} Scrum, Agile, unit testing, code review\par\vspace{1pt}
+\textbf{\color{primary}AI (project work):} LLM Agents, LangGraph, LangChain, RAG, PyTorch, TensorFlow, YOLO, spaCy
 }
 
 \section{CERTIFICATIONS}
