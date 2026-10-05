@@ -57,3 +57,9 @@ nul
 # Third-party CVs (kept out of the public repo)
 cv-nefzi/
 cv-kalai/
+
+# Local scratch / tool config
+.tmp-test-logs/
+scratch/
+.claude/
+.cursor/
