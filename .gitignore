@@ -53,3 +53,7 @@ Backend/third_party/nvidia_cuda12/*.dll
 
 # Windows reserved filename accidentally created as a real file
 nul
+
+# Third-party CVs (kept out of the public repo)
+cv-nefzi/
+cv-kalai/
